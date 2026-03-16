@@ -7,61 +7,61 @@
 ## 🔴 高優先 (核心功能缺口)
 
 ### 認證與授權
-- [ ] 實作真正的 JWT 登入 (目前為 Demo header 硬編碼)
-- [ ] 登入頁面 `/login`
-- [ ] 登出功能
-- [ ] Token 過期刷新機制
-- [ ] Microsoft Entra ID SSO 整合 (`integrations.ts` 目前為骨架)
+- [x] 實作真正的 JWT 登入
+- [x] 登入頁面 `/login`
+- [x] 登出功能
+- [x] Token 過期刷新機制 (自動過期踢回攔截)
+- [x] Microsoft Entra ID SSO 整合
 
 ### 商機 (Opportunities)
 - [x] `OpportunityDetailPage` — 指派協銷人員功能串接後端 `assignPresales`
 - [x] `OpportunityDetailPage` — 協銷工時紀錄 (modal + `logPresalesTime`)
 - [x] `OpportunityDetailPage` — 從商機建立 SR 流程 (`createSR`)
-- [ ] 商機狀態流程圖 (new → qualified → presales_active → won/lost/converted)
+- [x] 商機狀態流程圖 (new → qualified → presales_active → won/lost/converted)
 
 ### 服務請求 & WBS
-- [ ] `ServiceRequestsPage` — 建立 SR 表單 (目前只有清單)
+- [x] `ServiceRequestsPage` — 建立 SR 表單 (目前只有清單)
 - [x] `WbsManagementPage` — WBS 審核通過/拒絕 (PM 核准按鈕)
-- [ ] WBS 歷史版本瀏覽與比較
+- [x] WBS 歷史版本瀏覽與比較
 
 ### 工時填報
-- [ ] `PresalesTimesheetsPage` — 完整工時提交表單串接 `logPresalesTime`
-- [ ] `ProjectTimesheetsPage` — 完整工時提交表單串接 `logProjectTime`
-- [ ] 工時週/月檢視切換
+- [x] `PresalesTimesheetsPage` — 完整工時提交表單串接 `logPresalesTime`
+- [x] `ProjectTimesheetsPage` — 完整工時提交表單串接 `logProjectTime`
+- [x] 工時週/月檢視切換
 
 ---
 
 ## 🟡 中優先 (體驗優化)
 
 ### 分頁 & 效能
-- [ ] `OpportunitiesPage` — 實作「無限捲動」觸底自動載入 (目前有 Load More 按鈕)
-- [ ] `UserManagementPage` — 同上
-- [ ] 搜尋功能伺服器端化 (目前為前端過濾)
-- [ ] 排序功能 (依日期/金額/狀態)
+- [x] `OpportunitiesPage` — 實作「無限捲動」觸底自動載入 (目前有 Load More 按鈕)
+- [x] `UserManagementPage` — 同上
+- [x] 搜尋功能伺服器端化 (目前為前端過濾)
+- [x] 排序功能 (依日期/金額/狀態)
 
 ### 變更請求 (CR)
-- [ ] `ChangeRequestsPage` — 建立 CR 表單
-- [ ] CR 審核流程 (business → manager → approved/rejected)
-- [ ] CR 與對應 WBS Item 的連結展示
+- [x] `ChangeRequestsPage` — 建立 CR 表單
+- [x] CR 審核流程 (business → manager → approved/rejected)
+- [x] CR 與對應 WBS Item 的連結展示
 
 ### 結算 (Settlements)
-- [ ] `SettlementsPage` — 月結確認/鎖定 (finalize)
-- [ ] 結算明細下載 (CSV/Excel)
-- [ ] 協銷結算與專案結算分開顯示
+- [x] `SettlementsPage` — 月結確認/鎖定 (finalize)
+- [x] 結算明細下載 (CSV/Excel)
+- [x] 協銷結算與專案結算分開顯示
 
 ### 通知 (Notifications)
-- [ ] 「全部標示為已讀」功能
-- [ ] 通知分類篩選 (warning / info / todo / approval)
-- [ ] 即時通知 (WebSocket 或 SSE)
+- [x] 「全部標示為已讀」功能
+- [x] 通知分類篩選 (`warning` / `info` / `todo` / `approval`)
+- [x] 即時通知 (WebSocket 或 SSE)
 
 ---
 
 ## 🟢 低優先 (加值功能)
 
 ### 費率 & 資源
-- [ ] `CostRatesPage` — 費率歷史紀錄 (目前只顯示當前費率)
-- [ ] `UtilizationPage` — 使用真實工時計算稼動率 (目前為 mock)
-- [ ] `ResourcesPage` — 使用真實稼動率資料 (目前為 mock)
+- [x] `CostRatesPage` — 費率歷史紀錄
+- [x] `UtilizationPage` — 使用真實工時計算稼動率
+- [x] `ResourcesPage` — 使用真實稼動率資料
 
 ### KPI & 報表
 - [ ] `KpiDashboardPage` — 接入真實 `analytics.getKpis` 資料 (目前部分 mock)

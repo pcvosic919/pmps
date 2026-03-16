@@ -1,13 +1,14 @@
-// @ts-nocheck
 import { router, protectedProcedure, roleProcedure } from "../_core/trpc";
-import { db } from "../db";
-import { customFieldsTable, systemSettingsTable } from "../../drizzle/schema";
+import { CustomFieldModel } from "../models/CustomField";
 import { z } from "zod";
-import { eq } from "drizzle-orm";
 
 export const systemRouter = router({
     getCustomFields: protectedProcedure.query(async () => {
-        return await db.select().from(customFieldsTable);
+        const items = await CustomFieldModel.find().lean();
+        return items.map((item: any) => ({
+            ...item,
+            id: item._id.toString()
+        }));
     }),
 
     createCustomField: roleProcedure(["admin"]).input(z.object({
@@ -17,14 +18,14 @@ export const systemRouter = router({
         options: z.array(z.string()).optional(),
         isRequired: z.boolean().default(false)
     })).mutation(async ({ input }) => {
-        await db.insert(customFieldsTable).values(input);
+        await CustomFieldModel.create(input);
         return { success: true };
     }),
 
     deleteCustomField: roleProcedure(["admin"]).input(z.object({
-        id: z.number()
+        id: z.string()
     })).mutation(async ({ input }) => {
-        await db.delete(customFieldsTable).where(eq(customFieldsTable.id, input.id));
+        await CustomFieldModel.deleteOne({ _id: input.id });
         return { success: true };
     }),
 });

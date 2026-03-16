@@ -1,4 +1,5 @@
 import { Clock, Briefcase } from "lucide-react";
+import { Link } from "wouter";
 
 export function TimesheetsPage() {
     // Placeholder mock component until APIs are implemented fully
@@ -18,9 +19,11 @@ export function TimesheetsPage() {
                     </div>
                     <h3 className="text-xl font-bold mb-2">協銷工時填報</h3>
                     <p className="text-muted-foreground mb-6 text-sm">紀錄您在售前階段參與商機討論、架構規劃所花費的時間，將自動計入協銷成本。</p>
-                    <button className="bg-secondary text-secondary-foreground hover:bg-secondary/80 w-full py-2.5 rounded-md font-medium transition-colors">
-                        前往填報
-                    </button>
+                    <Link href="/presales-timesheets">
+                        <a className="bg-secondary text-secondary-foreground hover:bg-secondary/80 w-full py-2.5 rounded-md font-medium transition-colors inline-block">
+                            前往填報
+                        </a>
+                    </Link>
                 </div>
 
                 <div className="bg-card border border-border rounded-xl p-8 text-center hover:border-primary/50 transition-colors shadow-sm">
@@ -29,9 +32,11 @@ export function TimesheetsPage() {
                     </div>
                     <h3 className="text-xl font-bold mb-2">專案工時填報</h3>
                     <p className="text-muted-foreground mb-6 text-sm">依照已核准的 WBS 工作項目填寫每日實際執行時數，供系統計算專案毛利與進度。</p>
-                    <button className="bg-primary text-primary-foreground hover:bg-primary/90 w-full py-2.5 rounded-md font-medium transition-colors">
-                        前往填報
-                    </button>
+                    <Link href="/project-timesheets">
+                        <a className="bg-primary text-primary-foreground hover:bg-primary/90 w-full py-2.5 rounded-md font-medium transition-colors inline-block">
+                            前往填報
+                        </a>
+                    </Link>
                 </div>
             </div>
         </div>

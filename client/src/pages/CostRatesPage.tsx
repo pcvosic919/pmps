@@ -14,6 +14,7 @@ export function CostRatesPage() {
 
     const [searchTerm, setSearchTerm] = useState("");
     const [editingUser, setEditingUser] = useState<any | null>(null);
+    const [historyUser, setHistoryUser] = useState<any | null>(null);
     const [editForm, setEditForm] = useState({ dailyRate: 0, hourlyRate: 0, currency: "TWD" });
 
     const filteredUsers = usersWithRates?.filter(u =>
@@ -108,13 +109,22 @@ export function CostRatesPage() {
                                             {user.costRate ? new Date(user.costRate.updatedAt).toLocaleDateString() : "-"}
                                         </td>
                                         <td className="px-6 py-4 text-center">
-                                            <button
-                                                onClick={() => handleEditClick(user)}
-                                                className="p-2 text-primary hover:bg-primary/10 rounded-md transition-colors"
-                                                title="設定費率"
-                                            >
-                                                <Edit className="w-4 h-4" />
-                                            </button>
+                                            <div className="flex items-center justify-center space-x-1">
+                                                <button
+                                                    onClick={() => handleEditClick(user)}
+                                                    className="p-1.5 text-primary hover:bg-primary/10 rounded-md transition-colors"
+                                                    title="設定費率"
+                                                >
+                                                    <Edit className="w-4 h-4" />
+                                                </button>
+                                                <button
+                                                    onClick={() => setHistoryUser(user)}
+                                                    className="p-1.5 text-muted-foreground hover:bg-muted rounded-md transition-colors"
+                                                    title="查看歷史"
+                                                >
+                                                    <Search className="w-4 h-4" />
+                                                </button>
+                                            </div>
                                         </td>
                                     </tr>
                                 ))
@@ -176,6 +186,53 @@ export function CostRatesPage() {
                                 className="px-4 py-2 text-sm font-medium bg-primary text-primary-foreground rounded-md hover:bg-primary/90 transition-colors disabled:opacity-50"
                             >
                                 {updateRate.isPending ? "儲存中..." : "儲存設定"}
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {/* History Modal */}
+            {historyUser && (
+                <div className="fixed inset-0 bg-black/40 backdrop-blur-sm flex items-center justify-center z-50">
+                    <div className="bg-card w-full max-w-lg rounded-xl shadow-lg border p-6 max-h-[80vh] overflow-y-auto">
+                        <div className="flex justify-between items-center mb-5">
+                            <h3 className="text-xl font-bold flex items-center gap-2">
+                                📋 費率歷史 - {historyUser.name}
+                            </h3>
+                            <button onClick={() => setHistoryUser(null)} className="text-muted-foreground hover:text-foreground">
+                                ✕
+                            </button>
+                        </div>
+                        
+                        <div className="relative border-l-2 border-primary/30 pl-4 space-y-4">
+                            {(!historyUser.costRateHistory || historyUser.costRateHistory.length === 0) ? (
+                                <p className="text-sm text-muted-foreground italic p-2 bg-muted/30 rounded-lg">尚無費率歷史變更紀錄</p>
+                            ) : (
+                                [...historyUser.costRateHistory].sort((a: any, b: any) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime()).map((h: any, i: number) => (
+                                    <div key={i} className="relative">
+                                        <div className="absolute -left-[23px] top-1.5 w-3 h-3 rounded-full bg-primary border-2 border-background" />
+                                        <div className="bg-muted/40 p-3 rounded-lg border hover:bg-muted/60 transition-colors">
+                                            <div className="text-xs text-muted-foreground mb-1">
+                                                變更時間: {new Date(h.updatedAt).toLocaleString()}
+                                            </div>
+                                            <div className="grid grid-cols-3 gap-2 text-sm">
+                                                <div>日薪: <span className="font-semibold text-foreground">{h.dailyRate?.toLocaleString() || 0}</span></div>
+                                                <div>時薪: <span className="font-semibold text-foreground">{h.hourlyRate?.toLocaleString() || 0}</span></div>
+                                                <div>幣別: <span className="font-semibold text-foreground">{h.currency}</span></div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                ))
+                            )}
+                        </div>
+
+                        <div className="mt-6 flex justify-end">
+                            <button
+                                onClick={() => setHistoryUser(null)}
+                                className="px-5 py-2 text-sm font-medium border rounded-lg hover:bg-accent transition-colors"
+                            >
+                                關閉
                             </button>
                         </div>
                     </div>

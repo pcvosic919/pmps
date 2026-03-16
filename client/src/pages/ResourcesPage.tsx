@@ -19,15 +19,16 @@ interface ResourceEdit {
 
 export function ResourcesPage() {
     const { data: usersData, isLoading } = trpc.users.list.useQuery({ limit: 100 });
+    const { data: utilizationData } = trpc.analytics.getUtilization.useQuery();
     const updateUserMutation = trpc.users.updateUser.useMutation();
 
-    const [editingId, setEditingId] = useState<number | null>(null);
+    const [editingId, setEditingId] = useState<string | null>(null);
     const [editData, setEditData] = useState<ResourceEdit>({ department: "", skills: [] });
     const [isSaving, setIsSaving] = useState(false);
 
     // Local skill overrides (since skills aren't in DB yet, we save client-side per session)
-    const [localSkills, setLocalSkills] = useState<Record<number, ResourceSkill[]>>({});
-    const [localDepts, setLocalDepts] = useState<Record<number, string>>({});
+    const [localSkills, setLocalSkills] = useState<Record<string, ResourceSkill[]>>({});
+    const [localDepts, setLocalDepts] = useState<Record<string, string>>({});
 
     if (isLoading) {
         return <div className="p-8 text-center text-muted-foreground">載入資源池資料中...</div>;
@@ -51,7 +52,7 @@ export function ResourcesPage() {
         setEditingId(user.id);
     };
 
-    const handleSave = async (userId: number) => {
+    const handleSave = async (userId: string) => {
         setIsSaving(true);
         try {
             if (editData.department) {
@@ -103,7 +104,8 @@ export function ResourcesPage() {
 
             <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
                 {resources?.map((user: any) => {
-                    const utilization = Math.floor(((user.id * 17) % 40) + 50);
+                    const userUt = utilizationData?.find((u: any) => u.id === user.id);
+                    const utilization = userUt?.utilizationRate || 0;
                     const skills = localSkills[user.id] ?? [
                         { name: "React", level: "advanced" as SkillLevel },
                         { name: "Node.js", level: "expert" as SkillLevel },

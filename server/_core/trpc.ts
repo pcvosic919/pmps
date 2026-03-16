@@ -1,13 +1,15 @@
 import { initTRPC, TRPCError } from "@trpc/server";
 import { CreateExpressContextOptions } from "@trpc/server/adapters/express";
 import { db } from "../db";
-import { usersTable } from "../../drizzle/schema";
-import { eq } from "drizzle-orm";
+import { UserModel } from "../models/User";
 import { Role } from "../../shared/types";
+import jwt from "jsonwebtoken";
+
+const JWT_SECRET = process.env.JWT_SECRET || "default_secret_key_for_dev";
 
 // User session type
 export type UserSession = {
-    id: number;
+    id: string; // Changed to string for MongoDB compatibility
     email: string;
     name: string;
     role: Role;
@@ -25,17 +27,18 @@ export const createContext = async ({ req, res }: CreateExpressContextOptions) =
 
     if (authHeader && authHeader.startsWith("Bearer ")) {
         try {
-            const email = authHeader.split(" ")[1]; // Simplistic mock token = email
-            const dbUser = await db.select().from(usersTable).where(eq(usersTable.email, email)).limit(1);
+            const token = authHeader.split(" ")[1];
+            const decoded = jwt.verify(token, JWT_SECRET) as { id: string, email: string, role: string };
+            const dbUser = await UserModel.findById(decoded.id).lean();
 
-            if (dbUser.length > 0 && dbUser[0].isActive) {
+            if (dbUser && dbUser.isActive) {
                 user = {
-                    id: dbUser[0].id,
-                    email: dbUser[0].email,
-                    name: dbUser[0].name,
-                    role: dbUser[0].role as Role,
-                    roles: dbUser[0].roles as Role[],
-                    isActive: dbUser[0].isActive
+                    id: dbUser._id.toString(),
+                    email: dbUser.email,
+                    name: dbUser.name,
+                    role: dbUser.role as Role,
+                    roles: (dbUser.roles || []) as Role[],
+                    isActive: dbUser.isActive
                 };
             }
         } catch (err) {
@@ -46,7 +49,7 @@ export const createContext = async ({ req, res }: CreateExpressContextOptions) =
     return {
         req,
         res,
-        db,
+        db, // Kept for any backward compatibility during migration
         user,
     };
 };

@@ -1,9 +1,12 @@
 import { useState } from 'react';
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { QueryClient, QueryClientProvider, QueryCache, MutationCache } from '@tanstack/react-query';
 import { httpBatchLink } from '@trpc/client';
 import { trpc } from './lib/trpc';
-import { Route, Switch } from "wouter";
+import { Route, Switch, useLocation } from "wouter";
 import { AppLayout } from './components/AppLayout';
+import { MsalProvider } from '@azure/msal-react';
+import { msalInstance } from './lib/msal';
+import { LoginPage } from './pages/LoginPage';
 import { UserManagementPage } from './pages/UserManagementPage';
 import { CostRatesPage } from './pages/CostRatesPage';
 import { UtilizationPage } from './pages/UtilizationPage';
@@ -36,7 +39,29 @@ function NotFound() {
 }
 
 export default function App() {
-  const [queryClient] = useState(() => new QueryClient());
+  const [location, setLocation] = useLocation();
+  const token = localStorage.getItem("pmp_auth_token");
+
+  const [queryClient] = useState(() => new QueryClient({
+    queryCache: new QueryCache({
+      onError: (error: any) => {
+        if (error.data?.code === "UNAUTHORIZED") {
+          localStorage.removeItem("pmp_auth_token");
+          window.location.href = "/login";
+        }
+      }
+    }),
+    mutationCache: new MutationCache({
+      onError: (error: any) => {
+        if (error.data?.code === "UNAUTHORIZED") {
+          localStorage.removeItem("pmp_auth_token");
+          window.location.href = "/login";
+        } else {
+          toast.error(error.message || "發生錯誤，請稍後再試");
+        }
+      }
+    })
+  }));
   const [trpcClient] = useState(() =>
     trpc.createClient({
       links: [
@@ -44,7 +69,7 @@ export default function App() {
           url: '/api/trpc',
           async headers() {
             return {
-              authorization: `Bearer demo_admin@demo.com`,
+              authorization: `Bearer ${localStorage.getItem("pmp_auth_token") || ''}`,
             };
           },
         }),
@@ -52,46 +77,53 @@ export default function App() {
     }),
   );
 
+  // Auth Guard
+  if (!token && location !== "/login") {
+    setTimeout(() => setLocation("/login"), 0);
+    return null;
+  }
+
   queryClient.setDefaultOptions({
-    mutations: {
-      onError: (error: any) => {
-        toast.error(error.message || "發生錯誤，請稍後再試");
-      }
-    },
     queries: {
       retry: 1,
     }
   });
 
   return (
-    <trpc.Provider client={trpcClient} queryClient={queryClient}>
-      <QueryClientProvider client={queryClient}>
-        <AppLayout>
-          <Switch>
-            <Route path="/" component={DashboardPage} />
-            <Route path="/resources" component={ResourcesPage} />
-            <Route path="/users" component={UserManagementPage} />
-            <Route path="/cost-rates" component={CostRatesPage} />
-            <Route path="/utilization" component={UtilizationPage} />
-            <Route path="/settlements" component={SettlementsPage} />
-            <Route path="/notifications" component={NotificationsPage} />
-            <Route path="/system-settings" component={SystemSettingsPage} />
-            <Route path="/custom-fields" component={CustomFieldsPage} />
-            <Route path="/reportstory" component={ReportStoryPage} />
-            <Route path="/opportunities" component={OpportunitiesPage} />
-            <Route path="/opportunities/:id" component={OpportunityDetailPage} />
-            <Route path="/projects" component={ProjectManagementPage} />
-            <Route path="/service-requests" component={ServiceRequestsPage} />
-            <Route path="/service-requests/:id" component={WbsManagementPage} />
-            <Route path="/change-requests" component={ChangeRequestsPage} />
-            <Route path="/presales-timesheets" component={PresalesTimesheetsPage} />
-            <Route path="/project-timesheets" component={ProjectTimesheetsPage} />
-            <Route path="/kpi" component={KpiDashboardPage} />
-            <Route path="/:rest*" component={NotFound} />
-          </Switch>
-        </AppLayout>
-        <Toaster position="bottom-right" />
-      </QueryClientProvider>
-    </trpc.Provider>
+    <MsalProvider instance={msalInstance}>
+      <trpc.Provider client={trpcClient} queryClient={queryClient}>
+        <QueryClientProvider client={queryClient}>
+          {location === "/login" ? (
+            <LoginPage />
+          ) : (
+            <AppLayout>
+              <Switch>
+                <Route path="/" component={DashboardPage} />
+                <Route path="/resources" component={ResourcesPage} />
+                <Route path="/users" component={UserManagementPage} />
+                <Route path="/cost-rates" component={CostRatesPage} />
+                <Route path="/utilization" component={UtilizationPage} />
+                <Route path="/settlements" component={SettlementsPage} />
+                <Route path="/notifications" component={NotificationsPage} />
+                <Route path="/system-settings" component={SystemSettingsPage} />
+                <Route path="/custom-fields" component={CustomFieldsPage} />
+                <Route path="/reportstory" component={ReportStoryPage} />
+                <Route path="/opportunities" component={OpportunitiesPage} />
+                <Route path="/opportunities/:id" component={OpportunityDetailPage} />
+                <Route path="/projects" component={ProjectManagementPage} />
+                <Route path="/service-requests" component={ServiceRequestsPage} />
+                <Route path="/service-requests/:id" component={WbsManagementPage} />
+                <Route path="/change-requests" component={ChangeRequestsPage} />
+                <Route path="/presales-timesheets" component={PresalesTimesheetsPage} />
+                <Route path="/project-timesheets" component={ProjectTimesheetsPage} />
+                <Route path="/kpi" component={KpiDashboardPage} />
+                <Route path="/:rest*" component={NotFound} />
+              </Switch>
+            </AppLayout>
+          )}
+          <Toaster position="bottom-right" />
+        </QueryClientProvider>
+      </trpc.Provider>
+    </MsalProvider>
   );
 }

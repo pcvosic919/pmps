@@ -1,7 +1,8 @@
-import { useState } from "react";
+import { useState, useEffect, useRef } from "react";
 import { trpc } from "../lib/trpc";
 import { Link } from "wouter";
-import { Plus, Briefcase, Calendar, ChevronRight, Building2 } from "lucide-react";
+import { Plus, Briefcase, Calendar, ChevronRight, Building2, Search, Loader2 } from "lucide-react";
+import { useDebounce } from "../lib/useDebounce";
 import { z } from "zod";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
@@ -19,6 +20,12 @@ const oppSchema = z.object({
 });
 
 export function OpportunitiesPage() {
+    const [searchTerm, setSearchTerm] = useState("");
+    const [sortBy, setSortBy] = useState("createdAt");
+    const [sortOrder, setSortOrder] = useState<"asc" | "desc">("desc");
+
+    const debouncedSearchTerm = useDebounce(searchTerm, 500);
+
     const {
         data,
         isLoading,
@@ -27,13 +34,27 @@ export function OpportunitiesPage() {
         hasNextPage,
         isFetchingNextPage
     } = trpc.opportunities.list.useInfiniteQuery(
-        { limit: 12 },
+        { limit: 12, search: debouncedSearchTerm, sortBy, sortOrder },
         { getNextPageParam: (lastPage) => lastPage.nextCursor }
     );
 
     // Flatten the infinite pages into a single array
     const opps = data?.pages.flatMap(page => page.items) || [];
     const [isCreating, setIsCreating] = useState(false);
+
+    const observerRef = useRef<HTMLDivElement>(null);
+
+    useEffect(() => {
+        const observer = new IntersectionObserver((entries) => {
+            if (entries[0].isIntersecting && hasNextPage && !isFetchingNextPage) {
+                fetchNextPage();
+            }
+        });
+        if (observerRef.current) {
+            observer.observe(observerRef.current);
+        }
+        return () => observer.disconnect();
+    }, [hasNextPage, isFetchingNextPage, fetchNextPage]);
 
     const form = useForm<any>({
         resolver: zodResolver(oppSchema) as any,
@@ -100,6 +121,39 @@ export function OpportunitiesPage() {
                 </button>
             </div>
 
+            <div className="bg-card border rounded-xl shadow-sm p-4 flex justify-between items-center flex-wrap gap-4">
+                <div className="relative w-72">
+                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+                    <input
+                        type="text"
+                        placeholder="搜尋商機名稱、客戶..."
+                        value={searchTerm}
+                        onChange={(e) => setSearchTerm(e.target.value)}
+                        className="w-full pl-9 pr-4 py-2 text-sm rounded-md border border-input bg-background focus:outline-none focus:ring-1 focus:ring-primary"
+                    />
+                </div>
+
+                <div className="flex items-center gap-2">
+                    <span className="text-sm font-medium text-muted-foreground whitespace-nowrap">排序:</span>
+                    <select 
+                        value={`${sortBy}-${sortOrder}`}
+                        onChange={(e) => {
+                            const [field, order] = e.target.value.split("-");
+                            setSortBy(field);
+                            setSortOrder(order as "asc" | "desc");
+                            refetch(); // Trigger refresh with new sort
+                        }}
+                        className="text-sm border border-border rounded-md px-3 py-1.5 bg-background font-semibold hover:border-primary/50 transition-colors focus:outline-none cursor-pointer"
+                    >
+                        <option value="createdAt-desc">建立時間 (新到舊)</option>
+                        <option value="createdAt-asc">建立時間 (舊到新)</option>
+                        <option value="estimatedValue-desc">預估金額 (高到低)</option>
+                        <option value="estimatedValue-asc">預估金額 (低到高)</option>
+                        <option value="status-asc">依狀態排序</option>
+                    </select>
+                </div>
+            </div>
+
             <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
                 {opps?.map((opp) => (
                     <div key={opp.id} className="group bg-card border border-border rounded-xl p-5 hover:border-primary/50 hover:shadow-md transition-all">
@@ -153,17 +207,13 @@ export function OpportunitiesPage() {
                 )}
             </div>
 
-            {hasNextPage && (
-                <div className="flex justify-center mt-6">
-                    <Button
-                        variant="outline"
-                        onClick={() => fetchNextPage()}
-                        disabled={isFetchingNextPage}
-                    >
-                        {isFetchingNextPage ? "載入中..." : "載入更多"}
-                    </Button>
-                </div>
-            )}
+            <div ref={observerRef} className="flex justify-center mt-6">
+                {isFetchingNextPage && (
+                    <div className="text-muted-foreground text-sm flex items-center gap-1">
+                        <Loader2 className="w-4 h-4 animate-spin text-primary" /> 載入中...
+                    </div>
+                )}
+            </div>
 
             {/* Create Modal */}
             <Dialog open={isCreating} onOpenChange={setIsCreating}>

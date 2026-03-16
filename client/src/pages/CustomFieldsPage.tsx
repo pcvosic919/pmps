@@ -28,7 +28,7 @@ export function CustomFieldsPage() {
         });
     };
 
-    const handleDelete = (id: number) => {
+    const handleDelete = (id: string) => {
         if (confirm("確認刪除該自訂欄位？")) {
             deleteField.mutate({ id });
         }

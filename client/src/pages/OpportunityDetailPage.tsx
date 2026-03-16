@@ -18,7 +18,7 @@ const OPP_STATUSES = [
 
 export function OpportunityDetailPage() {
     const [match, params] = useRoute("/opportunities/:id");
-    const id = match ? parseInt(params.id as string, 10) : 0;
+    const id = match ? (params.id as string) : "";
 
     // ------ Modal states ------
     const [showAssignModal, setShowAssignModal] = useState(false);
@@ -92,7 +92,7 @@ export function OpportunityDetailPage() {
         if (!assignTechId) { setAssignError("請選擇技術員"); return; }
         const hours = parseFloat(assignHours);
         if (isNaN(hours) || hours <= 0) { setAssignError("請輸入有效時數"); return; }
-        assignMutation.mutate({ opportunityId: id, techId: parseInt(assignTechId), estimatedHours: hours });
+        assignMutation.mutate({ opportunityId: id, techId: assignTechId, estimatedHours: hours });
     };
 
     const handleLogTime = () => {
@@ -104,7 +104,7 @@ export function OpportunityDetailPage() {
 
     const handleAddMember = () => {
         if (!memberUserId) { setMemberError("請選擇使用者"); return; }
-        addMemberMutation.mutate({ opportunityId: id, userId: parseInt(memberUserId), memberRole });
+        addMemberMutation.mutate({ opportunityId: id, userId: memberUserId, memberRole });
     };
 
     const handleCreateSR = () => {
@@ -112,7 +112,7 @@ export function OpportunityDetailPage() {
         const amount = parseFloat(srAmount);
         if (isNaN(amount) || amount <= 0) { setSrError("請輸入有效合約金額"); return; }
         if (!srPmId) { setSrError("請選擇 PM"); return; }
-        createSRMutation.mutate({ opportunityId: id, title: srTitle, contractAmount: amount, pmId: parseInt(srPmId) });
+        createSRMutation.mutate({ opportunityId: id, title: srTitle, contractAmount: amount, pmId: srPmId });
     };
 
     if (isOppLoading || isMembersLoading || isAssignmentsLoading || isTimesheetsLoading) {
@@ -122,7 +122,7 @@ export function OpportunityDetailPage() {
 
     const currentStatus = OPP_STATUSES.find(s => s.value === opp.status) ?? OPP_STATUSES[0];
 
-    const getTechName = (techId: number) => {
+    const getTechName = (techId: string) => {
         const found = presalesList?.find((u: any) => u.id === techId);
         return found ? found.name : `#${techId}`;
     };
@@ -136,6 +136,66 @@ export function OpportunityDetailPage() {
                     </a>
                 </Link>
                 <h1 className="text-2xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-primary to-primary/60">商機詳情</h1>
+            </div>
+
+            {/* 商機狀態流向圖 (Stepper) */}
+            <div className="bg-card border border-border/50 rounded-xl p-5 shadow-sm flex items-center justify-between relative overflow-hidden">
+                <div className="absolute top-[2.1rem] left-0 right-0 h-0.5 bg-muted mx-16 z-0" />
+                <div 
+                    className="absolute top-[2.1rem] left-0 right-0 h-0.5 bg-primary mx-16 z-0 transition-all duration-500" 
+                    style={{ 
+                        width: `calc(${((() => {
+                            switch(opp.status) {
+                                case 'new': return 0;
+                                case 'qualified': return 1;
+                                case 'presales_active': return 2;
+                                case 'won': case 'lost': case 'converted': return 3;
+                                default: return 0;
+                            }
+                        })() / 3) * 100}% - ${(() => {
+                            const p = opp.status;
+                            if (p === 'new') return '0%';
+                            return '2rem'; // Offset for right aligns
+                        })()})`
+                    }} 
+                />
+                
+                {[
+                    { value: "new", label: "待處理" },
+                    { value: "qualified", label: "已確認" },
+                    { value: "presales_active", label: "協銷中" },
+                    { value: "final", label: "已結案" }
+                ].map((step, index) => {
+                    const currentProgress = (() => {
+                        switch(opp.status) {
+                            case 'new': return 0;
+                            case 'qualified': return 1;
+                            case 'presales_active': return 2;
+                            case 'won': case 'lost': case 'converted': return 3;
+                            default: return 0;
+                        }
+                    })();
+                    
+                    const isCompleted = currentProgress > index;
+                    const isActive = currentProgress === index;
+                    
+                    return (
+                        <div key={step.value} className="flex flex-col items-center z-10 relative">
+                            <div className={`w-9 h-9 rounded-full flex items-center justify-center font-bold text-sm border-2 transition-all ${
+                                isCompleted ? 'bg-primary border-primary text-primary-foreground' : 
+                                isActive ? 'bg-background border-primary text-primary shadow-sm shadow-primary/20' : 
+                                'bg-background border-muted text-muted-foreground'
+                            }`}>
+                                {isCompleted ? <Check className="w-4 h-4" /> : index + 1}
+                            </div>
+                            <span className={`text-xs mt-1.5 font-semibold ${isActive || isCompleted ? 'text-foreground' : 'text-muted-foreground'}`}>
+                                {step.value === "final" && (opp.status === "won" || opp.status === "lost" || opp.status === "converted") 
+                                    ? currentStatus.label 
+                                    : step.label}
+                            </span>
+                        </div>
+                    );
+                })}
             </div>
 
             {/* Opp Info Card */}

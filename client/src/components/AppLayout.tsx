@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Link, useLocation } from "wouter";
+import { Link } from "wouter";
 import {
     Building2,
     Users,
@@ -17,9 +17,11 @@ import {
     Bell,
     Settings2,
     Sparkles,
-    FolderKanban
+    FolderKanban,
+    LogOut
 } from "lucide-react";
 import { cn } from "../lib/utils";
+import { useMsal } from "@azure/msal-react";
 
 interface AppLayoutProps {
     children: React.ReactNode;
@@ -47,7 +49,19 @@ const navItems = [
 
 export function AppLayout({ children }: AppLayoutProps) {
     const [sidebarOpen, setSidebarOpen] = useState(true);
-    const [location] = useLocation();
+    const { instance } = useMsal();
+
+    const handleLogout = async () => {
+        // 清除 Token
+        localStorage.removeItem("pmp_auth_token");
+        // 如果有 MSAL 會話，也進行登出
+        try {
+            await instance.logoutPopup();
+        } catch (e) {
+            // popup blocked or failed, fallback to reload
+        }
+        window.location.href = "/login";
+    };
 
     return (
         <div className="min-h-screen bg-background text-foreground flex">
@@ -70,7 +84,7 @@ export function AppLayout({ children }: AppLayoutProps) {
                         <Link key={item.href} href={item.href}>
                             <a className={cn(
                                 "flex items-center px-4 py-2 mx-2 rounded-md transition-colors",
-                                location === item.href
+                                window.location.pathname === item.href
                                     ? "bg-primary text-primary-foreground"
                                     : "text-muted-foreground hover:bg-muted hover:text-foreground",
                                 !sidebarOpen && "justify-center px-0"
@@ -88,10 +102,15 @@ export function AppLayout({ children }: AppLayoutProps) {
                             A
                         </div>
                         {sidebarOpen && (
-                            <div className="ml-3">
+                            <div className="ml-3 flex-1">
                                 <p className="text-sm font-medium leading-none">Admin User</p>
                                 <p className="text-xs text-muted-foreground mt-1">admin</p>
                             </div>
+                        )}
+                        {sidebarOpen && (
+                            <button onClick={handleLogout} className="p-1.5 hover:bg-muted rounded-md text-muted-foreground hover:text-red-500 transition-colors" title="登出">
+                                <LogOut className="w-4 h-4" />
+                            </button>
                         )}
                     </div>
                 </div>

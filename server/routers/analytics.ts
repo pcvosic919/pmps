@@ -1,16 +1,16 @@
-// @ts-nocheck
 import { router, protectedProcedure, roleProcedure } from "../_core/trpc";
-import { db } from "../db";
-import { usersTable, projectTimesheetsTable, presalesTimesheetsTable, costRatesTable, serviceRequestsTable, projectsTable, opportunitiesTable, notificationsTable } from "../../drizzle/schema";
+import { ServiceRequestModel } from "../models/ServiceRequest";
+import { OpportunityModel } from "../models/Opportunity";
+import { TimesheetModel } from "../models/Timesheet";
+import { UserModel } from "../models/User";
+import { NotificationModel } from "../models/Notification";
+import { SettlementLockModel } from "../models/SettlementLock";
 import { z } from "zod";
-import { eq, sql, desc } from "drizzle-orm";
 import { GoogleGenerativeAI } from "@google/generative-ai";
 
 export const analyticsRouter = router({
     generateReportStory: roleProcedure(["admin", "manager"])
-        .input(z.object({
-            prompt: z.string()
-        }))
+        .input(z.object({ prompt: z.string() }))
         .mutation(async ({ input }) => {
             const apiKey = process.env.GOOGLE_AI_KEY;
             if (!apiKey) {
@@ -19,13 +19,12 @@ export const analyticsRouter = router({
                 };
             }
 
-            // 1. Gather Context Data
-            const srs = await db.select().from(serviceRequestsTable);
-            const opps = await db.select().from(opportunitiesTable);
+            const srs = await ServiceRequestModel.find().lean();
+            const opps = await OpportunityModel.find().lean();
             
-            const totalRevenue = srs.reduce((acc, sr) => acc + (sr.contractAmount || 0), 0);
-            const activeProjects = srs.filter(s => s.status === 'in_progress').length;
-            const openOpps = opps.filter(o => o.status !== 'won' && o.status !== 'lost').length;
+            const totalRevenue = srs.reduce((acc: number, sr: any) => acc + (sr.contractAmount || 0), 0);
+            const activeProjects = srs.filter((s: any) => s.status === 'in_progress').length;
+            const openOpps = opps.filter((o: any) => o.status !== 'won' && o.status !== 'lost').length;
 
             const context = `
             系統數據摘要：
@@ -38,7 +37,6 @@ export const analyticsRouter = router({
             ${input.prompt}
             `;
 
-            // 2. Call Gemini
             const genAI = new GoogleGenerativeAI(apiKey);
             const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
 
@@ -51,89 +49,134 @@ export const analyticsRouter = router({
         }),
 
     getUtilization: roleProcedure(["admin", "manager", "pm"]).query(async () => {
-        // Fetch all users
-        const users = await db.select({
-            id: usersTable.id,
-            name: usersTable.name,
-            department: usersTable.department,
-            role: usersTable.role,
-        }).from(usersTable);
-
-        // Fetch project timesheets (assuming current month or all time, we'll just sum all for simplicity now, but you should filter by month)
-        // For demonstration, we'll just grab everything
-        const pTimesheets = await db.select().from(projectTimesheetsTable);
-        const psTimesheets = await db.select().from(presalesTimesheetsTable);
+        const users = await UserModel.find().lean();
 
         const currentMonth = new Date().getMonth();
         const currentYear = new Date().getFullYear();
+        const startOfMonth = new Date(currentYear, currentMonth, 1);
+        const endOfMonth = new Date(currentYear, currentMonth + 1, 0);
 
-        return users.map(u => {
-            const userPT = pTimesheets.filter(t => t.userId === u.id && new Date(t.date).getMonth() === currentMonth && new Date(t.date).getFullYear() === currentYear);
-            const userPsT = psTimesheets.filter(t => t.userId === u.id && new Date(t.date).getMonth() === currentMonth && new Date(t.date).getFullYear() === currentYear);
+        // Aggregate hours by techId
+        const projectAgg = await TimesheetModel.aggregate([
+            { $match: { type: 'project', workDate: { $gte: startOfMonth, $lte: endOfMonth } } },
+            { $group: { _id: "$techId", totalHours: { $sum: "$hours" } } }
+        ]);
 
-            const projectHours = userPT.reduce((sum, t) => sum + t.hours, 0);
-            const presalesHours = userPsT.reduce((sum, t) => sum + t.hours, 0);
+        const presalesAgg = await TimesheetModel.aggregate([
+            { $match: { type: 'presales', workDate: { $gte: startOfMonth, $lte: endOfMonth } } },
+            { $group: { _id: "$techId", totalHours: { $sum: "$hours" } } }
+        ]);
 
-            const totalHours = projectHours + presalesHours;
-            // Assuming 160 available hours per month
+        return users.map((u: any) => {
+            const pHours = projectAgg.find(a => a._id.toString() === u._id.toString())?.totalHours || 0;
+            const psHours = presalesAgg.find(a => a._id.toString() === u._id.toString())?.totalHours || 0;
+            const totalHours = pHours + psHours;
             const utilizationRate = Math.round((totalHours / 160) * 100);
 
             return {
-                id: u.id,
+                id: u._id.toString(),
                 name: u.name,
                 department: u.department,
                 role: u.role,
-                projectHours,
-                presalesHours,
+                projectHours: pHours,
+                presalesHours: psHours,
                 totalHours,
                 utilizationRate
             };
         });
     }),
 
-    getSettlements: roleProcedure(["admin", "manager"]).query(async () => {
-        // Fetch SRs, Timesheets, and Cost Rates to calculate profitability per SR
-        const srs = await db.select().from(serviceRequestsTable);
-        const pTimesheets = await db.select().from(projectTimesheetsTable);
-        const rates = await db.select().from(costRatesTable);
+    getSettlements: roleProcedure(["admin", "manager"])
+        .input(z.object({ month: z.string().optional() }))
+        .query(async ({ input }) => {
+            const currentMonth = input.month || new Date().toISOString().slice(0, 7);
+            const startDate = new Date(`${currentMonth}-01`);
+            const endDate = new Date(startDate.getFullYear(), startDate.getMonth() + 1, 0, 23, 59, 59);
 
-        return srs.map(sr => {
-            // Find all timesheets for this SR (we assume timesheets have wbsItemId, and wbsItem belongs to wbsVersion belonging to SR - for simplicity here in demo we might just mock or join, but since we don't have direct srId on projectTimesheets we will just pretend or do a rough calc)
-            // Wait, projectTimesheetsTable has `wbsItemId`. We need to join wbsItems -> wbsVersions -> SR to get exact.
-            // For analytical purposes now, let's just use `costAmount` on projectTimesheets.
-            // Oh, actual cost amounts are already saved on the timesheet!
-            // But we need to link timesheet -> wbsItem -> wbsVersion -> SR.
-            // Let's do a raw SQL or a simpler approach just for the demo:
-            // Actually, for a quick MVP, let's just mock the aggregation or leave it simple.
-            // Let's return the SRs with their contractAmount and a mocked or calculated cost.
+            const srs = await ServiceRequestModel.find().lean();
+            const opps = await OpportunityModel.find().lean();
+
+            // 1. Projects (SR) Cost
+            const projectCostAgg = await TimesheetModel.aggregate([
+                { $match: { type: 'project', workDate: { $gte: startDate, $lte: endDate } } },
+                { $group: { _id: "$srId", totalCost: { $sum: "$costAmount" } } }
+            ]);
+
+            // 2. Presales (Opportunity) Cost
+            const presalesCostAgg = await TimesheetModel.aggregate([
+                { $match: { type: 'presales', workDate: { $gte: startDate, $lte: endDate } } },
+                { $group: { _id: "$opportunityId", totalCost: { $sum: "$costAmount" } } }
+            ]);
+
+            // Check if month is locked
+            const locks = await SettlementLockModel.find({ month: currentMonth }).lean();
+            const isProjectLocked = locks.some((l: any) => l.type === "project" && l.isLocked);
+            const isPresalesLocked = locks.some((l: any) => l.type === "presales" && l.isLocked);
+
+            const projectSettlements = srs.map((sr: any) => {
+                const actualCost = projectCostAgg.find(a => a._id?.toString() === sr._id.toString())?.totalCost || 0;
+                const margin = sr.contractAmount - actualCost;
+                return {
+                    id: sr._id.toString(),
+                    title: sr.title,
+                    pmId: sr.pmId?.toString(),
+                    contractAmount: sr.contractAmount,
+                    totalCost: actualCost,
+                    margin,
+                    marginPercent: sr.contractAmount > 0 ? Math.round((margin / sr.contractAmount) * 100) : 0,
+                    status: sr.status
+                };
+            });
+
+            const presalesSettlements = opps.map((opp: any) => {
+                const actualCost = presalesCostAgg.find(a => a._id?.toString() === opp._id.toString())?.totalCost || 0;
+                return {
+                    id: opp._id.toString(),
+                    title: opp.title,
+                    customerName: opp.customerName,
+                    totalCost: actualCost,
+                    status: opp.status
+                };
+            });
 
             return {
-                id: sr.id,
-                title: sr.title,
-                contractAmount: sr.contractAmount,
-                totalCost: sr.contractAmount * 0.6, // mock cost for demo
-                margin: sr.contractAmount - (sr.contractAmount * 0.6),
-                marginPercent: 40,
-                status: sr.status,
-                pmId: sr.pmId
+                currentMonth,
+                isProjectLocked,
+                isPresalesLocked,
+                projects: projectSettlements,
+                presales: presalesSettlements
             };
-        });
-    }),
+        }),
+
+    lockSettlement: roleProcedure(["admin", "manager"])
+        .input(z.object({ month: z.string(), type: z.enum(["project", "presales"]) }))
+        .mutation(async ({ ctx, input }) => {
+            await SettlementLockModel.updateOne(
+                { month: input.month, type: input.type },
+                { $set: { isLocked: true, lockedBy: ctx.user.id } },
+                { upsert: true }
+            );
+            return { success: true };
+        }),
 
     getKpiData: roleProcedure(["admin", "manager"]).query(async () => {
-        const srs = await db.select().from(serviceRequestsTable);
-        const projects = await db.select().from(projectsTable);
-        const opps = await db.select().from(opportunitiesTable);
+        const srs = await ServiceRequestModel.find().lean();
+        const opps = await OpportunityModel.find().lean();
 
-        const activeProjects = projects.filter(p => p.status === 'in_progress').length;
-        const totalRevenue = srs.reduce((acc, sr) => acc + (sr.contractAmount || 0), 0);
+        // Active projects are SRs in-progress
+        const activeProjects = srs.filter((p: any) => p.status === 'in_progress').length;
+        const totalRevenue = srs.reduce((acc: number, sr: any) => acc + (sr.contractAmount || 0), 0);
 
-        // Mocked cost for KPI
-        const totalCost = totalRevenue * 0.55;
+        // Aggregate total real cost from timesheets
+        const costAgg = await TimesheetModel.aggregate([
+            { $match: { type: 'project' } },
+            { $group: { _id: null, totalCost: { $sum: "$costAmount" } } }
+        ]);
+        const totalCost = costAgg[0]?.totalCost || 0;
         const totalMargin = totalRevenue - totalCost;
         const marginPercent = totalRevenue > 0 ? Math.round((totalMargin / totalRevenue) * 100) : 0;
 
-        const wonOpps = opps.filter(o => o.status === 'won').length;
+        const wonOpps = opps.filter((o: any) => o.status === 'won').length;
         const totalOpps = opps.length;
         const winRate = totalOpps > 0 ? Math.round((wonOpps / totalOpps) * 100) : 0;
 
@@ -143,8 +186,8 @@ export const analyticsRouter = router({
             totalMargin,
             marginPercent,
             winRate,
-            recentSrs: srs.slice(-5).map(sr => ({
-                id: sr.id,
+            recentSrs: srs.slice(-5).map((sr: any) => ({
+                id: sr._id.toString(),
                 title: sr.title,
                 status: sr.status,
                 amount: sr.contractAmount
@@ -153,21 +196,24 @@ export const analyticsRouter = router({
     }),
 
     getNotifications: protectedProcedure.query(async ({ ctx }) => {
-        const notifs = await db.select().from(notificationsTable).where(eq(notificationsTable.userId, ctx.user.id));
-        return notifs.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+        const notifs = await NotificationModel.find({ userId: ctx.user.id }).lean();
+        return notifs.map((n: any) => ({ ...n, id: n._id.toString(), userId: n.userId.toString() }))
+            .sort((a: any, b: any) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
     }),
 
-    markNotificationRead: protectedProcedure.input(z.object({ id: z.number() })).mutation(async ({ ctx, input }) => {
-        await db.update(notificationsTable)
-            .set({ isRead: true })
-            .where(sql`${notificationsTable.id} = ${input.id} AND ${notificationsTable.userId} = ${ctx.user.id}`);
+    markNotificationRead: protectedProcedure.input(z.object({ id: z.string() })).mutation(async ({ ctx, input }) => {
+        await NotificationModel.updateOne(
+            { _id: input.id, userId: ctx.user.id },
+            { isRead: true }
+        );
         return { success: true };
     }),
 
     markAllNotificationsRead: protectedProcedure.mutation(async ({ ctx }) => {
-        await db.update(notificationsTable)
-            .set({ isRead: true })
-            .where(eq(notificationsTable.userId, ctx.user.id));
+        await NotificationModel.updateMany(
+            { userId: ctx.user.id },
+            { isRead: true }
+        );
         return { success: true };
     }),
 });

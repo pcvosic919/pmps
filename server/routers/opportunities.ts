@@ -1,35 +1,66 @@
 import { z } from "zod";
 import { router, protectedProcedure, roleProcedure } from "../_core/trpc";
-import { db } from "../db";
-import { opportunitiesTable, opportunityMembersTable, presalesAssignmentsTable, serviceRequestsTable, presalesTimesheetsTable } from "../../drizzle/schema";
-import { eq, and, desc } from "drizzle-orm";
+import { OpportunityModel } from "../models/Opportunity";
+import { TimesheetModel } from "../models/Timesheet";
+import { ServiceRequestModel } from "../models/ServiceRequest";
 import { TRPCError } from "@trpc/server";
 
 export const opportunitiesRouter = router({
     list: protectedProcedure
         .input(z.object({
             limit: z.number().min(1).max(100).nullish(),
-            cursor: z.number().nullish(), // offset
+            cursor: z.number().nullish(), // Use offset as cursor
+            search: z.string().optional(),
+            sortBy: z.string().optional(),
+            sortOrder: z.enum(["asc", "desc"]).optional()
         }).optional())
         .query(async ({ input, ctx: _ctx }) => {
             const limit = input?.limit ?? 50;
-            const cursor = input?.cursor ?? 0;
+            const offset = input?.cursor ?? 0;
+            const search = input?.search;
+            const sortBy = input?.sortBy || "createdAt";
+            const sortOrder = input?.sortOrder || "desc";
 
-            // If not admin/business/manager, ideally only show opportunities they are a member of
-            const items = await db.select()
-                .from(opportunitiesTable)
-                .orderBy(desc(opportunitiesTable.id))
-                .limit(limit + 1)
-                .offset(cursor);
-
-            let nextCursor: typeof cursor | undefined = undefined;
-            if (items.length > limit) {
-                items.pop(); // Remove the extra item
-                nextCursor = cursor + limit;
+            const query: any = {};
+            if (search) {
+                query.$or = [
+                    { title: { $regex: search, $options: "i" } },
+                    { customerName: { $regex: search, $options: "i" } }
+                ];
             }
 
+            // Build sort definition
+            const sortObj: any = {};
+            sortObj[sortBy] = sortOrder === "desc" ? -1 : 1;
+            if (sortBy !== "_id") {
+                sortObj._id = -1; // tiebreaker
+            }
+
+            const items = await OpportunityModel.find(query)
+                .sort(sortObj)
+                .skip(offset)
+                .limit(limit + 1)
+                .lean();
+
+            let nextCursor: number | undefined = undefined;
+            if (items.length > limit) {
+                items.pop();
+                nextCursor = offset + limit;
+            }
+
+            const mappedItems = items.map(opp => ({
+                id: opp._id.toString(),
+                title: opp.title,
+                customerName: opp.customerName,
+                estimatedValue: opp.estimatedValue,
+                status: opp.status,
+                expectedCloseDate: opp.expectedCloseDate,
+                ownerId: opp.ownerId.toString(),
+                createdAt: opp.createdAt
+            }));
+
             return {
-                items,
+                items: mappedItems,
                 nextCursor
             };
         }),
@@ -43,185 +74,220 @@ export const opportunitiesRouter = router({
             expectedCloseDate: z.date().optional()
         }))
         .mutation(async ({ input, ctx }) => {
-            const result = await db.insert(opportunitiesTable).values({
-                title: input.title,
-                customerName: input.customerName,
-                estimatedValue: input.estimatedValue,
-                status: input.status,
-                expectedCloseDate: input.expectedCloseDate,
-                ownerId: ctx.user.id
+            const ownerId = ctx.user.id; // ctx.user.id is already string from jwt? Wait, if previous was number, it should be parsed to string
+
+            const result = await OpportunityModel.create({
+                ...input,
+                ownerId: ownerId,
+                members: [{
+                    userId: ownerId,
+                    memberRole: "owner"
+                }]
             });
-            const newOppId = Number(result.lastInsertRowid);
-            // Auto-assign creator as owner member
-            await db.insert(opportunityMembersTable).values({
-                opportunityId: newOppId,
-                userId: ctx.user.id,
-                memberRole: "owner"
-            });
-            return { success: true, id: newOppId };
+
+            return { success: true, id: result._id.toString() };
         }),
 
     getById: protectedProcedure
-        .input(z.object({ id: z.number() }))
+        .input(z.object({ id: z.string() }))
         .query(async ({ input }) => {
-            const opps = await db.select().from(opportunitiesTable).where(eq(opportunitiesTable.id, input.id)).limit(1);
-            if (!opps.length) throw new TRPCError({ code: "NOT_FOUND" });
-            return opps[0];
+            const opp = await OpportunityModel.findById(input.id).lean();
+            if (!opp) throw new TRPCError({ code: "NOT_FOUND" });
+            return {
+                ...opp,
+                id: opp._id.toString(),
+                ownerId: opp.ownerId.toString()
+            };
         }),
 
     getMembers: protectedProcedure
-        .input(z.object({ opportunityId: z.number() }))
+        .input(z.object({ opportunityId: z.string() }))
         .query(async ({ input }) => {
-            return db.select()
-                .from(opportunityMembersTable)
-                .where(eq(opportunityMembersTable.opportunityId, input.opportunityId));
+            const opp = await OpportunityModel.findById(input.opportunityId).select("members").lean();
+            if (!opp) return [];
+            return (opp.members || []).map((m: any) => ({
+                id: m._id.toString(),
+                opportunityId: input.opportunityId,
+                userId: m.userId.toString(),
+                memberRole: m.memberRole
+            }));
         }),
 
     addMember: roleProcedure(["admin", "business", "manager"])
         .input(z.object({
-            opportunityId: z.number(),
-            userId: z.number(),
+            opportunityId: z.string(),
+            userId: z.string(),
             memberRole: z.enum(["owner", "assignee", "watcher"]).default("watcher")
         }))
         .mutation(async ({ input }) => {
-            // Check if already a member
-            const existing = await db.select().from(opportunityMembersTable)
-                .where(and(
-                    eq(opportunityMembersTable.opportunityId, input.opportunityId),
-                    eq(opportunityMembersTable.userId, input.userId)
-                )).limit(1);
-            if (existing.length > 0) {
+            const existing = await OpportunityModel.findOne({
+                _id: input.opportunityId,
+                "members.userId": input.userId
+            });
+            if (existing) {
                 throw new TRPCError({ code: "CONFLICT", message: "此成員已在商機中" });
             }
-            await db.insert(opportunityMembersTable).values(input);
+
+            await OpportunityModel.updateOne(
+                { _id: input.opportunityId },
+                { $push: { members: { userId: input.userId, memberRole: input.memberRole } } }
+            );
             return { success: true };
         }),
 
     removeMember: roleProcedure(["admin", "business", "manager"])
-        .input(z.object({ memberId: z.number() }))
+        .input(z.object({ memberId: z.string() })) // memberId is the Sub-Doc _id
         .mutation(async ({ input }) => {
-            await db.delete(opportunityMembersTable).where(eq(opportunityMembersTable.id, input.memberId));
+            await OpportunityModel.updateOne(
+                { "members._id": input.memberId },
+                { $pull: { members: { _id: input.memberId } } }
+            );
             return { success: true };
         }),
 
     getAssignments: protectedProcedure
-        .input(z.object({ opportunityId: z.number() }))
+        .input(z.object({ opportunityId: z.string() }))
         .query(async ({ input }) => {
-            return db.select()
-                .from(presalesAssignmentsTable)
-                .where(eq(presalesAssignmentsTable.opportunityId, input.opportunityId));
+            const opp = await OpportunityModel.findById(input.opportunityId).select("presalesAssignments").lean();
+            if (!opp) return [];
+            return (opp.presalesAssignments || []).map((a: any) => ({
+                id: a._id.toString(),
+                opportunityId: input.opportunityId,
+                techId: a.techId.toString(),
+                estimatedHours: a.estimatedHours,
+                createdAt: a.createdAt
+            }));
         }),
 
     getTimesheets: protectedProcedure
-        .input(z.object({ opportunityId: z.number() }))
+        .input(z.object({ opportunityId: z.string() }))
         .query(async ({ input }) => {
-            return db.select()
-                .from(presalesTimesheetsTable)
-                .where(eq(presalesTimesheetsTable.opportunityId, input.opportunityId));
+            const items = await TimesheetModel.find({ opportunityId: input.opportunityId, type: "presales" }).lean();
+            return items.map(t => ({
+                ...t,
+                id: t._id.toString(),
+                opportunityId: t.opportunityId?.toString(),
+                techId: t.techId.toString()
+            }));
         }),
 
     getMyPresalesTimesheets: protectedProcedure
         .query(async ({ ctx }) => {
-            return db.select({
-                id: presalesTimesheetsTable.id,
-                opportunityId: presalesTimesheetsTable.opportunityId,
-                workDate: presalesTimesheetsTable.workDate,
-                hours: presalesTimesheetsTable.hours,
-                description: presalesTimesheetsTable.description,
-                costAmount: presalesTimesheetsTable.costAmount,
-                opportunityTitle: opportunitiesTable.title,
-                customerName: opportunitiesTable.customerName
-            })
-                .from(presalesTimesheetsTable)
-                .innerJoin(opportunitiesTable, eq(presalesTimesheetsTable.opportunityId, opportunitiesTable.id))
-                .where(eq(presalesTimesheetsTable.techId, ctx.user.id))
-                .orderBy(desc(presalesTimesheetsTable.workDate));
+            const items = await TimesheetModel.find({ techId: ctx.user.id, type: "presales" })
+                .populate("opportunityId") // Inner join to get title/customer
+                .sort({ workDate: -1 })
+                .lean();
+
+            return items.map((t: any) => ({
+                id: t._id.toString(),
+                opportunityId: t.opportunityId?._id.toString(),
+                workDate: t.workDate,
+                hours: t.hours,
+                description: t.description,
+                costAmount: t.costAmount,
+                opportunityTitle: t.opportunityId?.title || "未知商機",
+                customerName: t.opportunityId?.customerName || ""
+            }));
         }),
 
     getMyPresalesAssignments: protectedProcedure
         .query(async ({ ctx }) => {
-            return db.select({
-                id: presalesAssignmentsTable.id,
-                opportunityId: presalesAssignmentsTable.opportunityId,
-                opportunityTitle: opportunitiesTable.title,
-                customerName: opportunitiesTable.customerName,
-                estimatedHours: presalesAssignmentsTable.estimatedHours
-            })
-                .from(presalesAssignmentsTable)
-                .innerJoin(opportunitiesTable, eq(presalesAssignmentsTable.opportunityId, opportunitiesTable.id))
-                .where(eq(presalesAssignmentsTable.techId, ctx.user.id));
+            // Find opportunities where user is in presalesAssignments
+            const opps = await OpportunityModel.find({
+                "presalesAssignments.techId": ctx.user.id
+            }).lean();
+
+            const assignments: any[] = [];
+            opps.forEach(opp => {
+                opp.presalesAssignments.forEach((a: any) => {
+                    if (a.techId.toString() === ctx.user.id) {
+                        assignments.push({
+                            id: a._id.toString(),
+                            opportunityId: opp._id.toString(),
+                            opportunityTitle: opp.title,
+                            customerName: opp.customerName,
+                            estimatedHours: a.estimatedHours
+                        });
+                    }
+                });
+            });
+            return assignments;
         }),
 
     assignPresales: roleProcedure(["admin", "business"])
         .input(z.object({
-            opportunityId: z.number(),
-            techId: z.number(),
+            opportunityId: z.string(),
+            techId: z.string(),
             estimatedHours: z.number()
         }))
         .mutation(async ({ input }) => {
-            await db.insert(presalesAssignmentsTable).values(input);
+            await OpportunityModel.updateOne(
+                { _id: input.opportunityId },
+                { $push: { presalesAssignments: { techId: input.techId, estimatedHours: input.estimatedHours } } }
+            );
 
             // Auto-assign as opportunity member
-            const existing = await db.select().from(opportunityMembersTable)
-                .where(
-                    and(
-                        eq(opportunityMembersTable.opportunityId, input.opportunityId),
-                        eq(opportunityMembersTable.userId, input.techId)
-                    )
-                ).limit(1);
+            const existing = await OpportunityModel.findOne({
+                _id: input.opportunityId,
+                "members.userId": input.techId
+            });
 
-            if (!existing.length) {
-                await db.insert(opportunityMembersTable).values({
-                    opportunityId: input.opportunityId,
-                    userId: input.techId,
-                    memberRole: "assignee"
-                });
+            if (!existing) {
+                await OpportunityModel.updateOne(
+                    { _id: input.opportunityId },
+                    { $push: { members: { userId: input.techId, memberRole: "assignee" } } }
+                );
             }
             return { success: true };
         }),
 
     createSR: roleProcedure(["admin", "business", "pm"])
         .input(z.object({
-            opportunityId: z.number(),
+            opportunityId: z.string(),
             title: z.string(),
             contractAmount: z.number(),
-            pmId: z.number()
+            pmId: z.string()
         }))
         .mutation(async ({ input }) => {
-            const result = await db.insert(serviceRequestsTable).values(input);
+            const result = await ServiceRequestModel.create({
+                ...input,
+                opportunityId: input.opportunityId
+            });
 
             // Update Opp status to converted
-            await db.update(opportunitiesTable)
-                .set({ status: "converted" })
-                .where(eq(opportunitiesTable.id, input.opportunityId));
+            await OpportunityModel.updateOne(
+                { _id: input.opportunityId },
+                { $set: { status: "converted" } }
+            );
 
-            return { id: Number(result.lastInsertRowid) };
+            return { id: result._id.toString() };
         }),
 
     updateStatus: roleProcedure(["admin", "business"])
         .input(z.object({
-            id: z.number(),
+            id: z.string(),
             status: z.enum(["new", "qualified", "presales_active", "won", "converted", "lost"])
         }))
         .mutation(async ({ input }) => {
-            await db.update(opportunitiesTable)
-                .set({ status: input.status })
-                .where(eq(opportunitiesTable.id, input.id));
+            await OpportunityModel.updateOne(
+                { _id: input.id },
+                { $set: { status: input.status } }
+            );
             return { success: true };
         }),
 
     logPresalesTime: roleProcedure(["tech", "presales", "pm"])
         .input(z.object({
-            opportunityId: z.number(),
+            opportunityId: z.string(),
             workDate: z.coerce.date(),
             hours: z.number(),
             description: z.string(),
         }))
         .mutation(async ({ ctx, input }) => {
-            // In a real app, fetch cost rate for ctx.user.id to calculate costAmount
             const costAmount = input.hours * 1000; // Mock 1000 per hour
 
-            await db.insert(presalesTimesheetsTable).values({
+            await TimesheetModel.create({
+                type: "presales",
                 opportunityId: input.opportunityId,
                 techId: ctx.user.id,
                 workDate: input.workDate,
@@ -234,28 +300,31 @@ export const opportunitiesRouter = router({
 
     updatePresalesTimesheet: roleProcedure(["tech", "presales", "pm"])
         .input(z.object({
-            id: z.number(),
+            id: z.string(),
             workDate: z.coerce.date(),
             hours: z.number(),
             description: z.string(),
         }))
         .mutation(async ({ input }) => {
             const costAmount = input.hours * 1000;
-            await db.update(presalesTimesheetsTable)
-                .set({
-                    workDate: input.workDate,
-                    hours: input.hours,
-                    description: input.description,
-                    costAmount: costAmount
-                })
-                .where(eq(presalesTimesheetsTable.id, input.id));
+            await TimesheetModel.updateOne(
+                { _id: input.id },
+                {
+                    $set: {
+                        workDate: input.workDate,
+                        hours: input.hours,
+                        description: input.description,
+                        costAmount: costAmount
+                    }
+                }
+            );
             return { success: true };
         }),
 
     deletePresalesTimesheet: roleProcedure(["tech", "presales", "pm"])
-        .input(z.object({ id: z.number() }))
+        .input(z.object({ id: z.string() }))
         .mutation(async ({ input }) => {
-            await db.delete(presalesTimesheetsTable).where(eq(presalesTimesheetsTable.id, input.id));
+            await TimesheetModel.deleteOne({ _id: input.id });
             return { success: true };
         })
 });

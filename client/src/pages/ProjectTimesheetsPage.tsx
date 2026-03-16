@@ -1,5 +1,6 @@
 import { useState, useMemo } from "react";
 import { trpc } from "../lib/trpc";
+import { cn } from "../lib/utils";
 import { CalendarDays, Plus, Trash2, AlertCircle, Filter, Package } from "lucide-react";
 
 export function ProjectTimesheetsPage() {
@@ -7,13 +8,14 @@ export function ProjectTimesheetsPage() {
     const [isSubmitting, setIsSubmitting] = useState(false);
 
     // Form state
-    const [selectedWbsId, setSelectedWbsId] = useState<number | "">("");
+    const [selectedWbsId, setSelectedWbsId] = useState<string>("");
     const [workDate, setWorkDate] = useState<string>(new Date().toISOString().split("T")[0]);
     const [hours, setHours] = useState<number | "">("");
     const [description, setDescription] = useState("");
 
     // Filter state
-    const [filterProjectId, setFilterProjectId] = useState<number | "all">("all");
+    const [filterProjectId, setFilterProjectId] = useState<string>("all");
+    const [viewMode, setViewMode] = useState<"list" | "week" | "month">("list");
 
     // Fetches
     const { data: assignments } = trpc.projects.getMyProjectAssignments.useQuery();
@@ -41,8 +43,11 @@ export function ProjectTimesheetsPage() {
 
         setIsSubmitting(true);
         try {
+            const assignment = assignments?.find((a: any) => a.id === selectedWbsId);
+            const srId = assignment?.srId || "";
             await logTime.mutateAsync({
-                wbsItemId: Number(selectedWbsId),
+                wbsItemId: selectedWbsId,
+                srId: srId,
                 workDate: new Date(workDate),
                 hours: Number(hours),
                 description,
@@ -71,6 +76,27 @@ export function ProjectTimesheetsPage() {
         return timesheets.filter((t: any) => t.srId === filterProjectId);
     }, [timesheets, filterProjectId]);
 
+    // Grouped timesheets for week/month view
+    const groupedTimesheets = useMemo(() => {
+        if (viewMode === "list") return {};
+        const groups: Record<string, { totalHours: number, items: any[] }> = {};
+        filteredTimesheets.forEach((t: any) => {
+            const date = new Date(t.workDate);
+            let key = "";
+            if (viewMode === "week") {
+                const weekStart = new Date(date);
+                weekStart.setDate(date.getDate() - (date.getDay() === 0 ? 6 : date.getDay() - 1));
+                key = `${weekStart.getFullYear()}/W${Math.ceil(date.getDate() / 7)} (${weekStart.toLocaleDateString()})`;
+            } else {
+                key = `${date.getFullYear()}/${String(date.getMonth() + 1).padStart(2, '0')}月`;
+            }
+            if (!groups[key]) groups[key] = { totalHours: 0, items: [] };
+            groups[key].items.push(t);
+            groups[key].totalHours += t.hours;
+        });
+        return groups;
+    }, [filteredTimesheets, viewMode]);
+
     return (
         <div className="space-y-6 max-w-6xl mx-auto">
             <div className="flex justify-between items-center bg-card p-6 rounded-xl shadow-sm border border-border/50">
@@ -98,7 +124,7 @@ export function ProjectTimesheetsPage() {
                                     className="w-full border border-border bg-background rounded-md px-3 py-2 text-sm focus:ring-1 focus:ring-primary outline-none"
                                     value={selectedWbsId}
                                     onChange={(e) => {
-                                        const val = e.target.value === "" ? "" : Number(e.target.value);
+                                        const val = e.target.value;
                                         setSelectedWbsId(val);
                                         // Auto-filter history list to this project when starting to log
                                         if (val !== "") {
@@ -177,13 +203,37 @@ export function ProjectTimesheetsPage() {
                             <h3 className="text-xl font-bold">我的任務填報紀錄</h3>
                             
                             {/* Project Filter */}
-                            <div className="flex items-center gap-2 bg-muted/50 px-3 py-1.5 rounded-lg border border-border">
+                            <div className="flex flex-wrap items-center gap-2">
+                                <div className="flex bg-muted/50 p-1 rounded-lg border border-border text-xs">
+                                    <button 
+                                        type="button"
+                                        onClick={() => setViewMode("list")}
+                                        className={cn("px-3 py-1.5 rounded-md font-medium transition-colors", viewMode === "list" ? "bg-background text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground")}
+                                    >
+                                        清單
+                                    </button>
+                                    <button 
+                                        type="button"
+                                        onClick={() => setViewMode("week")}
+                                        className={cn("px-3 py-1.5 rounded-md font-medium transition-colors", viewMode === "week" ? "bg-background text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground")}
+                                    >
+                                        按週
+                                    </button>
+                                    <button 
+                                        type="button"
+                                        onClick={() => setViewMode("month")}
+                                        className={cn("px-3 py-1.5 rounded-md font-medium transition-colors", viewMode === "month" ? "bg-background text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground")}
+                                    >
+                                        按月
+                                    </button>
+                                </div>
+                                <div className="flex items-center gap-2 bg-muted/50 px-3 py-1.5 rounded-lg border border-border">
                                 <Filter className="w-3.5 h-3.5 text-muted-foreground" />
                                 <span className="text-xs font-medium text-muted-foreground whitespace-nowrap">篩選專案:</span>
                                 <select 
                                     className="bg-transparent text-xs font-semibold focus:outline-none cursor-pointer min-w-[120px]"
                                     value={filterProjectId}
-                                    onChange={(e) => setFilterProjectId(e.target.value === "all" ? "all" : Number(e.target.value))}
+                                    onChange={(e) => setFilterProjectId(e.target.value)}
                                 >
                                     <option value="all">全部專案</option>
                                     {assignedProjects.map(p => (
@@ -191,6 +241,7 @@ export function ProjectTimesheetsPage() {
                                     ))}
                                 </select>
                             </div>
+                        </div>
                         </div>
 
                         {loadingTimesheets ? (
@@ -220,34 +271,72 @@ export function ProjectTimesheetsPage() {
                                 )}
                             </div>
                         ) : (
-                            <div className="space-y-3">
-                                {filteredTimesheets.map((t: any) => (
-                                    <div key={t.id} className="p-4 border border-border rounded-lg bg-background hover:border-primary/30 transition-colors flex flex-col md:flex-row md:items-center justify-between gap-4">
-                                        <div className="flex-1">
-                                            <div className="flex items-center gap-2 mb-1">
-                                                <span className="font-semibold text-primary">{t.srTitle}</span>
-                                                <span className="text-xs bg-muted px-2 py-0.5 rounded text-muted-foreground">{t.wbsItemTitle}</span>
+                            <div>
+                                {viewMode === "list" ? (
+                                    <div className="space-y-3">
+                                        {filteredTimesheets.map((t: any) => (
+                                            <div key={t.id} className="p-4 border border-border rounded-lg bg-background hover:border-primary/30 transition-colors flex flex-col md:flex-row md:items-center justify-between gap-4">
+                                                <div className="flex-1">
+                                                    <div className="flex items-center gap-2 mb-1">
+                                                        <span className="font-semibold text-primary">{t.srTitle}</span>
+                                                        <span className="text-xs bg-muted px-2 py-0.5 rounded text-muted-foreground">{t.wbsItemTitle}</span>
+                                                    </div>
+                                                    <p className="text-sm">{t.description}</p>
+                                                    <div className="flex items-center gap-4 mt-2 text-xs text-muted-foreground">
+                                                        <span className="flex items-center gap-1"><CalendarDays className="w-3 h-3" /> {t.hours} 小時</span>
+                                                        <span className="flex items-center gap-1">{new Date(t.workDate).toISOString().split('T')[0].replace(/-/g, '/')}</span>
+                                                        <span>約 NT$ {t.costAmount?.toLocaleString()}</span>
+                                                    </div>
+                                                </div>
+                                                <div className="flex items-center gap-2">
+                                                    <button
+                                                        onClick={() => deleteTime.mutate({ id: t.id })}
+                                                        className="p-2 text-muted-foreground hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-950/30 rounded-md transition-colors"
+                                                        title="刪除"
+                                                        disabled={deleteTime.isPending}
+                                                    >
+                                                        <Trash2 className="w-4 h-4" />
+                                                    </button>
+                                                </div>
                                             </div>
-                                            <p className="text-sm">{t.description}</p>
-                                            <div className="flex items-center gap-4 mt-2 text-xs text-muted-foreground">
-                                                <span className="flex items-center gap-1"><CalendarDays className="w-3 h-3" /> {t.hours} 小時</span>
-                                                <span className="flex items-center gap-1">{new Date(t.workDate).toISOString().split('T')[0].replace(/-/g, '/')}</span>
-                                                <span>約 NT$ {t.costAmount?.toLocaleString()}</span>
-                                            </div>
-                                        </div>
-                                        <div className="flex items-center gap-2">
-                                            <button
-                                                onClick={() => deleteTime.mutate({ id: t.id })}
-                                                className="p-2 text-muted-foreground hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-950/30 rounded-md transition-colors"
-                                                title="刪除"
-                                                disabled={deleteTime.isPending}
-                                            >
-                                                <Trash2 className="w-4 h-4" />
-                                            </button>
-                                        </div>
+                                        ))}
                                     </div>
-                                ))}
-                            </div>
+                                ) : (
+                                    <div className="space-y-4">
+                                        {Object.entries(groupedTimesheets).sort((a, b) => b[0].localeCompare(a[0])).map(([key, group]: any) => (
+                                            <div key={key} className="bg-background border border-border rounded-xl p-4 overflow-hidden">
+                                                <div className="flex justify-between items-center mb-3 bg-muted/20 -m-4 p-4 border-b">
+                                                    <span className="font-bold text-sm flex items-center gap-1.5"><CalendarDays className="w-4 h-4 text-primary" /> {key}</span>
+                                                    <span className="text-xs font-semibold px-2 py-0.5 bg-primary/10 text-primary rounded-full">加總: {group.totalHours} hr</span>
+                                                </div>
+                                                <div className="space-y-2 mt-2">
+                                                    {group.items.map((t: any) => (
+                                                        <div key={t.id} className="p-3 border border-border/50 rounded-lg bg-card hover:border-primary/20 flex flex-col md:flex-row md:items-center justify-between gap-3 text-sm">
+                                                            <div className="flex-1">
+                                                                <div className="flex items-center gap-2 mb-0.5">
+                                                                    <span className="font-semibold">{t.srTitle}</span>
+                                                                    <span className="text-xs bg-muted px-1.5 py-0.5 rounded text-muted-foreground">{t.wbsItemTitle}</span>
+                                                                </div>
+                                                                <p className="text-muted-foreground text-xs">{t.description}</p>
+                                                            </div>
+                                                            <div className="flex items-center justify-between md:justify-end gap-4 min-w-[120px]">
+                                                                <div className="text-xs text-muted-foreground font-medium">{t.hours} hr / {new Date(t.workDate).toLocaleDateString()}</div>
+                                                                <button
+                                                                    onClick={() => deleteTime.mutate({ id: t.id })}
+                                                                    className="p-1.5 text-muted-foreground hover:text-red-500 rounded-md transition-colors"
+                                                                    disabled={deleteTime.isPending}
+                                                                >
+                                                                    <Trash2 className="w-3.5 h-3.5" />
+                                                                </button>
+                                                            </div>
+                                                        </div>
+                                                    ))}
+                                                </div>
+                                            </div>
+                                        ))}
+                                    </div>
+                                )}
+                                </div>
                         )}
                     </div>
                 </div>

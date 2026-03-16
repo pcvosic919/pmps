@@ -1,6 +1,6 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { trpc } from "../lib/trpc";
-import { Users as UsersIcon, Edit, UserX, UserPlus, Search } from "lucide-react";
+import { Users as UsersIcon, Edit, UserX, UserPlus, Search, Loader2 } from "lucide-react";
 import { z } from "zod";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
@@ -9,6 +9,7 @@ import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { useDebounce } from "../lib/useDebounce";
 
 const userSchema = z.object({
     name: z.string().min(1, "姓名不可為空"),
@@ -27,6 +28,12 @@ const editUserSchema = z.object({
 });
 
 export function UserManagementPage() {
+    const [searchTerm, setSearchTerm] = useState("");
+    const [sortBy, setSortBy] = useState("name");
+    const [sortOrder, setSortOrder] = useState<"asc" | "desc">("asc");
+
+    const debouncedSearchTerm = useDebounce(searchTerm, 500);
+
     const {
         data,
         isLoading,
@@ -35,9 +42,21 @@ export function UserManagementPage() {
         hasNextPage,
         isFetchingNextPage
     } = trpc.users.list.useInfiniteQuery(
-        { limit: 20 },
+        { limit: 20, search: debouncedSearchTerm, sortBy, sortOrder },
         { getNextPageParam: (lastPage) => lastPage.nextCursor }
     );
+
+    const observerRef = useRef<HTMLDivElement>(null);
+
+    useEffect(() => {
+        const observer = new IntersectionObserver((entries) => {
+            if (entries[0].isIntersecting && hasNextPage && !isFetchingNextPage) {
+                fetchNextPage();
+            }
+        });
+        if (observerRef.current) observer.observe(observerRef.current);
+        return () => observer.disconnect();
+    }, [hasNextPage, isFetchingNextPage, fetchNextPage]);
 
     // Flatten the infinite pages into a single array
     const users = (data?.pages.flatMap(page => page.items) || []) as any[];
@@ -45,7 +64,6 @@ export function UserManagementPage() {
     const deleteUser = trpc.users.deleteManual.useMutation({ onSuccess: () => refetch() });
     const createUser = trpc.users.createManual.useMutation({ onSuccess: () => { setIsCreatingUser(false); refetch(); createForm.reset(); } });
 
-    const [searchTerm, setSearchTerm] = useState("");
     const [editingUser, setEditingUser] = useState<any | null>(null);
     const [isCreatingUser, setIsCreatingUser] = useState(false);
 
@@ -72,11 +90,7 @@ export function UserManagementPage() {
         }
     }, [editingUser, editForm]);
 
-    const filteredUsers = users?.filter(u =>
-        u.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        u.email.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        (u.department && u.department.toLowerCase().includes(searchTerm.toLowerCase()))
-    );
+    const filteredUsers = users; // 已經由後端過濾
 
     const handleEditClick = (user: any) => {
         setEditingUser(user);
@@ -104,7 +118,7 @@ export function UserManagementPage() {
         });
     };
 
-    const handleDelete = (id: number, name: string) => {
+    const handleDelete = (id: string, name: string) => {
         if (confirm(`確定要刪除使用者 ${name} 嗎？此動作無法復原。`)) {
             deleteUser.mutate({ id });
         }
@@ -138,7 +152,7 @@ export function UserManagementPage() {
                 </button>
             </div>
 
-            <div className="bg-card border rounded-xl shadow-sm p-4 flex justify-between items-center">
+            <div className="bg-card border rounded-xl shadow-sm p-4 flex justify-between items-center flex-wrap gap-4">
                 <div className="relative w-72">
                     <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
                     <input
@@ -146,8 +160,27 @@ export function UserManagementPage() {
                         placeholder="搜尋人員姓名、信箱或部門..."
                         value={searchTerm}
                         onChange={(e) => setSearchTerm(e.target.value)}
-                        className="w-full pl-9 pr-4 py-2 text-sm rounded-md border border-input bg-background"
+                        className="w-full pl-9 pr-4 py-2 text-sm rounded-md border border-input bg-background focus:outline-none focus:ring-1 focus:ring-primary"
                     />
+                </div>
+
+                <div className="flex items-center gap-2">
+                    <span className="text-sm font-medium text-muted-foreground whitespace-nowrap">排序:</span>
+                    <select 
+                        value={`${sortBy}-${sortOrder}`}
+                        onChange={(e) => {
+                            const [field, order] = e.target.value.split("-");
+                            setSortBy(field);
+                            setSortOrder(order as "asc" | "desc");
+                            refetch(); // Trigger refresh with new sort
+                        }}
+                        className="text-sm border border-border rounded-md px-3 py-1.5 bg-background font-semibold hover:border-primary/50 transition-colors focus:outline-none cursor-pointer"
+                    >
+                        <option value="name-asc">姓名 (A - Z)</option>
+                        <option value="name-desc">姓名 (Z - A)</option>
+                        <option value="department-asc">依部門排序</option>
+                        <option value="role-asc">依主角色排序</option>
+                    </select>
                 </div>
             </div>
 
@@ -211,17 +244,13 @@ export function UserManagementPage() {
                 </div>
             </div>
 
-            {hasNextPage && (
-                <div className="flex justify-center mt-6">
-                    <Button
-                        variant="outline"
-                        onClick={() => fetchNextPage()}
-                        disabled={isFetchingNextPage}
-                    >
-                        {isFetchingNextPage ? "載入中..." : "載入更多"}
-                    </Button>
-                </div>
-            )}
+            <div ref={observerRef} className="flex justify-center mt-6">
+                {isFetchingNextPage && (
+                    <div className="text-muted-foreground text-sm flex items-center gap-1">
+                        <Loader2 className="w-4 h-4 animate-spin text-primary" /> 載入中...
+                    </div>
+                )}
+            </div>
 
             {/* Edit Modal */}
             <Dialog open={!!editingUser} onOpenChange={(open) => !open && setEditingUser(null)}>

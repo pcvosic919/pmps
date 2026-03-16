@@ -10,6 +10,8 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "@azure/msal-browser": "^5.5.0",
+    "@azure/msal-react": "^5.0.7",
     "@dispatch/server": "workspace:*",
     "@dispatch/shared": "workspace:*",
     "@hookform/resolvers": "^2.9.11",

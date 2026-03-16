@@ -1,9 +1,51 @@
+import { useState } from "react";
 import { trpc } from "../lib/trpc";
 import { Link } from "wouter";
-import { FileText, AlertTriangle, ChevronRight, BarChart3 } from "lucide-react";
+import { FileText, AlertTriangle, ChevronRight, BarChart3, Plus } from "lucide-react";
+import { z } from "zod";
+import { useForm } from "react-hook-form";
+import { zodResolver } from "@hookform/resolvers/zod";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "@/components/ui/form";
+import { Input } from "@/components/ui/input";
+import { Button } from "@/components/ui/button";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+
+const srSchema = z.object({
+    title: z.string().min(1, "SR 名稱不可為空"),
+    contractAmount: z.number().min(0, "合約金額不能為負"),
+    pmId: z.string().min(1, "請指派 PM"),
+    opportunityId: z.string().optional()
+});
 
 export function ServiceRequestsPage() {
-    const { data: srs, isLoading } = trpc.projects.srList.useQuery();
+    const { data: srs, isLoading, refetch } = trpc.projects.srList.useQuery();
+    const { data: opps } = trpc.opportunities.list.useInfiniteQuery({ limit: 100 });
+    const { data: users } = trpc.users.list.useQuery({ limit: 100 });
+
+    const [isCreating, setIsCreating] = useState(false);
+
+    const createSR = trpc.projects.createSR.useMutation({
+        onSuccess: () => {
+            setIsCreating(false);
+            refetch();
+            form.reset();
+        }
+    });
+
+    const form = useForm<any>({
+        resolver: zodResolver(srSchema) as any,
+        defaultValues: { title: "", contractAmount: 0, pmId: "", opportunityId: "" }
+    });
+
+    const handleCreate = (values: z.infer<typeof srSchema>) => {
+        createSR.mutate({
+            ...values,
+            opportunityId: values.opportunityId === "none" || !values.opportunityId ? undefined : values.opportunityId
+        });
+    };
+
+    const oppItems = opps?.pages.flatMap(p => p.items) || [];
 
     if (isLoading) {
         return <div className="p-8 text-center">載入中...</div>;
@@ -36,6 +78,12 @@ export function ServiceRequestsPage() {
                     <h2 className="text-3xl font-bold tracking-tight bg-clip-text text-transparent bg-gradient-to-r from-primary to-primary/60">服務請求 (SR)</h2>
                     <p className="text-muted-foreground mt-1">管理各專案的服務執行狀況與毛利預期</p>
                 </div>
+                <button
+                    onClick={() => setIsCreating(true)}
+                    className="bg-primary text-primary-foreground hover:bg-primary/90 px-5 py-2.5 rounded-lg inline-flex items-center text-sm font-medium transition-all shadow-md hover:shadow-lg">
+                    <Plus className="w-4 h-4 mr-2" />
+                    建立 SR
+                </button>
             </div>
 
             <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
@@ -99,6 +147,111 @@ export function ServiceRequestsPage() {
                     </div>
                 )}
             </div>
+            <Dialog open={isCreating} onOpenChange={setIsCreating}>
+                <DialogContent className="sm:max-w-lg">
+                    <DialogHeader>
+                        <DialogTitle className="flex items-center space-x-2">
+                            <FileText className="w-5 h-5 text-primary" />
+                            <span>新增服務請求 (SR)</span>
+                        </DialogTitle>
+                    </DialogHeader>
+                    <Form {...form}>
+                        <form onSubmit={form.handleSubmit(handleCreate)} className="space-y-4">
+                            <FormField
+                                control={form.control}
+                                name="title"
+                                render={({ field }: any) => (
+                                    <FormItem>
+                                        <FormLabel>SR 名稱 *</FormLabel>
+                                        <FormControl>
+                                            <Input placeholder="例：2026年 系統導入案" {...field} />
+                                        </FormControl>
+                                        <FormMessage />
+                                    </FormItem>
+                                )}
+                            />
+
+                            <FormField
+                                control={form.control}
+                                name="contractAmount"
+                                render={({ field }: any) => (
+                                    <FormItem>
+                                        <FormLabel>合約金額 (NT$) *</FormLabel>
+                                        <FormControl>
+                                            <Input
+                                                type="number"
+                                                {...field}
+                                                onChange={(e) => field.onChange(Number(e.target.value))}
+                                            />
+                                        </FormControl>
+                                        <FormMessage />
+                                    </FormItem>
+                                )}
+                            />
+
+                            <FormField
+                                control={form.control}
+                                name="pmId"
+                                render={({ field }: any) => (
+                                    <FormItem>
+                                        <FormLabel>指派 PM *</FormLabel>
+                                        <Select onValueChange={field.onChange} defaultValue={field.value}>
+                                            <FormControl>
+                                                <SelectTrigger>
+                                                    <SelectValue placeholder="請選擇 PM" />
+                                                </SelectTrigger>
+                                            </FormControl>
+                                            <SelectContent>
+                                                {users?.items?.filter((u: any) => u.role === "pm" || u.roles?.includes("pm")).map((u: any) => (
+                                                    <SelectItem key={u.id} value={u.id}>
+                                                        {u.name}
+                                                    </SelectItem>
+                                                ))}
+                                            </SelectContent>
+                                        </Select>
+                                        <FormMessage />
+                                    </FormItem>
+                                )}
+                            />
+
+                            <FormField
+                                control={form.control}
+                                name="opportunityId"
+                                render={({ field }: any) => (
+                                    <FormItem>
+                                        <FormLabel>關聯商機 (選填)</FormLabel>
+                                        <Select onValueChange={field.onChange} defaultValue={field.value}>
+                                            <FormControl>
+                                                <SelectTrigger>
+                                                    <SelectValue placeholder="不綁定商機" />
+                                                </SelectTrigger>
+                                            </FormControl>
+                                            <SelectContent>
+                                                <SelectItem value="none">不綁定商機</SelectItem>
+                                                {oppItems.map((opp: any) => (
+                                                    <SelectItem key={opp.id} value={opp.id}>
+                                                        {opp.title} ({opp.customerName})
+                                                    </SelectItem>
+                                                ))}
+                                            </SelectContent>
+                                        </Select>
+                                        <FormMessage />
+                                    </FormItem>
+                                )}
+                            />
+
+                            <div className="mt-6 flex justify-end space-x-3">
+                                <Button type="button" variant="outline" onClick={() => setIsCreating(false)}>
+                                    取消
+                                </Button>
+                                <Button type="submit" disabled={createSR.isPending}>
+                                    {createSR.isPending ? "建立中..." : "建立 SR"}
+                                </Button>
+                            </div>
+                        </form>
+                    </Form>
+                </DialogContent>
+            </Dialog>
         </div>
     );
 }

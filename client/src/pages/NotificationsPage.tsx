@@ -1,9 +1,12 @@
+import { useState, useEffect } from "react";
 import { trpc } from "../lib/trpc";
 import { Bell, CheckCircle2, Info, AlertTriangle, Clock } from "lucide-react";
 
 export function NotificationsPage() {
     const { data, isLoading, refetch } = trpc.analytics.getNotifications.useQuery();
     const notifications = (data || []) as any[];
+    const [filterType, setFilterType] = useState<string | null>(null);
+
     const markRead = trpc.analytics.markNotificationRead.useMutation({
         onSuccess: () => refetch()
     });
@@ -11,9 +14,26 @@ export function NotificationsPage() {
         onSuccess: () => refetch()
     });
 
+    useEffect(() => {
+        const token = localStorage.getItem("pmp_auth_token");
+        if (!token) return;
+
+        // 建立 SSE 連線
+        const eventSource = new EventSource(`/api/notifications/stream?token=${token}`);
+        
+        eventSource.onmessage = () => {
+            refetch(); // 收到新通知刷新
+        };
+
+        return () => {
+            eventSource.close();
+        };
+    }, [refetch]);
+
     if (isLoading) return <div className="p-8 text-center text-muted-foreground">載入通知中...</div>;
 
     const unreadCount = notifications?.filter((n: any) => !n.isRead).length || 0;
+    const filteredNotifications = notifications?.filter((n: any) => !filterType || n.type === filterType);
 
     const getIcon = (type: string) => {
         switch (type) {
@@ -46,14 +66,33 @@ export function NotificationsPage() {
                 )}
             </div>
 
+            {/* 分類篩選 */}
+            <div className="flex space-x-2">
+                {[
+                    { label: "全部", value: null },
+                    { label: "警告", value: "warning" },
+                    { label: "資訊", value: "info" },
+                    { label: "待辦", value: "todo" },
+                    { label: "審核", value: "approval" }
+                ].map(btn => (
+                    <button
+                        key={btn.label}
+                        onClick={() => setFilterType(btn.value)}
+                        className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-colors border ${filterType === btn.value ? 'bg-primary text-white border-primary shadow-sm' : 'bg-card text-muted-foreground border-border hover:bg-muted'}`}
+                    >
+                        {btn.label}
+                    </button>
+                ))}
+            </div>
+
             <div className="bg-card border rounded-xl shadow-sm overflow-hidden">
-                {notifications?.length === 0 ? (
+                {filteredNotifications?.length === 0 ? (
                     <div className="p-8 text-center text-muted-foreground">
                         目前沒有任何通知
                     </div>
                 ) : (
                     <ul className="divide-y divide-border">
-                        {notifications?.map((n: any) => (
+                        {filteredNotifications?.map((n: any) => (
                             <li
                                 key={n.id}
                                 className={`p-4 flex items-start space-x-4 transition-colors ${!n.isRead ? 'bg-primary/5 hover:bg-primary/10' : 'hover:bg-muted/30'}`}

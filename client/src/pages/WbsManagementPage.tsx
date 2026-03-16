@@ -7,18 +7,21 @@ import toast from "react-hot-toast";
 
 export function WbsManagementPage() {
     const [_match, params] = useRoute("/service-requests/:id");
-    const srId = params?.id ? parseInt(params.id) : 0;
+    const srId = params?.id || "";
     const utils = trpc.useContext();
 
     const [isBuildingVersion, setIsBuildingVersion] = useState(false);
-    const [draftItems, setDraftItems] = useState<{ title: string, estimatedHours: number, assigneeId: number | undefined }[]>([]);
+    const [draftItems, setDraftItems] = useState<{ title: string, estimatedHours: number, assigneeId: string | undefined }[]>([]);
 
     // Review state
-    const [reviewingId, setReviewingId] = useState<number | null>(null);
+    const [reviewingId, setReviewingId] = useState<string | null>(null);
     const [rejectionReason, setRejectionReason] = useState("");
     const [showRejectModal, setShowRejectModal] = useState(false);
-    const [rejectTargetId, setRejectTargetId] = useState<number | null>(null);
+    const [rejectTargetId, setRejectTargetId] = useState<string | null>(null);
 
+    // Version comparison state
+    const [compareTargets, setCompareTargets] = useState<Record<string, string>>({});
+    
     // Upload state
     const [isDragging, setIsDragging] = useState(false);
     const [isUploading, setIsUploading] = useState(false);
@@ -222,6 +225,18 @@ export function WbsManagementPage() {
                                                         <span className={`text-xs font-semibold px-2 py-0.5 rounded-full border ${getStatusColor(version.status)}`}>
                                                             {getStatusText(version.status)}
                                                         </span>
+                                                        {sr.wbsVersions.length > 1 && (
+                                                            <select 
+                                                                value={compareTargets[version.id] || ""}
+                                                                onChange={(e) => setCompareTargets({...compareTargets, [version.id]: e.target.value})}
+                                                                className="text-xs border border-border rounded px-1.5 py-0.5 bg-background font-medium hover:border-primary/50 transition-colors focus:outline-none"
+                                                            >
+                                                                <option value="">對比基準...</option>
+                                                                {sr.wbsVersions.filter((v: any) => v.id !== version.id).map((v: any) => (
+                                                                    <option key={v.id} value={v.id}>v{v.version} ({getStatusText(v.status)})</option>
+                                                                ))}
+                                                            </select>
+                                                        )}
                                                     </div>
                                                     <div className="flex items-center text-sm text-muted-foreground space-x-4">
                                                         <span className="flex items-center"><Clock className="w-3.5 h-3.5 mr-1" />{new Date(version.createdAt).toLocaleDateString()}</span>
@@ -262,15 +277,27 @@ export function WbsManagementPage() {
 
                                             {version.items && version.items.length > 0 && (
                                                 <div className="bg-muted/30 rounded-lg p-3 space-y-2 mt-2">
-                                                    {version.items.map((item: any) => (
-                                                        <div key={item.id} className="text-sm flex justify-between items-center bg-background border border-border p-2 rounded">
-                                                            <div className="font-medium">{item.title}</div>
-                                                            <div className="flex items-center gap-4 text-xs text-muted-foreground">
-                                                                <span>工時: {item.estimatedHours}h</span>
-                                                                <span className="min-w-[60px] text-right">{techs?.find(t => t.id === item.assigneeId)?.name || '未指派'}</span>
+                                                    {version.items.map((item: any) => {
+                                                        const compareWithId = compareTargets[version.id];
+                                                        const compareWithVer = compareWithId ? sr.wbsVersions.find((v: any) => v.id === compareWithId) : null;
+                                                        const compareItem = compareWithVer?.items.find((i: any) => i.title === item.title);
+                                                        const hourDiff = compareItem ? item.estimatedHours - compareItem.estimatedHours : null;
+
+                                                        return (
+                                                            <div key={item.id} className="text-sm flex justify-between items-center bg-background border border-border p-2 rounded hover:shadow-sm transition-shadow">
+                                                                <div className="font-medium">{item.title}</div>
+                                                                <div className="flex items-center gap-4 text-xs text-muted-foreground">
+                                                                    {hourDiff !== null && hourDiff !== 0 && (
+                                                                        <span className={`font-bold px-1.5 py-0.5 rounded flex items-center text-[10px] ${hourDiff > 0 ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'}`}>
+                                                                            {hourDiff > 0 ? '+' : ''}{hourDiff}h
+                                                                        </span>
+                                                                    )}
+                                                                    <span>工時: {item.estimatedHours}h</span>
+                                                                    <span className="min-w-[60px] text-right">{techs?.find(t => t.id === item.assigneeId)?.name || '未指派'}</span>
+                                                                </div>
                                                             </div>
-                                                        </div>
-                                                    ))}
+                                                        );
+                                                    })}
                                                 </div>
                                             )}
                                         </div>
@@ -321,7 +348,7 @@ export function WbsManagementPage() {
                                                         <div className="flex items-center text-xs text-muted-foreground flex-1">
                                                             <span className="mr-2">指派給:</span>
                                                             <select value={item.assigneeId || ""}
-                                                                onChange={(e) => handleUpdateDraftItem(idx, 'assigneeId', e.target.value ? Number(e.target.value) : undefined)}
+                                                                onChange={(e) => handleUpdateDraftItem(idx, 'assigneeId', e.target.value ? e.target.value : undefined)}
                                                                 className="flex-1 px-2 py-1 bg-muted rounded border border-transparent focus:bg-background focus:border-primary outline-none min-w-0">
                                                                 <option value="">-- 未指派 --</option>
                                                                 {techs?.map(tech => <option key={tech.id} value={tech.id}>{tech.name}</option>)}
