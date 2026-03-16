@@ -42,7 +42,8 @@ PMPsystem/
 |---|---|---|
 | Express | 4.x | HTTP 伺服器 |
 | tRPC | 11.x | 型別安全 API Server |
-| Drizzle ORM | 0.36.4 | SQLite ORM |
+| Drizzle ORM | 0.36.4 | SQLite ORM (繼承/關聯資料) |
+| Mongoose | 8.x | Cosmos DB / MongoDB (模型驅動/即時通知) |
 | @libsql/client | 0.17 | SQLite 驅動 |
 | dotenv | 16.x | 環境變數 |
 

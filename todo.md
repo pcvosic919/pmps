@@ -103,7 +103,7 @@
 
 ### DevOps
 - [ ] Docker Compose 設定
-- [ ] GitHub Actions CI/CD pipeline
+- [x] GitHub Actions CI/CD pipeline
 - [ ] 生產環境資料庫遷移策略 (目前 `db:push` 直接 push)
 - [ ] 資料庫備份機制
 
