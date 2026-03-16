@@ -1,0 +1,39 @@
+name: Build and Deploy to Azure
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout GitHub Action
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to Azure Container Registry (Optional - if using ACR)
+        # uses: azure/docker-login@v2
+        # with:
+        #   login-server: ${{ secrets.REGISTRY_LOGIN_SERVER }}
+        #   username: ${{ secrets.REGISTRY_USERNAME }}
+        #   password: ${{ secrets.REGISTRY_PASSWORD }}
+        run: echo "Skipping ACR login demo"
+
+      - name: Build and push container image
+        # This is a template. Real usage would push to ACR or Docker Hub
+        run: |
+          docker build . -t pcvosic919/pmps:${{ github.sha }}
+          echo "Image built successfully for ${{ github.sha }}"
+
+      # For Azure App Service Deployment via Zip/Container
+      # - name: Deploy to Azure Web App
+      #   uses: azure/webapps-deploy@v3
+      #   with:
+      #     app-name: 'your-azure-app-name'
+      #     publish-profile: ${{ secrets.AZURE_WEBAPP_PUBLISH_PROFILE }}
+      #     images: 'pcvosic919/pmps:${{ github.sha }}'
