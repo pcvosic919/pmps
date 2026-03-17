@@ -33,4 +33,4 @@ EXPOSE 5000
 ENV PORT=5000
 
 # Start the server (which serves API and can be updated to serve client too)
-CMD ["node", "server/dist/index.js"]
+CMD ["node", "server/dist/server/index.js"]
