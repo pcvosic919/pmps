@@ -9,9 +9,6 @@ on:
 jobs:
   build-and-deploy:
     runs-on: ubuntu-latest
-    permissions:
-      id-token: write #Required for requesting the JWT
-      contents: read #Required for actions/checkout
 
     steps:
       - name: Checkout GitHub Action
@@ -33,15 +30,9 @@ jobs:
           docker push ${{ secrets.ACR_LOGIN_SERVER }}/pmps:${{ github.sha }}
           docker push ${{ secrets.ACR_LOGIN_SERVER }}/pmps:latest
 
-      - name: Login to Azure
-        uses: azure/login@v2
-        with:
-          client-id: ${{ secrets.AZUREAPPSERVICE_CLIENTID_FB5342653B404D8BA8A4B0BE4630F22D }}
-          tenant-id: ${{ secrets.AZUREAPPSERVICE_TENANTID_FC73E295C990437780842B0DE0E3F252 }}
-          subscription-id: ${{ secrets.AZUREAPPSERVICE_SUBSCRIPTIONID_6095039526BD4E46899CCEF87ED7BF3D }}
-
       - name: 'Deploy to Azure Web App for Containers'
         uses: azure/webapps-deploy@v3
         with:
-          app-name: 'howardlabpmps' # 需更換成您的 Web App 名稱
+          app-name: 'howardlabpmp' # 修正為不帶 s 的正確名稱
+          publish-profile: ${{ secrets.AZURE_WEBAPP_PUBLISH_PROFILE }}
           images: '${{ secrets.ACR_LOGIN_SERVER }}/pmps:${{ github.sha }}'
