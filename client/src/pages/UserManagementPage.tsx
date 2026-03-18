@@ -175,13 +175,12 @@ export function UserManagementPage() {
                             const [field, order] = e.target.value.split("-");
                             setSortBy(field);
                             setSortOrder(order as "asc" | "desc");
-                            refetch(); // Trigger refresh with new sort
                         }}
                         className="text-sm border border-border rounded-md px-3 py-1.5 bg-background font-semibold hover:border-primary/50 transition-colors focus:outline-none cursor-pointer"
                     >
                         <option value="name-asc">姓名 (A - Z)</option>
                         <option value="name-desc">姓名 (Z - A)</option>
-                        <option value="department-asc">依部門排序</option>
+                        <option value="email-asc">依 Email 排序</option>
                         <option value="role-asc">依主角色排序</option>
                     </select>
                 </div>

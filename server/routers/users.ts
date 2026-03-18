@@ -3,74 +3,104 @@ import { router, protectedProcedure, roleProcedure } from "../_core/trpc";
 import { UserModel } from "../models/User";
 import { TRPCError } from "@trpc/server";
 import { roles } from "../../shared/types";
+import { decodeCursor, encodeCursor, toObjectId } from "../_core/cursor";
+
+const userSortFields = ["name", "email", "role", "createdAt"] as const;
+
+const userListInput = z.object({
+    limit: z.number().min(1).max(100).nullish(),
+    cursor: z.string().nullish(),
+    search: z.string().trim().optional(),
+    sortBy: z.enum(userSortFields).optional(),
+    sortOrder: z.enum(["asc", "desc"]).optional()
+}).optional();
+
+const buildSearchQuery = (search?: string) => {
+    if (!search) {
+        return {};
+    }
+
+    return {
+        $or: [
+            { name: { $regex: search, $options: "i" } },
+            { email: { $regex: search, $options: "i" } },
+            { department: { $regex: search, $options: "i" } }
+        ]
+    };
+};
 
 export const usersRouter = router({
     list: roleProcedure(["admin", "manager"])
-        .input(z.object({
-            limit: z.number().min(1).max(100).nullish(),
-            cursor: z.number().nullish(), // Use offset as cursor
-            search: z.string().optional(),
-            sortBy: z.string().optional(),
-            sortOrder: z.enum(["asc", "desc"]).optional()
-        }).optional())
+        .input(userListInput)
         .query(async ({ input }) => {
             const limit = input?.limit ?? 50;
-            const offset = input?.cursor ?? 0;
             const search = input?.search;
-            const sortBy = input?.sortBy || "name"; // Default sort by name
+            const sortBy = input?.sortBy || "name";
             const sortOrder = input?.sortOrder || "asc";
+            const direction = sortOrder === "desc" ? -1 : 1;
+            const cursor = input?.cursor ? decodeCursor(input.cursor) : null;
 
-            const query: any = {};
-            if (search) {
-                query.$or = [
-                    { name: { $regex: search, $options: "i" } },
-                    { email: { $regex: search, $options: "i" } },
-                    { department: { $regex: search, $options: "i" } }
-                ];
-            }
+            const query: Record<string, unknown> = buildSearchQuery(search);
 
-            // Build sort definition
-            const sortObj: any = {};
-            sortObj[sortBy] = sortOrder === "desc" ? -1 : 1;
-            if (sortBy !== "_id") {
-                sortObj._id = 1; // tiebreaker
+            if (cursor) {
+                const cursorValue = cursor.value;
+                const comparisonOperator = direction === 1 ? "$gt" : "$lt";
+
+                const cursorFilter = {
+                    $or: [
+                        { [sortBy]: { [comparisonOperator]: cursorValue } },
+                        { [sortBy]: cursorValue, _id: { [comparisonOperator]: toObjectId(cursor.id) } }
+                    ]
+                };
+
+                if ("$and" in query && Array.isArray(query.$and)) {
+                    query.$and = [...query.$and, cursorFilter];
+                } else if (Object.keys(query).length > 0) {
+                    query.$and = [query, cursorFilter];
+                    for (const key of Object.keys(query).filter((key) => key !== "$and")) {
+                        delete query[key];
+                    }
+                } else {
+                    Object.assign(query, cursorFilter);
+                }
             }
 
             const items = await UserModel.find(query)
-                .sort(sortObj)
-                .skip(offset)
+                .select("name email department title role roles isActive provider createdAt")
+                .sort({ [sortBy]: direction, _id: direction })
                 .limit(limit + 1)
                 .lean();
 
-            let nextCursor: number | undefined = undefined;
-            if (items.length > limit) {
-                items.pop();
-                nextCursor = offset + limit;
-            }
-
-            // Map _id to id to keep frontend compatible
-            const mappedItems = items.map(u => ({
-                id: u._id.toString(),
-                name: u.name,
-                email: u.email,
-                department: u.department,
-                title: u.title,
-                role: u.role,
-                roles: u.roles,
-                isActive: u.isActive,
-                provider: u.provider
-            }));
+            const hasMore = items.length > limit;
+            const pageItems = hasMore ? items.slice(0, limit) : items;
+            const lastItem = pageItems[pageItems.length - 1];
 
             return {
-                items: mappedItems,
-                nextCursor
+                items: pageItems.map((u) => ({
+                    id: u._id.toString(),
+                    name: u.name,
+                    email: u.email,
+                    department: u.department,
+                    title: u.title,
+                    role: u.role,
+                    roles: u.roles,
+                    isActive: u.isActive,
+                    provider: u.provider
+                })),
+                nextCursor: hasMore && lastItem
+                    ? encodeCursor(lastItem._id, ((lastItem as Record<string, string | number | Date | null>)[sortBy] ?? null) instanceof Date
+                        ? ((lastItem as Record<string, Date>)[sortBy]).toISOString()
+                        : ((lastItem as Record<string, string | number | null>)[sortBy] ?? null))
+                    : undefined
             };
         }),
 
     techList: protectedProcedure.query(async () => {
         const users = await UserModel.find({
             $or: [{ role: "tech" }, { roles: "tech" }]
-        }).lean();
+        })
+            .select("name email department title role roles isActive provider")
+            .lean();
         return users.map(u => ({ ...u, id: u._id.toString() }));
     }),
 
@@ -81,7 +111,9 @@ export const usersRouter = router({
                 { role: { $in: allowedRoles } },
                 { roles: { $in: allowedRoles } }
             ]
-        }).lean();
+        })
+            .select("name email department title role roles isActive provider")
+            .lean();
         return users.map(u => ({ ...u, id: u._id.toString() }));
     }),
 
@@ -104,7 +136,7 @@ export const usersRouter = router({
         }),
 
     deleteManual: roleProcedure(["admin"])
-        .input(z.object({ id: z.string() })) // Updated to string for MongoDB _id
+        .input(z.object({ id: z.string() }))
         .mutation(async ({ input }) => {
             const user = await UserModel.findById(input.id);
             if (!user) throw new TRPCError({ code: "NOT_FOUND" });
@@ -118,7 +150,7 @@ export const usersRouter = router({
 
     getCostRates: roleProcedure(["admin", "manager", "pm"]).query(async () => {
         const users = await UserModel.find({}, { _id: 1, name: 1, email: 1, department: 1, role: 1, costRate: 1, costRateHistory: 1 }).lean();
-        
+
         return users.map(u => ({
             id: u._id.toString(),
             name: u.name,
@@ -132,7 +164,7 @@ export const usersRouter = router({
 
     updateCostRate: roleProcedure(["admin", "manager"])
         .input(z.object({
-            userId: z.string(), // string for MongoDB _id
+            userId: z.string(),
             dailyRate: z.number(),
             hourlyRate: z.number(),
             currency: z.string().default("TWD")
@@ -163,7 +195,7 @@ export const usersRouter = router({
 
     updateUser: roleProcedure(["admin"])
         .input(z.object({
-            id: z.string(), // string for MongoDB _id
+            id: z.string(),
             department: z.string().optional(),
             title: z.string().optional(),
             role: z.enum(roles).optional(),

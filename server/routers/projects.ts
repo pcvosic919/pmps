@@ -21,8 +21,26 @@ import {
 } from "../_core/authorization";
 
 export const projectsRouter = router({
-    srList: protectedProcedure.query(async ({ ctx }) => {
-        const items = await ServiceRequestModel.find().lean();
+    srList: protectedProcedure.input(z.object({
+        search: z.string().trim().optional(),
+        status: z.enum(srStatuses).optional(),
+        limit: z.number().min(1).max(200).optional()
+    }).optional()).query(async ({ ctx, input }) => {
+        const query: Record<string, unknown> = {};
+        if (input?.search) {
+            query.title = { $regex: input.search, $options: "i" };
+        }
+        if (input?.status) {
+            query.status = input.status;
+        }
+
+        const items = await ServiceRequestModel.find(
+            query,
+            { _id: 1, title: 1, contractAmount: 1, pmId: 1, status: 1, marginEstimate: 1, marginWarning: 1, createdAt: 1, opportunityId: 1, members: 1, wbsVersions: 1, changeRequests: 1 }
+        )
+            .sort({ createdAt: -1, _id: -1 })
+            .limit(input?.limit ?? 200)
+            .lean();
         const opportunityIds = [...new Set(items
             .map(item => item.opportunityId?.toString())
             .filter((id): id is string => !!id))];

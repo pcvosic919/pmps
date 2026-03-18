@@ -8,41 +8,46 @@ import { SettlementLockModel } from "../models/SettlementLock";
 import { z } from "zod";
 import { settlementTypes } from "../../shared/types";
 
+const toIdMap = (items: Array<{ _id: unknown; totalHours?: number; totalCost?: number; totalRevenue?: number }>, key: "totalHours" | "totalCost" | "totalRevenue") =>
+    new Map(items.map((item) => [item._id?.toString(), item[key] ?? 0]));
+
 export const analyticsRouter = router({
     getUtilization: roleProcedure(["admin", "manager", "pm"]).query(async () => {
-        const users = await UserModel.find().lean();
+        const users = await UserModel.find({}, { _id: 1, name: 1, department: 1, role: 1 }).lean();
 
-        const currentMonth = new Date().getMonth();
-        const currentYear = new Date().getFullYear();
-        const startOfMonth = new Date(currentYear, currentMonth, 1);
-        const endOfMonth = new Date(currentYear, currentMonth + 1, 0);
+        const now = new Date();
+        const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+        const endOfMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59, 999);
 
-        // Aggregate hours by techId
-        const projectAgg = await TimesheetModel.aggregate([
-            { $match: { type: 'project', workDate: { $gte: startOfMonth, $lte: endOfMonth } } },
-            { $group: { _id: "$techId", totalHours: { $sum: "$hours" } } }
+        const [projectAgg, presalesAgg] = await Promise.all([
+            TimesheetModel.aggregate([
+                { $match: { type: "project", workDate: { $gte: startOfMonth, $lte: endOfMonth } } },
+                { $group: { _id: "$techId", totalHours: { $sum: "$hours" } } }
+            ]),
+            TimesheetModel.aggregate([
+                { $match: { type: "presales", workDate: { $gte: startOfMonth, $lte: endOfMonth } } },
+                { $group: { _id: "$techId", totalHours: { $sum: "$hours" } } }
+            ])
         ]);
 
-        const presalesAgg = await TimesheetModel.aggregate([
-            { $match: { type: 'presales', workDate: { $gte: startOfMonth, $lte: endOfMonth } } },
-            { $group: { _id: "$techId", totalHours: { $sum: "$hours" } } }
-        ]);
+        const projectHoursMap = toIdMap(projectAgg, "totalHours");
+        const presalesHoursMap = toIdMap(presalesAgg, "totalHours");
 
         return users.map((u: any) => {
-            const pHours = projectAgg.find(a => a._id.toString() === u._id.toString())?.totalHours || 0;
-            const psHours = presalesAgg.find(a => a._id.toString() === u._id.toString())?.totalHours || 0;
-            const totalHours = pHours + psHours;
-            const utilizationRate = Math.round((totalHours / 160) * 100);
+            const userId = u._id.toString();
+            const projectHours = projectHoursMap.get(userId) ?? 0;
+            const presalesHours = presalesHoursMap.get(userId) ?? 0;
+            const totalHours = projectHours + presalesHours;
 
             return {
-                id: u._id.toString(),
+                id: userId,
                 name: u.name,
                 department: u.department,
                 role: u.role,
-                projectHours: pHours,
-                presalesHours: psHours,
+                projectHours,
+                presalesHours,
                 totalHours,
-                utilizationRate
+                utilizationRate: Math.round((totalHours / 160) * 100)
             };
         });
     }),
@@ -51,61 +56,51 @@ export const analyticsRouter = router({
         .input(z.object({ month: z.string().optional() }))
         .query(async ({ input }) => {
             const currentMonth = input.month || new Date().toISOString().slice(0, 7);
-            const startDate = new Date(`${currentMonth}-01`);
-            const endDate = new Date(startDate.getFullYear(), startDate.getMonth() + 1, 0, 23, 59, 59);
+            const startDate = new Date(`${currentMonth}-01T00:00:00.000Z`);
+            const endDate = new Date(startDate.getUTCFullYear(), startDate.getUTCMonth() + 1, 0, 23, 59, 59, 999);
 
-            const srs = await ServiceRequestModel.find().lean();
-            const opps = await OpportunityModel.find().lean();
-
-            // 1. Projects (SR) Cost
-            const projectCostAgg = await TimesheetModel.aggregate([
-                { $match: { type: 'project', workDate: { $gte: startDate, $lte: endDate } } },
-                { $group: { _id: "$srId", totalCost: { $sum: "$costAmount" } } }
+            const [srs, opps, projectCostAgg, presalesCostAgg, locks] = await Promise.all([
+                ServiceRequestModel.find({}, { _id: 1, title: 1, pmId: 1, contractAmount: 1, status: 1 }).lean(),
+                OpportunityModel.find({}, { _id: 1, title: 1, customerName: 1, status: 1 }).lean(),
+                TimesheetModel.aggregate([
+                    { $match: { type: "project", workDate: { $gte: startDate, $lte: endDate } } },
+                    { $group: { _id: "$srId", totalCost: { $sum: "$costAmount" } } }
+                ]),
+                TimesheetModel.aggregate([
+                    { $match: { type: "presales", workDate: { $gte: startDate, $lte: endDate } } },
+                    { $group: { _id: "$opportunityId", totalCost: { $sum: "$costAmount" } } }
+                ]),
+                SettlementLockModel.find({ month: currentMonth }).lean()
             ]);
 
-            // 2. Presales (Opportunity) Cost
-            const presalesCostAgg = await TimesheetModel.aggregate([
-                { $match: { type: 'presales', workDate: { $gte: startDate, $lte: endDate } } },
-                { $group: { _id: "$opportunityId", totalCost: { $sum: "$costAmount" } } }
-            ]);
-
-            // Check if month is locked
-            const locks = await SettlementLockModel.find({ month: currentMonth }).lean();
-            const isProjectLocked = locks.some((l: any) => l.type === "project" && l.isLocked);
-            const isPresalesLocked = locks.some((l: any) => l.type === "presales" && l.isLocked);
-
-            const projectSettlements = srs.map((sr: any) => {
-                const actualCost = projectCostAgg.find(a => a._id?.toString() === sr._id.toString())?.totalCost || 0;
-                const margin = sr.contractAmount - actualCost;
-                return {
-                    id: sr._id.toString(),
-                    title: sr.title,
-                    pmId: sr.pmId?.toString(),
-                    contractAmount: sr.contractAmount,
-                    totalCost: actualCost,
-                    margin,
-                    marginPercent: sr.contractAmount > 0 ? Math.round((margin / sr.contractAmount) * 100) : 0,
-                    status: sr.status
-                };
-            });
-
-            const presalesSettlements = opps.map((opp: any) => {
-                const actualCost = presalesCostAgg.find(a => a._id?.toString() === opp._id.toString())?.totalCost || 0;
-                return {
-                    id: opp._id.toString(),
-                    title: opp.title,
-                    customerName: opp.customerName,
-                    totalCost: actualCost,
-                    status: opp.status
-                };
-            });
+            const projectCostMap = toIdMap(projectCostAgg, "totalCost");
+            const presalesCostMap = toIdMap(presalesCostAgg, "totalCost");
 
             return {
                 currentMonth,
-                isProjectLocked,
-                isPresalesLocked,
-                projects: projectSettlements,
-                presales: presalesSettlements
+                isProjectLocked: locks.some((l: any) => l.type === "project" && l.isLocked),
+                isPresalesLocked: locks.some((l: any) => l.type === "presales" && l.isLocked),
+                projects: srs.map((sr: any) => {
+                    const totalCost = projectCostMap.get(sr._id.toString()) ?? 0;
+                    const margin = sr.contractAmount - totalCost;
+                    return {
+                        id: sr._id.toString(),
+                        title: sr.title,
+                        pmId: sr.pmId?.toString(),
+                        contractAmount: sr.contractAmount,
+                        totalCost,
+                        margin,
+                        marginPercent: sr.contractAmount > 0 ? Math.round((margin / sr.contractAmount) * 100) : 0,
+                        status: sr.status
+                    };
+                }),
+                presales: opps.map((opp: any) => ({
+                    id: opp._id.toString(),
+                    title: opp.title,
+                    customerName: opp.customerName,
+                    totalCost: presalesCostMap.get(opp._id.toString()) ?? 0,
+                    status: opp.status
+                }))
             };
         }),
 
@@ -121,36 +116,64 @@ export const analyticsRouter = router({
         }),
 
     getKpiData: roleProcedure(["admin", "manager"]).query(async () => {
-        const srs = await ServiceRequestModel.find().lean();
-        const opps = await OpportunityModel.find().lean();
-
-        const activeProjects = srs.filter((p: any) => p.status === 'in_progress').length;
-        const totalRevenue = srs.reduce((acc: number, sr: any) => acc + (sr.contractAmount || 0), 0);
-
-        const costAgg = await TimesheetModel.aggregate([
-            { $match: { type: 'project' } },
-            { $group: { _id: null, totalCost: { $sum: "$costAmount" } } }
+        const [srTotals, recentSrs, oppStats, totalCostAgg] = await Promise.all([
+            ServiceRequestModel.aggregate([
+                {
+                    $group: {
+                        _id: null,
+                        activeProjects: {
+                            $sum: {
+                                $cond: [{ $eq: ["$status", "in_progress"] }, 1, 0]
+                            }
+                        },
+                        totalRevenue: { $sum: "$contractAmount" }
+                    }
+                }
+            ]),
+            ServiceRequestModel.find({}, { _id: 1, title: 1, status: 1, contractAmount: 1 })
+                .sort({ createdAt: -1, _id: -1 })
+                .limit(5)
+                .lean(),
+            OpportunityModel.aggregate([
+                {
+                    $group: {
+                        _id: null,
+                        wonOpps: { $sum: { $cond: [{ $eq: ["$status", "won"] }, 1, 0] } },
+                        pendingOpps: {
+                            $sum: {
+                                $cond: [
+                                    { $in: ["$status", ["qualified", "presales_active", "new"]] },
+                                    1,
+                                    0
+                                ]
+                            }
+                        },
+                        lostOpps: { $sum: { $cond: [{ $eq: ["$status", "lost"] }, 1, 0] } },
+                        totalOpps: { $sum: 1 }
+                    }
+                }
+            ]),
+            TimesheetModel.aggregate([
+                { $match: { type: "project" } },
+                { $group: { _id: null, totalCost: { $sum: "$costAmount" } } }
+            ])
         ]);
-        const totalCost = costAgg[0]?.totalCost || 0;
-        const totalMargin = totalRevenue - totalCost;
-        const marginPercent = totalRevenue > 0 ? Math.round((totalMargin / totalRevenue) * 100) : 0;
 
-        const wonOpps = opps.filter((o: any) => o.status === 'won').length;
-        const pendingOpps = opps.filter((o: any) => o.status === 'qualified' || o.status === 'presales_active' || o.status === 'new').length;
-        const lostOpps = opps.filter((o: any) => o.status === 'lost').length;
-        const totalOpps = opps.length;
-        const winRate = totalOpps > 0 ? Math.round((wonOpps / totalOpps) * 100) : 0;
+        const totals = srTotals[0] ?? { activeProjects: 0, totalRevenue: 0 };
+        const oppSummary = oppStats[0] ?? { wonOpps: 0, pendingOpps: 0, lostOpps: 0, totalOpps: 0 };
+        const totalCost = totalCostAgg[0]?.totalCost || 0;
+        const totalMargin = totals.totalRevenue - totalCost;
 
         return {
-            activeProjects,
-            totalRevenue,
+            activeProjects: totals.activeProjects,
+            totalRevenue: totals.totalRevenue,
             totalMargin,
-            marginPercent,
-            winRate,
-            wonOpps,
-            pendingOpps,
-            lostOpps,
-            recentSrs: srs.slice(-5).map((sr: any) => ({
+            marginPercent: totals.totalRevenue > 0 ? Math.round((totalMargin / totals.totalRevenue) * 100) : 0,
+            winRate: oppSummary.totalOpps > 0 ? Math.round((oppSummary.wonOpps / oppSummary.totalOpps) * 100) : 0,
+            wonOpps: oppSummary.wonOpps,
+            pendingOpps: oppSummary.pendingOpps,
+            lostOpps: oppSummary.lostOpps,
+            recentSrs: recentSrs.map((sr: any) => ({
                 id: sr._id.toString(),
                 title: sr.title,
                 status: sr.status,
@@ -160,67 +183,85 @@ export const analyticsRouter = router({
     }),
 
     getWinRateTrend: roleProcedure(["admin", "manager"]).query(async () => {
-        const opps = await OpportunityModel.find().lean();
-        
-        const trendMap: Record<string, { total: number, won: number }> = {};
+        const trend = await OpportunityModel.aggregate([
+            {
+                $group: {
+                    _id: {
+                        year: { $year: "$createdAt" },
+                        month: { $month: "$createdAt" }
+                    },
+                    total: { $sum: 1 },
+                    won: {
+                        $sum: {
+                            $cond: [{ $eq: ["$status", "won"] }, 1, 0]
+                        }
+                    }
+                }
+            },
+            { $sort: { "_id.year": 1, "_id.month": 1 } }
+        ]);
 
-        for (const opp of opps) {
-            const date = opp.createdAt || new Date();
-            const monthStr = date.toISOString().slice(0, 7); // YYYY-MM
-            if (!trendMap[monthStr]) {
-                trendMap[monthStr] = { total: 0, won: 0 };
-            }
-            trendMap[monthStr].total += 1;
-            if (opp.status === 'won') {
-                trendMap[monthStr].won += 1;
-            }
-        }
-
-        return Object.entries(trendMap)
-            .sort((a, b) => a[0].localeCompare(b[0]))
-            .map(([month, stats]) => ({
-                month,
-                winRate: stats.total > 0 ? Math.round((stats.won / stats.total) * 100) : 0
-            }))
-            .slice(-6); // 只取近 6 個月
+        return trend.slice(-6).map((item: any) => ({
+            month: `${item._id.year}-${String(item._id.month).padStart(2, "0")}`,
+            winRate: item.total > 0 ? Math.round((item.won / item.total) * 100) : 0
+        }));
     }),
 
     getCostVsRevenuePerPerson: roleProcedure(["admin", "manager"]).query(async () => {
-        const users = await UserModel.find().lean();
-        const srs = await ServiceRequestModel.find().lean();
-
-        // 1. 各人員專屬 Cost 聚合 (Timesheet)
-        const costAgg = await TimesheetModel.aggregate([
-            { $group: { _id: "$techId", totalCost: { $sum: "$costAmount" } } }
+        const [users, costAgg, revenueAgg] = await Promise.all([
+            UserModel.find({}, { _id: 1, name: 1 }).lean(),
+            TimesheetModel.aggregate([
+                { $group: { _id: "$techId", totalCost: { $sum: "$costAmount" } } }
+            ]),
+            ServiceRequestModel.aggregate([
+                { $group: { _id: "$pmId", totalRevenue: { $sum: "$contractAmount" } } }
+            ])
         ]);
 
-        return users.map((u: any) => {
-            const userCost = costAgg.find(c => c._id.toString() === u._id.toString())?.totalCost || 0;
-            
-            // 2. 身為 PM 所管理的總營收 (Service Request)
-            const userRevenue = srs
-                .filter(sr => sr.pmId?.toString() === u._id.toString())
-                .reduce((acc, sr) => acc + (sr.contractAmount || 0), 0);
+        const costMap = toIdMap(costAgg, "totalCost");
+        const revenueMap = toIdMap(revenueAgg, "totalRevenue");
 
-            return {
-                id: u._id.toString(),
-                name: u.name,
-                cost: userCost,
-                revenue: userRevenue
-            };
-        }).filter(u => u.cost > 0 || u.revenue > 0); // 過濾掉完全沒數據的人員
+        return users.map((u: any) => ({
+            id: u._id.toString(),
+            name: u.name,
+            cost: costMap.get(u._id.toString()) ?? 0,
+            revenue: revenueMap.get(u._id.toString()) ?? 0
+        })).filter((u) => u.cost > 0 || u.revenue > 0);
     }),
 
     generateReportStory: roleProcedure(["admin", "manager"])
         .input(z.object({ prompt: z.string() }))
         .mutation(async ({ input }) => {
-            const srs = await ServiceRequestModel.find().lean();
-            const opps = await OpportunityModel.find().lean();
+            const [srTotals, oppStats] = await Promise.all([
+                ServiceRequestModel.aggregate([
+                    {
+                        $group: {
+                            _id: null,
+                            activeProjects: {
+                                $sum: {
+                                    $cond: [{ $eq: ["$status", "in_progress"] }, 1, 0]
+                                }
+                            },
+                            totalRevenue: { $sum: "$contractAmount" }
+                        }
+                    }
+                ]),
+                OpportunityModel.aggregate([
+                    {
+                        $group: {
+                            _id: null,
+                            totalOpps: { $sum: 1 },
+                            wonOpps: { $sum: { $cond: [{ $eq: ["$status", "won"] }, 1, 0] } }
+                        }
+                    }
+                ])
+            ]);
 
-            const activeProjects = srs.filter((p: any) => p.status === 'in_progress').length;
-            const totalRevenue = srs.reduce((acc: number, sr: any) => acc + (sr.contractAmount || 0), 0);
-            const wonOppsCount = opps.filter((o: any) => o.status === 'won').length;
-            const winRate = opps.length > 0 ? Math.round((wonOppsCount / opps.length) * 100) : 0;
+            const activeProjects = srTotals[0]?.activeProjects ?? 0;
+            const totalRevenue = srTotals[0]?.totalRevenue ?? 0;
+            const totalOpps = oppStats[0]?.totalOpps ?? 0;
+            const wonOppsCount = oppStats[0]?.wonOpps ?? 0;
+            const winRate = totalOpps > 0 ? Math.round((wonOppsCount / totalOpps) * 100) : 0;
 
             const apiKey = process.env.GEMINI_API_KEY;
 
@@ -229,7 +270,7 @@ export const analyticsRouter = router({
                     const { GoogleGenerativeAI } = require("@google/generative-ai");
                     const ai = new GoogleGenerativeAI(apiKey);
                     const model = ai.getGenerativeModel({ model: "gemini-1.5-flash" });
-                    
+
                     const promptText = `
 你是一個專案管理系統的 AI 助手。請根據以下系統報表數據，回答使用者的分析需求。
 ### 背景數據概覽：
@@ -249,7 +290,6 @@ export const analyticsRouter = router({
                 }
             }
 
-            // 優雅降級的 Mock 模板 Response
             return {
                 report: `# 🤖 AI 智能分析報告 (數據降級模式)
 
@@ -274,24 +314,32 @@ export const analyticsRouter = router({
             };
         }),
 
-    getNotifications: protectedProcedure.query(async ({ ctx }) => {
-        const notifs = await NotificationModel.find({ userId: ctx.user.id }).lean();
-        return notifs.map((n: any) => ({ ...n, id: n._id.toString(), userId: n.userId.toString() }))
-            .sort((a: any, b: any) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
-    }),
+    getNotifications: protectedProcedure
+        .input(z.object({ limit: z.number().min(1).max(200).optional() }).optional())
+        .query(async ({ ctx, input }) => {
+            const limit = input?.limit ?? 50;
+            const notifs = await NotificationModel.find(
+                { userId: ctx.user.id },
+                { _id: 1, userId: 1, type: 1, message: 1, isRead: 1, actionUrl: 1, createdAt: 1 }
+            )
+                .sort({ createdAt: -1, _id: -1 })
+                .limit(limit)
+                .lean();
+            return notifs.map((n: any) => ({ ...n, id: n._id.toString(), userId: n.userId.toString() }));
+        }),
 
     markNotificationRead: protectedProcedure.input(z.object({ id: z.string() })).mutation(async ({ ctx, input }) => {
         await NotificationModel.updateOne(
             { _id: input.id, userId: ctx.user.id },
-            { isRead: true }
+            { $set: { isRead: true } }
         );
         return { success: true };
     }),
 
     markAllNotificationsRead: protectedProcedure.mutation(async ({ ctx }) => {
         await NotificationModel.updateMany(
-            { userId: ctx.user.id },
-            { isRead: true }
+            { userId: ctx.user.id, isRead: false },
+            { $set: { isRead: true } }
         );
         return { success: true };
     }),

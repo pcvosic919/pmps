@@ -47,4 +47,8 @@ const UserSchema = new Schema<IUser>({
     }]
 }, { timestamps: true });
 
+UserSchema.index({ role: 1, isActive: 1 });
+UserSchema.index({ name: 1, _id: 1 });
+UserSchema.index({ createdAt: -1 });
+
 export const UserModel = mongoose.models.User || mongoose.model<IUser>("User", UserSchema);
