@@ -4,11 +4,13 @@ import { useRoute } from "wouter";
 import { ArrowLeft, Plus, FileText, Clock, Trash2, Save, X, CheckCircle2, XCircle, Upload, Paperclip, AlertCircle } from "lucide-react";
 import { Link } from "wouter";
 import toast from "react-hot-toast";
+import { useCurrentUser } from "../lib/useCurrentUser";
 
 export function WbsManagementPage() {
     const [_match, params] = useRoute("/service-requests/:id");
     const srId = params?.id || "";
     const utils = trpc.useContext();
+    const { hasRole } = useCurrentUser();
 
     const [isBuildingVersion, setIsBuildingVersion] = useState(false);
     const [draftItems, setDraftItems] = useState<{ title: string, estimatedHours: number, assigneeId: string | undefined }[]>([]);
@@ -249,7 +251,7 @@ export function WbsManagementPage() {
                                                         </div>
                                                     )}
                                                 </div>
-                                                {version.status === "submitted" && (
+                                                {version.status === "submitted" && hasRole("manager") && (
                                                     <div className="flex gap-2">
                                                         {reviewingId === version.id ? (
                                                             <span className="text-xs text-muted-foreground animate-pulse">處理中...</span>

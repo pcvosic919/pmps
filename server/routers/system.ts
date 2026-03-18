@@ -22,8 +22,8 @@ const settingsPayloadSchema = z.object({
 });
 
 const defaultSettings = {
-    companyName: "Demo Tech Corp",
-    systemEmail: "noreply@demotech.com",
+    companyName: "PMP System",
+    systemEmail: "noreply@example.com",
     defaultCurrency: "TWD",
     sessionTimeout: 60,
     enableNotifications: true,

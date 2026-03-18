@@ -26,10 +26,11 @@ export function ServiceRequestsPage() {
     const [isCreating, setIsCreating] = useState(false);
 
     const createSR = trpc.projects.createSR.useMutation({
-        onSuccess: () => {
+        onSuccess: (result) => {
             setIsCreating(false);
             refetch();
             form.reset();
+            window.location.href = `/service-requests/${result.id}`;
         }
     });
 

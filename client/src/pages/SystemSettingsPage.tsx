@@ -4,8 +4,8 @@ import { toast } from "react-hot-toast";
 import { trpc } from "../lib/trpc";
 
 const defaultSettings = {
-    companyName: "Demo Tech Corp",
-    systemEmail: "noreply@demotech.com",
+    companyName: "PMP System",
+    systemEmail: "noreply@example.com",
     defaultCurrency: "TWD",
     sessionTimeout: 60,
     enableNotifications: true,

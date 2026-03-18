@@ -8,6 +8,7 @@ export function ProjectTimesheetsPage() {
     const [isSubmitting, setIsSubmitting] = useState(false);
 
     // Form state
+    const [selectedProjectId, setSelectedProjectId] = useState<string>("");
     const [selectedWbsId, setSelectedWbsId] = useState<string>("");
     const [workDate, setWorkDate] = useState<string>(new Date().toISOString().split("T")[0]);
     const [hours, setHours] = useState<number | "">("");
@@ -25,6 +26,7 @@ export function ProjectTimesheetsPage() {
     const logTime = trpc.projects.logProjectTime.useMutation({
         onSuccess: () => {
             utils.projects.getMyProjectTimesheets.invalidate();
+            setSelectedProjectId("");
             setSelectedWbsId("");
             setHours("");
             setDescription("");
@@ -39,15 +41,13 @@ export function ProjectTimesheetsPage() {
 
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
-        if (!selectedWbsId || !hours || !workDate || !description) return;
+        if (!selectedProjectId || !selectedWbsId || !hours || !workDate || !description) return;
 
         setIsSubmitting(true);
         try {
-            const assignment = assignments?.find((a: any) => a.id === selectedWbsId);
-            const srId = assignment?.srId || "";
             await logTime.mutateAsync({
                 wbsItemId: selectedWbsId,
-                srId: srId,
+                srId: selectedProjectId,
                 workDate: new Date(workDate),
                 hours: Number(hours),
                 description,
@@ -60,14 +60,18 @@ export function ProjectTimesheetsPage() {
     // Derived unique projects from assignments for the filter dropdown
     const assignedProjects = useMemo(() => {
         if (!assignments) return [];
-        const unique = new Map();
+        const unique = new Map<string, { id: string; title: string; items: any[] }>();
         assignments.forEach((a: any) => {
             if (!unique.has(a.srId)) {
-                unique.set(a.srId, { id: a.srId, title: a.srTitle });
+                unique.set(a.srId, { id: a.srId, title: a.srTitle, items: [] });
             }
+            unique.get(a.srId)?.items.push(a);
         });
         return Array.from(unique.values());
     }, [assignments]);
+
+    const selectedProject = assignedProjects.find((project) => project.id === selectedProjectId);
+    const availableWbsItems = selectedProject?.items || [];
 
     // Filtered timesheets
     const filteredTimesheets = useMemo(() => {
@@ -119,31 +123,52 @@ export function ProjectTimesheetsPage() {
                         </h3>
                         <form onSubmit={handleSubmit} className="space-y-4">
                             <div>
-                                <label className="block text-sm font-medium mb-1">對應任務 (WBS)</label>
+                                <label className="block text-sm font-medium mb-1">對應專案</label>
                                 <select
                                     className="w-full border border-border bg-background rounded-md px-3 py-2 text-sm focus:ring-1 focus:ring-primary outline-none"
-                                    value={selectedWbsId}
+                                    value={selectedProjectId}
                                     onChange={(e) => {
-                                        const val = e.target.value;
-                                        setSelectedWbsId(val);
-                                        // Auto-filter history list to this project when starting to log
-                                        if (val !== "") {
-                                            const assignment = assignments?.find((a: any) => a.id === val);
-                                            if (assignment) setFilterProjectId(assignment.srId);
+                                        setSelectedProjectId(e.target.value);
+                                        setSelectedWbsId("");
+                                        if (e.target.value) {
+                                            setFilterProjectId(e.target.value);
                                         }
                                     }}
                                     required
                                 >
-                                    <option value="">-- 選擇您被指派的任務 --</option>
-                                    {assignments?.map((a: any) => (
+                                    <option value="">-- 先選擇專案 --</option>
+                                    {assignedProjects.map((project) => (
+                                        <option key={project.id} value={project.id}>
+                                            {project.title}
+                                        </option>
+                                    ))}
+                                </select>
+                            </div>
+
+                            <div>
+                                <label className="block text-sm font-medium mb-1">對應任務 (WBS)</label>
+                                <select
+                                    className="w-full border border-border bg-background rounded-md px-3 py-2 text-sm focus:ring-1 focus:ring-primary outline-none"
+                                    value={selectedWbsId}
+                                    onChange={(e) => setSelectedWbsId(e.target.value)}
+                                    required
+                                    disabled={!selectedProjectId}
+                                >
+                                    <option value="">-- 再選擇該專案下的 WBS --</option>
+                                    {availableWbsItems.map((a: any) => (
                                         <option key={a.id} value={a.id}>
-                                            [{a.srTitle}] {a.title}
+                                            {a.title} ({a.estimatedHours}h / 已填 {a.actualHours || 0}h)
                                         </option>
                                     ))}
                                 </select>
                                 {assignments?.length === 0 && (
                                     <p className="text-xs text-yellow-600 dark:text-yellow-400 mt-1 flex items-center gap-1">
                                         <AlertCircle className="w-3 h-3" /> 找不到指派給您的專案任務
+                                    </p>
+                                )}
+                                {selectedProjectId && availableWbsItems.length === 0 && (
+                                    <p className="text-xs text-yellow-600 dark:text-yellow-400 mt-1 flex items-center gap-1">
+                                        <AlertCircle className="w-3 h-3" /> 此專案目前沒有可填報的 WBS 項目
                                     </p>
                                 )}
                             </div>
@@ -187,7 +212,7 @@ export function ProjectTimesheetsPage() {
 
                             <button
                                 type="submit"
-                                disabled={isSubmitting || !selectedWbsId}
+                                disabled={isSubmitting || !selectedProjectId || !selectedWbsId}
                                 className="w-full bg-primary text-primary-foreground py-2 rounded-md font-medium hover:bg-primary/90 transition-colors disabled:opacity-50"
                             >
                                 {isSubmitting ? "送出中..." : "儲存工時"}
