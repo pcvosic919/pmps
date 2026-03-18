@@ -84,6 +84,28 @@ pnpm db:push       # 推送 schema 到資料庫
 
 ---
 
+## 🐳 Docker 與 Azure 部署
+
+本系統支援 Docker 容器化，並已整合 GitHub Actions 自動推送至 ACR (Azure Container Registry) 部署至 Azure App Service。
+
+### 環境變數 (Environment Variables)
+在生產環境 (如 Azure 控制台) 中，必須設定以下變數：
+| 變數名稱 | 必填 | 說明 |
+|---|---|---|
+| `MONGODB_URI` | **是** | Cosmos DB / MongoDB 完整連線字串 (需啟動 SSL) |
+| `GEMINI_API_KEY` | 否 | Google AI Studio 密鑰 (用於 AI 報表故事分析) |
+| `PORT` | 否 | 容器 Port，預設為 `5000` |
+
+### 打包與運作原理
+1. 透過 `Dockerfile` 進行 Multi-stage Build。
+2. 後端 Express 伺服器會**自動託管** `client/dist` 靜態檔案。
+3. 支援 **SPA Fallback** 機制：非 `/api` 的 GET request 會自動導向 `index.html`。
+4. 容器曝露連接埠（Port）為 `5000`。
+
+---
+
+---
+
 ## 📱 頁面路由
 
 | 路徑 | 元件 | 說明 |

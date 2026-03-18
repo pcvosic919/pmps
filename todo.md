@@ -103,14 +103,11 @@
 
 ### DevOps
 - [ ] Docker Compose 設定
-- [x] GitHub Actions CI/CD pipeline
+- [x] GitHub Actions CI/CD pipeline (ACR + App Service)
+- [x] Docker 容器化與靜態檔案託管 (SPA Fallback)
 - [ ] 生產環境資料庫遷移策略 (目前 `db:push` 直接 push)
 - [ ] 資料庫備份機制
 
-### 代辦事項
-- [ ] 建立 SR 表單 (目前只有清單)
-- [ ] WBS 審核通過/拒絕 (PM 核准按鈕)核准在 服務請求頁面核准
-- [ ] WBS 歷史版本瀏覽與比較
 ---
 
 ## ✅ 已完成
