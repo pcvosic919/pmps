@@ -8,6 +8,7 @@ import { UserModel } from "../models/User";
 import { OpportunityModel } from "../models/Opportunity";
 import mongoose from "mongoose";
 import { TRPCError } from "@trpc/server";
+import { approvalActions, srStatuses } from "../../shared/types";
 
 export const projectsRouter = router({
     srList: protectedProcedure.query(async () => {
@@ -49,7 +50,7 @@ export const projectsRouter = router({
     updateSRStatus: roleProcedure(["admin", "business", "pm", "manager"])
         .input(z.object({
             id: z.string(),
-            status: z.enum(["new", "in_progress", "completed", "cancelled"])
+            status: z.enum(srStatuses)
         }))
         .mutation(async ({ input }) => {
             await ServiceRequestModel.updateOne(
@@ -89,7 +90,7 @@ export const projectsRouter = router({
     reviewWbsVersion: roleProcedure(["admin", "manager"])
         .input(z.object({
             id: z.string(), // wbsVersion _id
-            action: z.enum(["approved", "rejected"]),
+            action: z.enum(approvalActions),
             rejectionReason: z.string().optional()
         }))
         .mutation(async ({ ctx, input }) => {
@@ -204,7 +205,7 @@ export const projectsRouter = router({
 
             const newVersion = {
                 versionNumber: input.versionNumber,
-                status: "submitted",
+                status: "submitted" as const,
                 submittedBy: ctx.user.id,
                 items: input.items.map(item => ({
                     title: item.title,
@@ -302,7 +303,7 @@ export const projectsRouter = router({
         .input(z.object({
             srId: z.string(),
             crId: z.string(),
-            action: z.enum(["approved", "rejected"]),
+            action: z.enum(approvalActions),
             rejectionReason: z.string().optional()
         }))
         .mutation(async ({ input }) => {

@@ -2,6 +2,7 @@ import { useState, useEffect, useRef } from "react";
 import { trpc } from "../lib/trpc";
 import { Users as UsersIcon, Edit, UserX, UserPlus, Search, Loader2 } from "lucide-react";
 import { z } from "zod";
+import { roles, type Role } from "../../../shared/types";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -15,15 +16,17 @@ const userSchema = z.object({
     name: z.string().min(1, "姓名不可為空"),
     email: z.string().email("請輸入有效的電子郵件"),
     department: z.string().optional(),
-    role: z.enum(["admin", "manager", "pm", "presales", "tech", "business", "user"]),
-    roles: z.array(z.string()).optional(),
+    role: z.enum(roles),
+    roles: z.array(z.enum(roles)).optional(),
     isActive: z.boolean().default(true)
 });
 
+const editableRoles = ["admin", "manager", "pm", "presales", "tech", "user"] as const;
+
 const editUserSchema = z.object({
     department: z.string().optional(),
-    role: z.enum(["admin", "manager", "pm", "presales", "tech", "user"]),
-    roles: z.array(z.string()).optional(),
+    role: z.enum(editableRoles),
+    roles: z.array(z.enum(roles)).optional(),
     isActive: z.boolean().default(true)
 });
 
@@ -85,7 +88,7 @@ export function UserManagementPage() {
                 department: editingUser.department || "",
                 role: editingUser.role,
                 isActive: editingUser.isActive,
-                roles: editingUser.roles || []
+                roles: (editingUser.roles || []) as Role[]
             });
         }
     }, [editingUser, editForm]);
@@ -96,25 +99,25 @@ export function UserManagementPage() {
         setEditingUser(user);
     };
 
-    const handleSave = (values: z.infer<typeof editUserSchema>) => {
+    const handleSave = (values: any) => {
         if (!editingUser) return;
         updateUser.mutate({
             id: editingUser.id,
             department: values.department,
             role: values.role,
             isActive: values.isActive,
-            roles: values.roles || []
+            roles: (values.roles || []) as Role[]
         });
     };
 
-    const handleCreate = (values: z.infer<typeof userSchema>) => {
+    const handleCreate = (values: any) => {
         createUser.mutate({
             name: values.name,
             email: values.email,
             department: values.department,
             role: values.role,
             isActive: values.isActive,
-            roles: values.roles || []
+            roles: (values.roles || []) as Role[]
         });
     };
 
@@ -124,7 +127,7 @@ export function UserManagementPage() {
         }
     };
 
-    const handleRoleToggle = (roleName: string, currentRoles: string[], onChange: (roles: string[]) => void) => {
+    const handleRoleToggle = (roleName: Role, currentRoles: Role[], onChange: (roles: Role[]) => void) => {
         const hasRole = currentRoles.includes(roleName);
         if (hasRole) {
             onChange(currentRoles.filter(r => r !== roleName));
@@ -135,7 +138,7 @@ export function UserManagementPage() {
 
     if (isLoading) return <div className="p-8 text-center text-muted-foreground">載入中...</div>;
 
-    const availableSecondaryRoles = ["pm", "presales", "tech", "business"];
+    const availableSecondaryRoles: Role[] = ["pm", "presales", "tech", "business"];
 
     return (
         <div className="space-y-6">

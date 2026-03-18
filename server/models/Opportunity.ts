@@ -1,26 +1,28 @@
 import mongoose, { Schema, Document } from "mongoose";
-import { opportunityStatuses } from "../../shared/types";
+import { memberRoles, opportunityStatuses, type CustomFieldValue, type OpportunityStatus, type OpportunityMember, type PresalesAssignment } from "../../shared/types";
+
+export interface IOpportunityMember extends Omit<OpportunityMember, "userId"> {
+    userId: mongoose.Types.ObjectId;
+}
+
+export interface IPresalesAssignment extends Omit<PresalesAssignment, "techId"> {
+    techId: mongoose.Types.ObjectId;
+}
+
+export interface IOpportunityCustomField extends Omit<CustomFieldValue, "fieldId"> {
+    fieldId: mongoose.Types.ObjectId;
+}
 
 export interface IOpportunity extends Document {
     title: string;
     customerName: string;
     estimatedValue: number;
-    status: string;
+    status: OpportunityStatus;
     expectedCloseDate?: Date;
-    ownerId: mongoose.Types.ObjectId; // 參照 User._id
-    members: {
-        userId: mongoose.Types.ObjectId;
-        memberRole: "owner" | "assignee" | "watcher";
-    }[];
-    presalesAssignments: {
-        techId: mongoose.Types.ObjectId;
-        estimatedHours: number;
-        createdAt: Date;
-    }[];
-    customFields?: {
-        fieldId: mongoose.Types.ObjectId;
-        value: string;
-    }[];
+    ownerId: mongoose.Types.ObjectId;
+    members: IOpportunityMember[];
+    presalesAssignments: IPresalesAssignment[];
+    customFields?: IOpportunityCustomField[];
     createdAt: Date;
     updatedAt: Date;
 }
@@ -34,7 +36,7 @@ const OpportunitySchema = new Schema<IOpportunity>({
     ownerId: { type: Schema.Types.ObjectId, ref: "User", required: true },
     members: [{
         userId: { type: Schema.Types.ObjectId, ref: "User", required: true },
-        memberRole: { type: String, enum: ["owner", "assignee", "watcher"], default: "assignee", required: true }
+        memberRole: { type: String, enum: memberRoles, default: "assignee", required: true }
     }],
     presalesAssignments: [{
         techId: { type: Schema.Types.ObjectId, ref: "User", required: true },

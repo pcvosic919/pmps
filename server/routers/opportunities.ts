@@ -4,6 +4,7 @@ import { OpportunityModel } from "../models/Opportunity";
 import { TimesheetModel } from "../models/Timesheet";
 import { ServiceRequestModel } from "../models/ServiceRequest";
 import { TRPCError } from "@trpc/server";
+import { memberRoles, opportunityStatuses } from "../../shared/types";
 
 export const opportunitiesRouter = router({
     list: protectedProcedure
@@ -70,7 +71,7 @@ export const opportunitiesRouter = router({
             title: z.string(),
             customerName: z.string(),
             estimatedValue: z.number().default(0),
-            status: z.enum(["new", "qualified", "presales_active", "won", "converted", "lost"]).default("new"),
+            status: z.enum(opportunityStatuses).default("new"),
             expectedCloseDate: z.date().optional(),
             customFields: z.array(z.object({
                 fieldId: z.string(),
@@ -121,7 +122,7 @@ export const opportunitiesRouter = router({
         .input(z.object({
             opportunityId: z.string(),
             userId: z.string(),
-            memberRole: z.enum(["owner", "assignee", "watcher"]).default("watcher")
+            memberRole: z.enum(memberRoles).default("watcher")
         }))
         .mutation(async ({ input }) => {
             const existing = await OpportunityModel.findOne({
@@ -270,7 +271,7 @@ export const opportunitiesRouter = router({
     updateStatus: roleProcedure(["admin", "business"])
         .input(z.object({
             id: z.string(),
-            status: z.enum(["new", "qualified", "presales_active", "won", "converted", "lost"])
+            status: z.enum(opportunityStatuses)
         }))
         .mutation(async ({ input }) => {
             await OpportunityModel.updateOne(
