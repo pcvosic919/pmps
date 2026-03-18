@@ -49,14 +49,18 @@ export const createContext = async ({ req, res }: CreateExpressContextOptions) =
     return {
         req,
         res,
-        db, // Kept for any backward compatibility during migration
         user,
     };
 };
 
 export type Context = Awaited<ReturnType<typeof createContext>>;
 
-const t = initTRPC.context<Context>().create();
+const t = initTRPC.context<Context>().create({
+    errorFormatter({ shape, error }) {
+        console.error("🚨 tRPC Error Detailed:", error);
+        return shape;
+    }
+});
 
 export const router = t.router;
 export const publicProcedure = t.procedure;
@@ -64,6 +68,7 @@ export const publicProcedure = t.procedure;
 // Middleware for checking if user is logged in
 const isAuthed = t.middleware(({ next, ctx }) => {
     if (!ctx.user) {
+        console.error("🔒 Auth middleware: No user found in context (Unauthorized)");
         throw new TRPCError({ code: "UNAUTHORIZED" });
     }
     return next({
