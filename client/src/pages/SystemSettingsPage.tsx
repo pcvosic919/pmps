@@ -1,38 +1,55 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Settings, Save, Database, Shield, Layout, Bell } from "lucide-react";
+import { toast } from "react-hot-toast";
+import { trpc } from "../lib/trpc";
+
+const defaultSettings = {
+    companyName: "Demo Tech Corp",
+    systemEmail: "noreply@demotech.com",
+    defaultCurrency: "TWD",
+    sessionTimeout: 60,
+    enableNotifications: true,
+    allowClientAccess: false,
+    entraClientId: "",
+    entraClientSecret: "",
+    entraTenantId: "",
+    entraEnabled: false,
+    apiToken: "",
+    webhookUrl: "",
+    webhookEnabled: false,
+    hrSyncUrl: "",
+    hrSyncEnabled: false,
+};
 
 export function SystemSettingsPage() {
     const [activeTab, setActiveTab] = useState("general");
-    const [isSaving, setIsSaving] = useState(false);
+    const [settings, setSettings] = useState(defaultSettings);
 
-    const [settings, setSettings] = useState({
-        companyName: "Demo Tech Corp",
-        systemEmail: "noreply@demotech.com",
-        defaultCurrency: "TWD",
-        sessionTimeout: 60,
-        enableNotifications: true,
-        allowClientAccess: false,
+    const utils = trpc.useUtils();
+    const { data, isLoading } = trpc.system.getSettings.useQuery();
+    const updateSettings = trpc.system.updateSettings.useMutation({
+        onSuccess: async () => {
+            toast.success("系統設定已儲存至資料庫");
+            await utils.system.getSettings.invalidate();
+        },
+        onError: (error) => {
+            toast.error(error.message || "儲存失敗，請稍後再試");
+        }
     });
 
-    const [integrations, setIntegrations] = useState({
-        entraClientId: "",
-        entraClientSecret: "",
-        entraTenantId: "",
-        entraEnabled: false,
-        apiToken: "",
-        webhookUrl: "",
-        webhookEnabled: false,
-        hrSyncUrl: "",
-        hrSyncEnabled: false,
-    });
+    useEffect(() => {
+        if (data) {
+            setSettings(data);
+        }
+    }, [data]);
 
     const handleSave = () => {
-        setIsSaving(true);
-        setTimeout(() => {
-            setIsSaving(false);
-            alert("系統設定已儲存");
-        }, 800);
+        updateSettings.mutate(settings);
     };
+
+    if (isLoading) {
+        return <div className="p-8 text-center text-muted-foreground">載入系統設定中...</div>;
+    }
 
     return (
         <div className="space-y-6 max-w-5xl mx-auto">
@@ -46,16 +63,15 @@ export function SystemSettingsPage() {
                 </div>
                 <button
                     onClick={handleSave}
-                    disabled={isSaving}
+                    disabled={updateSettings.isPending}
                     className="bg-primary text-primary-foreground hover:bg-primary/90 px-5 py-2.5 rounded-lg flex items-center text-sm font-medium transition-all shadow-md active:scale-95 disabled:opacity-50"
                 >
                     <Save className="w-4 h-4 mr-2" />
-                    {isSaving ? "儲存中..." : "儲存設定"}
+                    {updateSettings.isPending ? "儲存中..." : "儲存設定"}
                 </button>
             </div>
 
             <div className="flex flex-col md:flex-row gap-6">
-                {/* Sidebar Navigation */}
                 <div className="w-full md:w-64 space-y-1">
                     {[
                         { key: "general", icon: <Layout className="w-5 h-5" />, label: "一般設定" },
@@ -74,7 +90,6 @@ export function SystemSettingsPage() {
                     ))}
                 </div>
 
-                {/* Settings Content Area */}
                 <div className="flex-1 bg-card border rounded-xl shadow-sm p-6 lg:p-8">
                     {activeTab === "general" && (
                         <div className="space-y-6">
@@ -83,7 +98,8 @@ export function SystemSettingsPage() {
                                 <div>
                                     <label className="block text-sm font-bold mb-2">公司名稱</label>
                                     <input
-                                        type="text" value={settings.companyName}
+                                        type="text"
+                                        value={settings.companyName}
                                         onChange={e => setSettings(s => ({ ...s, companyName: e.target.value }))}
                                         className="w-full p-2.5 rounded-lg border border-input bg-background/50 focus:bg-background transition-colors"
                                     />
@@ -103,7 +119,8 @@ export function SystemSettingsPage() {
                                 <div>
                                     <label className="block text-sm font-bold mb-2">系統寄件信箱</label>
                                     <input
-                                        type="email" value={settings.systemEmail}
+                                        type="email"
+                                        value={settings.systemEmail}
                                         onChange={e => setSettings(s => ({ ...s, systemEmail: e.target.value }))}
                                         className="w-full p-2.5 rounded-lg border border-input bg-background/50 focus:bg-background transition-colors"
                                     />
@@ -122,7 +139,11 @@ export function SystemSettingsPage() {
                                         <span className="text-primary font-mono">{settings.sessionTimeout}m</span>
                                     </label>
                                     <input
-                                        type="range" min="15" max="240" step="15" value={settings.sessionTimeout}
+                                        type="range"
+                                        min="15"
+                                        max="240"
+                                        step="15"
+                                        value={settings.sessionTimeout}
                                         onChange={e => setSettings(s => ({ ...s, sessionTimeout: Number(e.target.value) }))}
                                         className="w-full accent-primary"
                                     />
@@ -131,7 +152,8 @@ export function SystemSettingsPage() {
                                     <label className="flex items-start space-x-3 cursor-pointer group">
                                         <div className="flex h-5 items-center">
                                             <input
-                                                type="checkbox" checked={settings.allowClientAccess}
+                                                type="checkbox"
+                                                checked={settings.allowClientAccess}
                                                 onChange={e => setSettings(s => ({ ...s, allowClientAccess: e.target.checked }))}
                                                 className="w-4 h-4 rounded border-input text-primary focus:ring-primary/20"
                                             />
@@ -153,7 +175,8 @@ export function SystemSettingsPage() {
                                 <label className="flex items-start space-x-3 cursor-pointer group">
                                     <div className="flex h-5 items-center">
                                         <input
-                                            type="checkbox" checked={settings.enableNotifications}
+                                            type="checkbox"
+                                            checked={settings.enableNotifications}
                                             onChange={e => setSettings(s => ({ ...s, enableNotifications: e.target.checked }))}
                                             className="w-4 h-4 rounded border-input text-primary focus:ring-primary/20"
                                         />
@@ -169,39 +192,44 @@ export function SystemSettingsPage() {
 
                     {activeTab === "integrations" && (
                         <div className="space-y-8">
-                            {/* Microsoft Entra ID */}
                             <div>
                                 <div className="flex items-center justify-between mb-4 border-b pb-2">
                                     <h3 className="text-lg font-bold">Microsoft Entra ID (Azure AD) 整合</h3>
                                     <div
-                                        onClick={() => setIntegrations(s => ({ ...s, entraEnabled: !s.entraEnabled }))}
-                                        className={`relative inline-flex h-6 w-11 cursor-pointer rounded-full transition-colors ${integrations.entraEnabled ? 'bg-primary' : 'bg-muted border border-border'}`}
+                                        onClick={() => setSettings(s => ({ ...s, entraEnabled: !s.entraEnabled }))}
+                                        className={`relative inline-flex h-6 w-11 cursor-pointer rounded-full transition-colors ${settings.entraEnabled ? 'bg-primary' : 'bg-muted border border-border'}`}
                                     >
-                                        <span className={`inline-block h-5 w-5 mt-0.5 rounded-full bg-white shadow transition-transform ${integrations.entraEnabled ? 'translate-x-5' : 'translate-x-0.5'}`} />
+                                        <span className={`inline-block h-5 w-5 mt-0.5 rounded-full bg-white shadow transition-transform ${settings.entraEnabled ? 'translate-x-5' : 'translate-x-0.5'}`} />
                                     </div>
                                 </div>
-                                <div className={`grid gap-4 max-w-2xl ${integrations.entraEnabled ? '' : 'opacity-40 pointer-events-none'}`}>
+                                <div className={`grid gap-4 max-w-2xl ${settings.entraEnabled ? '' : 'opacity-40 pointer-events-none'}`}>
                                     <div>
                                         <label className="block text-sm font-medium mb-1">Tenant ID</label>
                                         <input
-                                            type="text" value={integrations.entraTenantId} placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
-                                            onChange={e => setIntegrations(s => ({ ...s, entraTenantId: e.target.value }))}
+                                            type="text"
+                                            value={settings.entraTenantId}
+                                            placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
+                                            onChange={e => setSettings(s => ({ ...s, entraTenantId: e.target.value }))}
                                             className="w-full p-2.5 rounded-lg border border-input bg-background/50 focus:bg-background font-mono text-sm"
                                         />
                                     </div>
                                     <div>
                                         <label className="block text-sm font-medium mb-1">Client ID (應用程式識別碼)</label>
                                         <input
-                                            type="text" value={integrations.entraClientId} placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
-                                            onChange={e => setIntegrations(s => ({ ...s, entraClientId: e.target.value }))}
+                                            type="text"
+                                            value={settings.entraClientId}
+                                            placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
+                                            onChange={e => setSettings(s => ({ ...s, entraClientId: e.target.value }))}
                                             className="w-full p-2.5 rounded-lg border border-input bg-background/50 focus:bg-background font-mono text-sm"
                                         />
                                     </div>
                                     <div>
                                         <label className="block text-sm font-medium mb-1">Client Secret</label>
                                         <input
-                                            type="password" value={integrations.entraClientSecret} placeholder="••••••••••••••••"
-                                            onChange={e => setIntegrations(s => ({ ...s, entraClientSecret: e.target.value }))}
+                                            type="password"
+                                            value={settings.entraClientSecret}
+                                            placeholder="••••••••••••••••"
+                                            onChange={e => setSettings(s => ({ ...s, entraClientSecret: e.target.value }))}
                                             className="w-full p-2.5 rounded-lg border border-input bg-background/50 focus:bg-background font-mono text-sm"
                                         />
                                         <p className="text-xs text-muted-foreground mt-1">設定後用戶可透過 Microsoft 帳號 SSO 登入</p>
@@ -209,7 +237,6 @@ export function SystemSettingsPage() {
                                 </div>
                             </div>
 
-                            {/* API Token */}
                             <div>
                                 <h3 className="text-lg font-bold mb-4 border-b pb-2">系統 API Token</h3>
                                 <div className="grid gap-4 max-w-2xl">
@@ -217,12 +244,14 @@ export function SystemSettingsPage() {
                                         <label className="block text-sm font-medium mb-1">API Token</label>
                                         <div className="flex space-x-2">
                                             <input
-                                                type="text" value={integrations.apiToken} placeholder="輸入或貼上 API Token"
-                                                onChange={e => setIntegrations(s => ({ ...s, apiToken: e.target.value }))}
+                                                type="text"
+                                                value={settings.apiToken}
+                                                placeholder="輸入或貼上 API Token"
+                                                onChange={e => setSettings(s => ({ ...s, apiToken: e.target.value }))}
                                                 className="flex-1 p-2.5 rounded-lg border border-input bg-background/50 focus:bg-background font-mono text-sm"
                                             />
                                             <button
-                                                onClick={() => setIntegrations(s => ({ ...s, apiToken: `pmp_${Math.random().toString(36).slice(2, 18)}` }))}
+                                                onClick={() => setSettings(s => ({ ...s, apiToken: `pmp_${Math.random().toString(36).slice(2, 18)}` }))}
                                                 className="px-4 py-2 text-sm bg-muted hover:bg-muted/80 border border-border rounded-lg whitespace-nowrap"
                                             >
                                                 產生 Token
@@ -233,23 +262,24 @@ export function SystemSettingsPage() {
                                 </div>
                             </div>
 
-                            {/* Webhook */}
                             <div>
                                 <div className="flex items-center justify-between mb-4 border-b pb-2">
                                     <h3 className="text-lg font-bold">Webhook 通知</h3>
                                     <div
-                                        onClick={() => setIntegrations(s => ({ ...s, webhookEnabled: !s.webhookEnabled }))}
-                                        className={`relative inline-flex h-6 w-11 cursor-pointer rounded-full transition-colors ${integrations.webhookEnabled ? 'bg-primary' : 'bg-muted border border-border'}`}
+                                        onClick={() => setSettings(s => ({ ...s, webhookEnabled: !s.webhookEnabled }))}
+                                        className={`relative inline-flex h-6 w-11 cursor-pointer rounded-full transition-colors ${settings.webhookEnabled ? 'bg-primary' : 'bg-muted border border-border'}`}
                                     >
-                                        <span className={`inline-block h-5 w-5 mt-0.5 rounded-full bg-white shadow transition-transform ${integrations.webhookEnabled ? 'translate-x-5' : 'translate-x-0.5'}`} />
+                                        <span className={`inline-block h-5 w-5 mt-0.5 rounded-full bg-white shadow transition-transform ${settings.webhookEnabled ? 'translate-x-5' : 'translate-x-0.5'}`} />
                                     </div>
                                 </div>
-                                <div className={`grid gap-4 max-w-2xl ${integrations.webhookEnabled ? '' : 'opacity-40 pointer-events-none'}`}>
+                                <div className={`grid gap-4 max-w-2xl ${settings.webhookEnabled ? '' : 'opacity-40 pointer-events-none'}`}>
                                     <div>
                                         <label className="block text-sm font-medium mb-1">Webhook URL</label>
                                         <input
-                                            type="url" value={integrations.webhookUrl} placeholder="https://your-service.com/webhook"
-                                            onChange={e => setIntegrations(s => ({ ...s, webhookUrl: e.target.value }))}
+                                            type="url"
+                                            value={settings.webhookUrl}
+                                            placeholder="https://your-service.com/webhook"
+                                            onChange={e => setSettings(s => ({ ...s, webhookUrl: e.target.value }))}
                                             className="w-full p-2.5 rounded-lg border border-input bg-background/50 focus:bg-background text-sm"
                                         />
                                         <p className="text-xs text-muted-foreground mt-1">商機狀態變更、SR 建立等事件將推送至此 URL</p>
@@ -257,23 +287,24 @@ export function SystemSettingsPage() {
                                 </div>
                             </div>
 
-                            {/* HR System Sync */}
                             <div>
                                 <div className="flex items-center justify-between mb-4 border-b pb-2">
                                     <h3 className="text-lg font-bold">HR 系統同步</h3>
                                     <div
-                                        onClick={() => setIntegrations(s => ({ ...s, hrSyncEnabled: !s.hrSyncEnabled }))}
-                                        className={`relative inline-flex h-6 w-11 cursor-pointer rounded-full transition-colors ${integrations.hrSyncEnabled ? 'bg-primary' : 'bg-muted border border-border'}`}
+                                        onClick={() => setSettings(s => ({ ...s, hrSyncEnabled: !s.hrSyncEnabled }))}
+                                        className={`relative inline-flex h-6 w-11 cursor-pointer rounded-full transition-colors ${settings.hrSyncEnabled ? 'bg-primary' : 'bg-muted border border-border'}`}
                                     >
-                                        <span className={`inline-block h-5 w-5 mt-0.5 rounded-full bg-white shadow transition-transform ${integrations.hrSyncEnabled ? 'translate-x-5' : 'translate-x-0.5'}`} />
+                                        <span className={`inline-block h-5 w-5 mt-0.5 rounded-full bg-white shadow transition-transform ${settings.hrSyncEnabled ? 'translate-x-5' : 'translate-x-0.5'}`} />
                                     </div>
                                 </div>
-                                <div className={`grid gap-4 max-w-2xl ${integrations.hrSyncEnabled ? '' : 'opacity-40 pointer-events-none'}`}>
+                                <div className={`grid gap-4 max-w-2xl ${settings.hrSyncEnabled ? '' : 'opacity-40 pointer-events-none'}`}>
                                     <div>
                                         <label className="block text-sm font-medium mb-1">HR API Endpoint</label>
                                         <input
-                                            type="url" value={integrations.hrSyncUrl} placeholder="https://hr-system.company.com/api/sync"
-                                            onChange={e => setIntegrations(s => ({ ...s, hrSyncUrl: e.target.value }))}
+                                            type="url"
+                                            value={settings.hrSyncUrl}
+                                            placeholder="https://hr-system.company.com/api/sync"
+                                            onChange={e => setSettings(s => ({ ...s, hrSyncUrl: e.target.value }))}
                                             className="w-full p-2.5 rounded-lg border border-input bg-background/50 focus:bg-background text-sm"
                                         />
                                         <p className="text-xs text-muted-foreground mt-1">自動同步員工名單與部門資訊</p>
