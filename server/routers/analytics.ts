@@ -9,45 +9,6 @@ import { z } from "zod";
 import { GoogleGenerativeAI } from "@google/generative-ai";
 
 export const analyticsRouter = router({
-    generateReportStory: roleProcedure(["admin", "manager"])
-        .input(z.object({ prompt: z.string() }))
-        .mutation(async ({ input }) => {
-            const apiKey = process.env.GOOGLE_AI_KEY;
-            if (!apiKey) {
-                return { 
-                    report: "尚未設定 GOOGLE_AI_KEY 秘鑰，請在系統設定或環境變數中更新。目前回傳系統概況摘要：\n\n- 目前有 5 個活躍專案\n- 平均稼動率 78%\n- 本季毛利預估 42%" 
-                };
-            }
-
-            const srs = await ServiceRequestModel.find().lean();
-            const opps = await OpportunityModel.find().lean();
-            
-            const totalRevenue = srs.reduce((acc: number, sr: any) => acc + (sr.contractAmount || 0), 0);
-            const activeProjects = srs.filter((s: any) => s.status === 'in_progress').length;
-            const openOpps = opps.filter((o: any) => o.status !== 'won' && o.status !== 'lost').length;
-
-            const context = `
-            系統數據摘要：
-            - 服務請求(SR)總數: ${srs.length}
-            - 執行中專案數: ${activeProjects}
-            - 總合約金額: NT$ ${totalRevenue.toLocaleString()}
-            - 待處理商機數: ${openOpps}
-            
-            使用者的具體分析需求：
-            ${input.prompt}
-            `;
-
-            const genAI = new GoogleGenerativeAI(apiKey);
-            const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
-
-            const result = await model.generateContent([
-                "你是一位資深的 PMP 專案管理專家與 BI 分析師。請基於提供的系統數據與使用者的分析需求，撰寫一份簡明扼要、具備洞察力的專案報表故事。請使用繁體中文，格式清晰（使用 Markdown 強調重點）。",
-                context
-            ]);
-
-            return { report: result.response.text() };
-        }),
-
     getUtilization: roleProcedure(["admin", "manager", "pm"]).query(async () => {
         const users = await UserModel.find().lean();
 
@@ -308,7 +269,7 @@ export const analyticsRouter = router({
 
 ## 📌 改善與行動建議 (Action Items)
 - **短線戰術**：檢視 pending 狀態的商機，在協銷指派中強化技術員的支援時數，把 win rate 拉抬突破。
-- **長線策略**：維護環境變數 `.env` 連通道，利於 AI 提供更具診斷性的客製報告。
+- **長線策略**：維護環境參數環境變數連通道，利於 AI 提供更具診斷性的客製報告。
 `
             };
         }),
