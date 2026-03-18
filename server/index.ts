@@ -72,6 +72,21 @@ app.get("/api/health", async (_req, res) => {
     }
 });
 
+import path from "path";
+const clientDistPath = path.resolve(__dirname, "../../../client/dist");
+
+// Serve client built static files
+app.use(express.static(clientDistPath));
+
+// Fallback for Single Page Application (SPA) routing
+app.get("*", (req, res) => {
+    if (!req.url.startsWith("/api")) {
+        res.sendFile(path.join(clientDistPath, "index.html"));
+    } else {
+        res.status(404).json({ error: "Not Found" });
+    }
+});
+
 const PORT = process.env.PORT ? parseInt(process.env.PORT, 10) : 5000;
 
 app.listen(PORT, "0.0.0.0", () => {
