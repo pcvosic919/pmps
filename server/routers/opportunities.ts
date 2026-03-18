@@ -14,9 +14,11 @@ import {
     canManageTimesheet,
     hasAnyRole,
 } from "../_core/authorization";
-import { decodeCursor, encodeCursor, toObjectId } from "../_core/cursor";
-
-const opportunitySortFields = ["createdAt", "estimatedValue", "status"] as const;
+import { decodeCursor, encodeCursor } from "../_core/cursor";
+import {
+    buildOpportunityListQuery,
+    opportunitySortFields,
+} from "./opportunities.listing";
 
 const listInput = z.object({
     limit: z.number().min(1).max(100).nullish(),
@@ -25,33 +27,6 @@ const listInput = z.object({
     sortBy: z.enum(opportunitySortFields).optional(),
     sortOrder: z.enum(["asc", "desc"]).optional()
 }).optional();
-
-const buildSearchQuery = (search?: string) => {
-    if (!search) {
-        return {};
-    }
-
-    return {
-        $or: [
-            { title: { $regex: search, $options: "i" } },
-            { customerName: { $regex: search, $options: "i" } }
-        ]
-    };
-};
-
-const getAccessibleOpportunityQuery = (ctxUser: { id: string; role: string; roles: string[] }) => {
-    if (hasAnyRole(ctxUser as any, ["admin", "manager"])) {
-        return {};
-    }
-
-    return {
-        $or: [
-            { ownerId: toObjectId(ctxUser.id) },
-            { "members.userId": toObjectId(ctxUser.id) },
-            { "presalesAssignments.techId": toObjectId(ctxUser.id) }
-        ]
-    };
-};
 
 const assertOpportunityNotConverted = (opportunity: { status?: string }) => {
     if (opportunity.status === "converted") {
@@ -97,29 +72,13 @@ export const opportunitiesRouter = router({
             const sortOrder = input?.sortOrder || "desc";
             const direction = sortOrder === "desc" ? -1 : 1;
             const cursor = input?.cursor ? decodeCursor(input.cursor) : null;
-            const clauses: Record<string, unknown>[] = [];
-            const searchQuery = buildSearchQuery(search);
-            const accessQuery = getAccessibleOpportunityQuery(ctx.user);
-
-            if (Object.keys(searchQuery).length > 0) {
-                clauses.push(searchQuery);
-            }
-            if (Object.keys(accessQuery).length > 0) {
-                clauses.push(accessQuery);
-            }
-
-            if (cursor) {
-                const comparisonOperator = direction === 1 ? "$gt" : "$lt";
-                const cursorFilter = {
-                    $or: [
-                        { [sortBy]: { [comparisonOperator]: cursor.value } },
-                        { [sortBy]: cursor.value, _id: { [comparisonOperator]: toObjectId(cursor.id) } }
-                    ]
-                };
-                clauses.push(cursorFilter);
-            }
-
-            const query = clauses.length > 0 ? { $and: clauses } : {};
+            const query = buildOpportunityListQuery({
+                search,
+                cursor,
+                sortBy,
+                sortOrder,
+                user: ctx.user
+            });
 
             const items = await OpportunityModel.find(query)
                 .select("title customerName estimatedValue status expectedCloseDate ownerId createdAt members presalesAssignments")
