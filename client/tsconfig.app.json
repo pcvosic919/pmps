@@ -31,6 +31,10 @@
     "../server/**/*",
     "../shared/**/*"
   ],
+  "exclude": [
+    "../server/**/*.test.ts",
+    "../server/**/*.spec.ts"
+  ],
   "references": [
     {
       "path": "./tsconfig.node.json"
