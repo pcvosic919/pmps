@@ -1,62 +1,48 @@
 import mongoose, { Schema, Document } from "mongoose";
-import { srStatuses, wbsVersionStatuses } from "../../shared/types";
+import { changeRequestStatuses, memberRoles, srStatuses, wbsVersionStatuses, type ChangeRequestInput, type ChangeRequestStatus, type CustomFieldValue, type MemberRole, type ServiceRequestAttachment, type SrStatus, type WbsItemInput, type WbsVersionInput, type WbsVersionStatus } from "../../shared/types";
 
-export interface IWbsItem {
+export interface IWbsItem extends Omit<WbsItemInput, "assigneeId"> {
     id: mongoose.Types.ObjectId;
-    title: string;
-    estimatedHours: number;
-    actualHours: number;
-    startDate?: Date;
-    endDate?: Date;
-    assigneeId?: mongoose.Types.ObjectId; // 參照 User._id
+    assigneeId?: mongoose.Types.ObjectId;
 }
 
-export interface IWbsVersion {
+export interface IWbsVersion extends Omit<WbsVersionInput, "submittedBy" | "reviewedBy" | "items"> {
     _id: mongoose.Types.ObjectId;
-    versionNumber: number;
-    status: string;
-    rejectionReason?: string;
+    status: WbsVersionStatus;
     submittedBy?: mongoose.Types.ObjectId;
     reviewedBy?: mongoose.Types.ObjectId;
     items: IWbsItem[];
-    createdAt: Date;
 }
 
-export interface IChangeRequest {
+export interface IChangeRequest extends Omit<ChangeRequestInput, "wbsItemId" | "requesterId"> {
     _id: mongoose.Types.ObjectId;
     wbsItemId?: mongoose.Types.ObjectId;
     requesterId: mongoose.Types.ObjectId;
-    reason: string;
-    hoursAdjustment: number;
-    amountAdjustment: number;
-    status: string;
-    rejectionReason?: string;
-    createdAt: Date;
+    status: ChangeRequestStatus;
+}
+
+export interface IServiceRequestMember {
+    userId: mongoose.Types.ObjectId;
+    memberRole: MemberRole;
+}
+
+export interface IServiceRequestAttachment extends Omit<ServiceRequestAttachment, "uploadedById"> {
+    uploadedById: mongoose.Types.ObjectId;
 }
 
 export interface IServiceRequest extends Document {
-    opportunityId?: mongoose.Types.ObjectId; // 參照 Opportunity._id
+    opportunityId?: mongoose.Types.ObjectId;
     title: string;
     contractAmount: number;
-    pmId: mongoose.Types.ObjectId; // 參照 User._id
-    status: string;
+    pmId: mongoose.Types.ObjectId;
+    status: SrStatus;
     marginEstimate: number;
     marginWarning: boolean;
-    members: {
-        userId: mongoose.Types.ObjectId;
-        memberRole: "owner" | "assignee" | "watcher";
-    }[];
-    attachments: {
-        fileName: string;
-        fileKey: string;
-        fileUrl: string;
-        fileSize: number;
-        mimeType: string;
-        uploadedById: mongoose.Types.ObjectId;
-        createdAt: Date;
-    }[];
+    members: IServiceRequestMember[];
+    attachments: IServiceRequestAttachment[];
     wbsVersions: IWbsVersion[];
-    changeRequests: IChangeRequest[]; // Added for CR history
+    changeRequests: IChangeRequest[];
+    customFields?: Array<Omit<CustomFieldValue, "fieldId"> & { fieldId: mongoose.Types.ObjectId }>;
     createdAt: Date;
     updatedAt: Date;
 }
@@ -86,7 +72,7 @@ const ChangeRequestSchema = new Schema<IChangeRequest>({
     reason: { type: String, required: true },
     hoursAdjustment: { type: Number, default: 0 },
     amountAdjustment: { type: Number, default: 0 },
-    status: { type: String, enum: ["pending_business", "pending_manager", "approved", "rejected"], default: "pending_business", required: true },
+    status: { type: String, enum: changeRequestStatuses, default: "pending_business", required: true },
     rejectionReason: { type: String },
     createdAt: { type: Date, default: Date.now }
 });
@@ -101,7 +87,7 @@ const ServiceRequestSchema = new Schema<IServiceRequest>({
     marginWarning: { type: Boolean, default: false },
     members: [{
         userId: { type: Schema.Types.ObjectId, ref: "User", required: true },
-        memberRole: { type: String, enum: ["owner", "assignee", "watcher"], default: "assignee", required: true }
+        memberRole: { type: String, enum: memberRoles, default: "assignee", required: true }
     }],
     attachments: [{
         fileName: { type: String, required: true },
@@ -113,7 +99,7 @@ const ServiceRequestSchema = new Schema<IServiceRequest>({
         createdAt: { type: Date, default: Date.now }
     }],
     wbsVersions: [WbsVersionSchema],
-    changeRequests: [ChangeRequestSchema] // Embedded CRs
+    changeRequests: [ChangeRequestSchema]
 }, { timestamps: true });
 
 export const ServiceRequestModel = mongoose.models.ServiceRequest || mongoose.model<IServiceRequest>("ServiceRequest", ServiceRequestSchema);

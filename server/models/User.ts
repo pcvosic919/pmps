@@ -1,5 +1,5 @@
 import mongoose, { Schema, Document } from "mongoose";
-import { roles } from "../../shared/types";
+import { authProviders, roles, skillLevels, type AuthProvider, type Role, type UserCostRate, type UserCostRateHistory, type UserSkill } from "../../shared/types";
 
 export interface IUser extends Document {
     email: string;
@@ -7,14 +7,14 @@ export interface IUser extends Document {
     password?: string;
     department?: string;
     title?: string;
-    role: string;
-    roles: string[];
-    provider: "manual" | "oauth" | "entra";
+    role: Role;
+    roles: Role[];
+    provider: AuthProvider;
     providerId?: string;
     isActive: boolean;
-    skills: { category: string; level: string }[];
-    costRate: { dailyRate: number; hourlyRate: number; currency: string };
-    costRateHistory?: { dailyRate: number; hourlyRate: number; currency: string; updatedAt: Date }[];
+    skills: UserSkill[];
+    costRate: UserCostRate;
+    costRateHistory?: UserCostRateHistory[];
     createdAt: Date;
     updatedAt: Date;
 }
@@ -26,13 +26,13 @@ const UserSchema = new Schema<IUser>({
     department: { type: String },
     title: { type: String },
     role: { type: String, enum: roles, default: "user", required: true },
-    roles: { type: [String], default: [] },
-    provider: { type: String, enum: ["manual", "oauth", "entra"], default: "manual", required: true },
+    roles: { type: [String], enum: roles, default: [] },
+    provider: { type: String, enum: authProviders, default: "manual", required: true },
     providerId: { type: String },
     isActive: { type: Boolean, default: true, required: true },
     skills: [{
         category: { type: String, required: true },
-        level: { type: String, enum: ["junior", "mid", "senior"], required: true }
+        level: { type: String, enum: skillLevels, required: true }
     }],
     costRate: {
         dailyRate: { type: Number, default: 0 },

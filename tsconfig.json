@@ -10,7 +10,6 @@
         "isolatedModules": true
     },
     "include": [
-        "scripts/**/*",
-        "drizzle/**/*"
+        "scripts/**/*"
     ]
 }

@@ -1,6 +1,5 @@
 import { initTRPC, TRPCError } from "@trpc/server";
 import { CreateExpressContextOptions } from "@trpc/server/adapters/express";
-import { db } from "../db";
 import { UserModel } from "../models/User";
 import { Role } from "../../shared/types";
 import jwt from "jsonwebtoken";

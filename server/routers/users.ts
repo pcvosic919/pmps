@@ -2,6 +2,7 @@ import { z } from "zod";
 import { router, protectedProcedure, roleProcedure } from "../_core/trpc";
 import { UserModel } from "../models/User";
 import { TRPCError } from "@trpc/server";
+import { roles } from "../../shared/types";
 
 export const usersRouter = router({
     list: roleProcedure(["admin", "manager"])
@@ -89,8 +90,8 @@ export const usersRouter = router({
             name: z.string(),
             email: z.string().email(),
             department: z.string().optional(),
-            role: z.enum(["admin", "manager", "pm", "presales", "tech", "business", "user"]).default("user"),
-            roles: z.array(z.string()).default([]),
+            role: z.enum(roles).default("user"),
+            roles: z.array(z.enum(roles)).default([]),
             isActive: z.boolean().default(true)
         }))
         .mutation(async ({ input }) => {
@@ -165,8 +166,8 @@ export const usersRouter = router({
             id: z.string(), // string for MongoDB _id
             department: z.string().optional(),
             title: z.string().optional(),
-            role: z.enum(["admin", "manager", "pm", "presales", "tech", "user"]).optional(),
-            roles: z.array(z.string()).optional(),
+            role: z.enum(roles).optional(),
+            roles: z.array(z.enum(roles)).optional(),
             isActive: z.boolean().optional()
         }))
         .mutation(async ({ input }) => {

@@ -1,8 +1,9 @@
 import mongoose, { Schema, Document } from "mongoose";
+import { notificationTypes, type NotificationType } from "../../shared/types";
 
 export interface INotification extends Document {
-    userId: mongoose.Types.ObjectId; // 參照 User._id
-    type: "warning" | "info" | "todo" | "approval";
+    userId: mongoose.Types.ObjectId;
+    type: NotificationType;
     message: string;
     isRead: boolean;
     actionUrl?: string;
@@ -11,7 +12,7 @@ export interface INotification extends Document {
 
 const NotificationSchema = new Schema<INotification>({
     userId: { type: Schema.Types.ObjectId, ref: "User", required: true },
-    type: { type: String, enum: ["warning", "info", "todo", "approval"], required: true },
+    type: { type: String, enum: notificationTypes, required: true },
     message: { type: String, required: true },
     isRead: { type: Boolean, default: false, required: true },
     actionUrl: { type: String }

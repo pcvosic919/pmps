@@ -6,6 +6,7 @@ import { UserModel } from "../models/User";
 import { NotificationModel } from "../models/Notification";
 import { SettlementLockModel } from "../models/SettlementLock";
 import { z } from "zod";
+import { settlementTypes } from "../../shared/types";
 
 export const analyticsRouter = router({
     getUtilization: roleProcedure(["admin", "manager", "pm"]).query(async () => {
@@ -109,7 +110,7 @@ export const analyticsRouter = router({
         }),
 
     lockSettlement: roleProcedure(["admin", "manager"])
-        .input(z.object({ month: z.string(), type: z.enum(["project", "presales"]) }))
+        .input(z.object({ month: z.string(), type: z.enum(settlementTypes) }))
         .mutation(async ({ ctx, input }) => {
             await SettlementLockModel.updateOne(
                 { month: input.month, type: input.type },

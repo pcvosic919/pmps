@@ -1,17 +1,18 @@
 import mongoose, { Schema, Document } from "mongoose";
+import { customFieldEntityTypes, customFieldTypes, type CustomFieldEntityType, type CustomFieldType } from "../../shared/types";
 
 export interface ICustomField extends Document {
-    entityType: "opportunity" | "sr" | "wbs" | "cr";
+    entityType: CustomFieldEntityType;
     name: string;
-    fieldType: "text" | "number" | "select" | "multiselect" | "date" | "switch" | "url";
+    fieldType: CustomFieldType;
     options?: string[];
     isRequired: boolean;
 }
 
 const CustomFieldSchema = new Schema<ICustomField>({
-    entityType: { type: String, enum: ["opportunity", "sr", "wbs", "cr"], required: true },
+    entityType: { type: String, enum: customFieldEntityTypes, required: true },
     name: { type: String, required: true },
-    fieldType: { type: String, enum: ["text", "number", "select", "multiselect", "date", "switch", "url"], required: true },
+    fieldType: { type: String, enum: customFieldTypes, required: true },
     options: [{ type: String }],
     isRequired: { type: Boolean, default: false }
 }, { timestamps: true });
