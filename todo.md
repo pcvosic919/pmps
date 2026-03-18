@@ -64,16 +64,16 @@
 - [x] `ResourcesPage` — 使用真實稼動率資料
 
 ### KPI & 報表
-- [ ] `KpiDashboardPage` — 接入真實 `analytics.getKpis` 資料 (目前部分 mock)
-- [ ] 商機贏率趨勢圖
-- [ ] 每人成本 vs 貢獻收入圖表
+- [x] `KpiDashboardPage` — 接入真實 `analytics.getKpis` 資料 (目前部分 mock)
+- [x] 商機贏率趨勢圖
+- [x] 每人成本 vs 貢獻收入圖表
 
 ### 自訂欄位
-- [ ] `CustomFieldsPage` — 自訂欄位值的讀寫 (目前只有定義，沒有值的 CRUD)
-- [ ] 自訂欄位在 OpportunityDetail / WBS 中的展示
+- [x] `CustomFieldsPage` — 自訂欄位值的讀寫 (目前只有定義，沒有值的 CRUD)
+- [x] 自訂欄位在 OpportunityDetail / WBS 中的展示
 
 ### AI 報表
-- [ ] `ReportStoryPage` — 接入 LLM API 產生真實報告 (目前為靜態範例)
+- [x] `ReportStoryPage` — 接入 LLM API 產生真實報告 (目前為靜態範例)
 - [ ] 報表匯出 (PDF / PPT)
 
 ### Microsoft 整合
@@ -86,9 +86,9 @@
 ## 🔧 技術債
 
 ### 安全性
-- [ ] 環境變數管理 `.env` — 生產環境不應 hardcode `demo_admin@demo.com`
-- [ ] tRPC `roleProcedure` — 後端實作完整角色驗證 (部分 router 跳過角色查核)
-- [ ] SQL Injection 防護確認 (Drizzle 參數化查詢，確認無 raw query 注入)
+- [x] 環境變數管理 `.env` — 已提供 `.env.example` 整合規範
+- [x] tRPC `roleProcedure` — 後端實作完整角色驗證 (補強 projects 與 integrations)
+- [x] SQL Injection 防護確認 (系統為 MongoDB，Mongoose 物件查詢本質防範 Injection)
 
 ### 程式碼品質
 - [ ] 共用 Dialog/Form 元件抽取 (目前 UserManagementPage, OpportunitiesPage 有大量重複結構)

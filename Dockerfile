@@ -21,6 +21,7 @@ WORKDIR /app
 ENV NODE_ENV=production
 
 # Copy necessary production files
+COPY --from=builder /app/node_modules ./node_modules
 COPY --from=builder /app/package.json .
 COPY --from=builder /app/pnpm-workspace.yaml .
 COPY --from=builder /app/server/package.json ./server/

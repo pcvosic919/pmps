@@ -52,6 +52,12 @@ export function OpportunityDetailPage() {
     const { data: timesheets, isLoading: isTimesheetsLoading, refetch: refetchTimesheets } = trpc.opportunities.getTimesheets.useQuery({ opportunityId: id }, { enabled: !!id });
     const { data: presalesList } = trpc.users.presalesList.useQuery();
     const { data: allUsers } = trpc.users.list.useQuery({ limit: 100 });
+    const { data: customFieldDefs } = trpc.system.getCustomFields.useQuery();
+
+    const oppFields = customFieldDefs?.filter((f: any) => f.entityType === "opportunity") || [];
+    const getFieldValue = (fieldId: string) => {
+        return (opp as any)?.customFields?.find((cf: any) => cf.fieldId === fieldId)?.value || "未填寫";
+    };
 
     // ------ Mutations ------
     const assignMutation = trpc.opportunities.assignPresales.useMutation({
@@ -256,6 +262,22 @@ export function OpportunityDetailPage() {
                         <p className="font-semibold">{new Date(opp.createdAt).toLocaleDateString()}</p>
                     </div>
                 </div>
+
+                {/* 自訂欄位表格展示 */}
+                {oppFields.length > 0 && (
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-6 pt-4 mt-4 border-t border-border/30 border-dashed animate-in fade-in duration-300">
+                        {oppFields.map((f: any) => (
+                            <div key={f.id} className="space-y-1">
+                                <span className="text-sm text-muted-foreground">{f.name}</span>
+                                <p className="font-semibold text-sm">
+                                    {f.fieldType === "switch" 
+                                        ? (getFieldValue(f.id) === "true" ? "✅ 啟用" : "❌ 關閉") 
+                                        : getFieldValue(f.id)}
+                                </p>
+                            </div>
+                        ))}
+                    </div>
+                )}
             </div>
 
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">

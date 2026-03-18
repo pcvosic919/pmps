@@ -1,56 +1,55 @@
-// @ts-ignore - Supress IDE module resolution cache error, tsc compiles this perfectly.
-import { drizzle } from "drizzle-orm/libsql";
-import { createClient } from "@libsql/client";
-import * as schema from "../drizzle/schema.js"; // Note: might need .js extensions or tsx
-import { eq } from "drizzle-orm";
+import mongoose from "mongoose";
+import { UserModel } from "../server/models/User";
+import { OpportunityModel } from "../server/models/Opportunity";
 import dotenv from "dotenv";
-import path from "path";
-import { fileURLToPath } from "url";
 
 dotenv.config();
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
-const dbPath = path.resolve(__dirname, "../server/sqlite.db");
+const MONGODB_URI = process.env.MONGODB_URI || "mongodb://localhost:27017/pmp_system";
 
 async function seed() {
-    const client = createClient({ url: `file:${dbPath}` });
-    const db = drizzle(client, { schema });
-
-    console.log("Seeding database at", dbPath);
-
-    // Insert Mock Users
-    const userRows = [
-        { email: "demo_admin@demo.com", name: "Demo Admin", role: "admin", roles: ["admin"] },
-        { email: "demo_manager@demo.com", name: "Demo Manager", role: "manager", roles: ["manager"] },
-        { email: "demo_business@demo.com", name: "Demo Business", role: "business", roles: ["business"] },
-        { email: "demo_presales@demo.com", name: "Demo Presales", role: "presales", roles: ["presales"] },
-        { email: "demo_pm@demo.com", name: "Demo PM", role: "pm", roles: ["pm"] },
-        { email: "demo_tech@demo.com", name: "Demo Tech", role: "tech", roles: ["tech"] },
-        { email: "demo_presales2@demo.com", name: "Demo Presales 2", role: "presales", roles: ["presales", "tech"] },
-    ];
+    console.log("Seeding database at", MONGODB_URI);
 
     try {
+        await mongoose.connect(MONGODB_URI);
+        console.log("Connected to MongoDB for seeding.");
+
+        // Clear existing to prevent duplicate email key errors on re-run
+        await UserModel.deleteMany({});
+        await OpportunityModel.deleteMany({});
+        console.log("Cleared existing Users and Opportunities.");
+
+        // Insert Mock Users
+        const userRows = [
+            { email: "demo_admin@demo.com", name: "Demo Admin", role: "admin", roles: ["admin"] },
+            { email: "demo_manager@demo.com", name: "Demo Manager", role: "manager", roles: ["manager"] },
+            { email: "demo_business@demo.com", name: "Demo Business", role: "business", roles: ["business"] },
+            { email: "demo_presales@demo.com", name: "Demo Presales", role: "presales", roles: ["presales"] },
+            { email: "demo_pm@demo.com", name: "Demo PM", role: "pm", roles: ["pm"] },
+            { email: "demo_tech@demo.com", name: "Demo Tech", role: "tech", roles: ["tech"] },
+            { email: "demo_presales2@demo.com", name: "Demo Presales 2", role: "presales", roles: ["presales", "tech"] },
+        ];
+
+        const createdUsers = [];
         for (const u of userRows) {
-            await db.insert(schema.usersTable).values({
+            const user = await UserModel.create({
                 email: u.email,
                 name: u.name,
-                role: u.role as any,
+                role: u.role,
                 roles: u.roles,
                 password: "password123",
-                provider: "manual"
-            }).onConflictDoUpdate({
-                target: schema.usersTable.email,
-                set: { name: u.name }
+                provider: "manual",
+                isActive: true
             });
+            createdUsers.push(user);
         }
 
         console.log("Users seeded successfully.");
 
         // Retrieve Admin as owner
-        const adminUser = await db.select().from(schema.usersTable).where(eq(schema.usersTable.email, "demo_admin@demo.com")).limit(1);
+        const adminUser = createdUsers.find(u => u.email === "demo_admin@demo.com");
 
-        if (adminUser.length > 0) {
+        if (adminUser) {
             const opps = [
                 { title: "Contoso 企業數位轉型", customerName: "Contoso", estimatedValue: 500000, status: "new" },
                 { title: "Fabrikam 資安強化", customerName: "Fabrikam", estimatedValue: 300000, status: "qualified" },
@@ -60,25 +59,21 @@ async function seed() {
             ];
 
             for (const o of opps) {
-                // Skip if already exists by checking roughly
-                const existing = await db.select().from(schema.opportunitiesTable).where(eq(schema.opportunitiesTable.title, o.title)).limit(1);
-                if (existing.length === 0) {
-                    await db.insert(schema.opportunitiesTable).values({
-                        title: o.title,
-                        customerName: o.customerName,
-                        estimatedValue: o.estimatedValue,
-                        status: o.status as any,
-                        ownerId: adminUser[0].id
-                    });
-                }
+                await OpportunityModel.create({
+                    title: o.title,
+                    customerName: o.customerName,
+                    estimatedValue: o.estimatedValue,
+                    status: o.status,
+                    ownerId: adminUser._id
+                });
             }
             console.log("Opportunities seeded successfully.");
         }
     } catch (err) {
         console.error("Failed to seed:", err);
     } finally {
-        // No explicit close needed for local file client usually, but can close if needed
-        // client.close()
+        await mongoose.disconnect();
+        console.log("MongoDB connection closed.");
     }
 }
 

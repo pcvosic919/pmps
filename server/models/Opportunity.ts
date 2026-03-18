@@ -17,6 +17,10 @@ export interface IOpportunity extends Document {
         estimatedHours: number;
         createdAt: Date;
     }[];
+    customFields?: {
+        fieldId: mongoose.Types.ObjectId;
+        value: string;
+    }[];
     createdAt: Date;
     updatedAt: Date;
 }
@@ -36,6 +40,10 @@ const OpportunitySchema = new Schema<IOpportunity>({
         techId: { type: Schema.Types.ObjectId, ref: "User", required: true },
         estimatedHours: { type: Number, required: true },
         createdAt: { type: Date, default: Date.now, required: true }
+    }],
+    customFields: [{
+        fieldId: { type: Schema.Types.ObjectId, ref: "CustomField" },
+        value: { type: String }
     }]
 }, { timestamps: true });
 

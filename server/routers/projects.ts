@@ -128,7 +128,7 @@ export const projectsRouter = router({
             })).sort((a: any, b: any) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
         }),
 
-    uploadSrAttachment: protectedProcedure
+    uploadSrAttachment: roleProcedure(["admin", "manager", "pm", "tech", "presales"])
         .input(z.object({
             srId: z.string(),
             fileName: z.string(),
@@ -251,7 +251,7 @@ export const projectsRouter = router({
         }));
     }),
 
-    createCr: protectedProcedure
+    createCr: roleProcedure(["admin", "pm", "tech", "presales"])
         .input(z.object({
             srId: z.string(),
             wbsItemId: z.string().optional(),

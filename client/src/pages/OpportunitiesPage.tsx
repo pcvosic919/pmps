@@ -41,6 +41,11 @@ export function OpportunitiesPage() {
     // Flatten the infinite pages into a single array
     const opps = data?.pages.flatMap(page => page.items) || [];
     const [isCreating, setIsCreating] = useState(false);
+    
+    // 自訂欄位數值暫存
+    const [customFieldsValues, setCustomFieldsValues] = useState<Record<string, string>>({});
+    const { data: customFieldDefs } = trpc.system.getCustomFields.useQuery();
+    const oppFields = customFieldDefs?.filter((f: any) => f.entityType === "opportunity") || [];
 
     const observerRef = useRef<HTMLDivElement>(null);
 
@@ -66,15 +71,22 @@ export function OpportunitiesPage() {
             setIsCreating(false);
             refetch();
             form.reset();
+            setCustomFieldsValues({}); // 清空
         }
     });
 
     const handleCreate = (values: z.infer<typeof oppSchema>) => {
+        const customFields = Object.entries(customFieldsValues).map(([fieldId, value]) => ({
+            fieldId,
+            value
+        }));
+
         createOpp.mutate({
             title: values.title,
             customerName: values.customerName,
             estimatedValue: values.estimatedValue,
-            status: values.status
+            status: values.status,
+            customFields: customFields.length > 0 ? customFields : undefined
         });
     };
 
@@ -294,6 +306,42 @@ export function OpportunitiesPage() {
                                     </FormItem>
                                 )}
                             />
+
+                            {oppFields.map((f: any) => (
+                                <FormItem key={f.id}>
+                                    <FormLabel className="text-sm font-medium">自訂：{f.name} {f.isRequired && <span className="text-destructive">*</span>}</FormLabel>
+                                    <FormControl>
+                                        {f.fieldType === "select" ? (
+                                            <Select onValueChange={(val) => setCustomFieldsValues(p => ({ ...p, [f.id]: val }))}>
+                                                <SelectTrigger>
+                                                    <SelectValue placeholder={`選擇 ${f.name}`} />
+                                                </SelectTrigger>
+                                                <SelectContent>
+                                                    {f.options?.map((opt: string) => (
+                                                        <SelectItem key={opt} value={opt}>{opt}</SelectItem>
+                                                    ))}
+                                                </SelectContent>
+                                            </Select>
+                                        ) : f.fieldType === "switch" ? (
+                                            <div className="flex items-center space-x-2 pt-1">
+                                                <input 
+                                                    type="checkbox" 
+                                                    className="w-4 h-4 rounded border-gray-300 text-primary focus:ring-primary" 
+                                                    onChange={(e) => setCustomFieldsValues(p => ({ ...p, [f.id]: e.target.checked ? "true" : "false" }))} 
+                                                />
+                                                <span className="text-xs text-muted-foreground">啟用 / 開啟</span>
+                                            </div>
+                                        ) : (
+                                            <Input 
+                                                type={f.fieldType === "number" ? "number" : "text"} 
+                                                placeholder={`請輸入 ${f.name}`} 
+                                                onChange={(e) => setCustomFieldsValues(p => ({ ...p, [f.id]: e.target.value }))} 
+                                            />
+                                        )}
+                                    </FormControl>
+                                </FormItem>
+                            ))}
+
                             <div className="mt-6 flex justify-end space-x-3">
                                 <Button type="button" variant="outline" onClick={() => setIsCreating(false)}>
                                     取消

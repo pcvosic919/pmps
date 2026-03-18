@@ -71,10 +71,14 @@ export const opportunitiesRouter = router({
             customerName: z.string(),
             estimatedValue: z.number().default(0),
             status: z.enum(["new", "qualified", "presales_active", "won", "converted", "lost"]).default("new"),
-            expectedCloseDate: z.date().optional()
+            expectedCloseDate: z.date().optional(),
+            customFields: z.array(z.object({
+                fieldId: z.string(),
+                value: z.string()
+            })).optional()
         }))
         .mutation(async ({ input, ctx }) => {
-            const ownerId = ctx.user.id; // ctx.user.id is already string from jwt? Wait, if previous was number, it should be parsed to string
+            const ownerId = ctx.user.id;
 
             const result = await OpportunityModel.create({
                 ...input,

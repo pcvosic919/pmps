@@ -1,15 +1,17 @@
 import { trpc } from "../lib/trpc";
-import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip as RechartsTooltip, BarChart, Bar, XAxis, YAxis, CartesianGrid } from "recharts";
+import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip as RechartsTooltip, BarChart, Bar, LineChart, Line, XAxis, YAxis, CartesianGrid } from "recharts";
 import { TrendingUp, Users, AlertTriangle, CheckCircle, PieChart as PieChartIcon } from "lucide-react";
 
 export function KpiDashboardPage() {
     const { data: kpiData, isLoading: kpiLoading } = trpc.analytics.getKpiData.useQuery();
     const { data: utData, isLoading: utLoading } = trpc.analytics.getUtilization.useQuery();
+    const { data: trendData, isLoading: trendLoading } = trpc.analytics.getWinRateTrend.useQuery();
+    const { data: costRevData, isLoading: costRevLoading } = trpc.analytics.getCostVsRevenuePerPerson.useQuery();
 
     const oppData = [
-        { name: '待處理 / 協銷中', value: kpiData?.activeProjects || 15, color: '#3b82f6' },
-        { name: '已成交', value: kpiData?.winRate || 8, color: '#10b981' },
-        { name: '失敗', value: 3, color: '#ef4444' },
+        { name: '進行中 / 協銷中', value: kpiData?.pendingOpps || 0, color: '#3b82f6' },
+        { name: '已成交', value: kpiData?.wonOpps || 0, color: '#10b981' },
+        { name: '流標 / 失敗', value: kpiData?.lostOpps || 0, color: '#ef4444' },
     ];
 
     const utilizationData = utData?.slice(0, 5).map(u => ({
@@ -18,7 +20,7 @@ export function KpiDashboardPage() {
         target: 80
     })) || [];
 
-    if (kpiLoading || utLoading) {
+    if (kpiLoading || utLoading || trendLoading || costRevLoading) {
         return <div className="p-8 text-center text-muted-foreground">載入 KPI 數據中...</div>;
     }
 
@@ -121,6 +123,47 @@ export function KpiDashboardPage() {
                                 <YAxis tick={{ fontSize: 12 }} axisLine={false} tickLine={false} />
                                 <RechartsTooltip cursor={{ fill: '#88888811' }} />
                                 <Bar dataKey="稼動率" fill="var(--color-primary)" radius={[4, 4, 0, 0]} />
+                            </BarChart>
+                        </ResponsiveContainer>
+                    </div>
+                </div>
+            </div>
+
+            <div className="grid md:grid-cols-2 gap-6">
+                {/* Win Rate Trend Line Chart */}
+                <div className="bg-card border border-border rounded-xl p-6 shadow-sm">
+                    <h3 className="text-lg font-bold mb-6 flex items-center">
+                        <TrendingUp className="w-5 h-5 mr-2 text-muted-foreground" />
+                        商機勝率趨勢 (近半年)
+                    </h3>
+                    <div className="h-64">
+                        <ResponsiveContainer width="100%" height="100%">
+                            <LineChart data={trendData}>
+                                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#88888833" />
+                                <XAxis dataKey="month" tick={{ fontSize: 12 }} axisLine={false} tickLine={false} />
+                                <YAxis tick={{ fontSize: 12 }} axisLine={false} tickLine={false} />
+                                <RechartsTooltip cursor={{ fill: '#88888811' }} />
+                                <Line type="monotone" dataKey="winRate" stroke="var(--color-primary)" strokeWidth={2} activeDot={{ r: 6 }} />
+                            </LineChart>
+                        </ResponsiveContainer>
+                    </div>
+                </div>
+
+                {/* Cost vs Revenue Bar Chart */}
+                <div className="bg-card border border-border rounded-xl p-6 shadow-sm">
+                    <h3 className="text-lg font-bold mb-6 flex items-center">
+                        <PieChartIcon className="w-5 h-5 mr-2 text-muted-foreground" />
+                        每人成本 vs 貢獻營收 (PM)
+                    </h3>
+                    <div className="h-64">
+                        <ResponsiveContainer width="100%" height="100%">
+                            <BarChart data={costRevData}>
+                                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#88888833" />
+                                <XAxis dataKey="name" tick={{ fontSize: 12 }} axisLine={false} tickLine={false} />
+                                <YAxis tick={{ fontSize: 12 }} axisLine={false} tickLine={false} />
+                                <RechartsTooltip cursor={{ fill: '#88888811' }} />
+                                <Bar dataKey="cost" name="成本" fill="#ef4444" radius={[4, 4, 0, 0]} />
+                                <Bar dataKey="revenue" name="營收" fill="#10b981" radius={[4, 4, 0, 0]} />
                             </BarChart>
                         </ResponsiveContainer>
                     </div>

@@ -82,10 +82,31 @@ export function ReportStoryPage() {
                             匯出 PDF
                         </button>
                     </div>
-                    <div className="p-6 prose prose-sm max-w-none dark:prose-invert">
-                        {report.split("\n").map((line, i) => (
-                            <p key={i} className="mb-2 leading-relaxed whitespace-pre-wrap">{line}</p>
-                        ))}
+                    <div className="p-6 prose prose-sm max-w-none dark:prose-invert space-y-1">
+                        {report.split("\n").map((line, i) => {
+                            const trimmed = line.trim();
+                            if (trimmed.startsWith("# ")) {
+                                return <h1 key={i} className="text-2xl font-black mt-4 mb-2 text-primary">{trimmed.replace("# ", "")}</h1>;
+                            }
+                            if (trimmed.startsWith("## ")) {
+                                return <h2 key={i} className="text-xl font-bold mt-3 mb-2 border-b pb-1 border-border/50 text-foreground">{trimmed.replace("## ", "")}</h2>;
+                            }
+                            if (trimmed.startsWith("### ")) {
+                                return <h3 key={i} className="text-lg font-bold mt-2 mb-1 text-foreground/90">{trimmed.replace("### ", "")}</h3>;
+                            }
+                            if (trimmed.startsWith("> ")) {
+                                return <div key={i} className="bg-muted px-4 py-2 rounded-r-lg border-l-4 border-primary text-xs my-2 italic text-muted-foreground">{trimmed.replace("> ", "")}</div>;
+                            }
+                            if (trimmed.startsWith("- ")) {
+                                return <li key={i} className="ml-5 list-disc text-sm text-foreground/80 leading-relaxed">{trimmed.replace("- ", "")}</li>;
+                            }
+                            if (trimmed === "---") {
+                                return <hr key={i} className="my-4 border-border/60" />;
+                            }
+                            if (!trimmed) return <div key={i} className="h-2" />;
+                            
+                            return <p key={i} className="text-sm text-foreground/85 leading-relaxed whitespace-pre-wrap">{line}</p>;
+                        })}
                     </div>
                 </div>
             )}
