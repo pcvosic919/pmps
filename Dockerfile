@@ -15,9 +15,6 @@ RUN pnpm install --frozen-lockfile
 # Build the whole monorepo
 RUN pnpm build
 
-# Prune devDependencies for production
-RUN pnpm install --prod --frozen-lockfile || pnpm prune --prod
-
 # Stage 3: Runner
 FROM node:22-alpine AS runner
 WORKDIR /app
