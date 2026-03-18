@@ -29,10 +29,3 @@ jobs:
           docker build . -t ${{ secrets.ACR_LOGIN_SERVER }}/pmps:${{ github.sha }} -t ${{ secrets.ACR_LOGIN_SERVER }}/pmps:latest
           docker push ${{ secrets.ACR_LOGIN_SERVER }}/pmps:${{ github.sha }}
           docker push ${{ secrets.ACR_LOGIN_SERVER }}/pmps:latest
-
-      - name: 'Deploy to Azure Web App for Containers'
-        uses: azure/webapps-deploy@v3
-        with:
-          app-name: 'howardlabpmp' # 修正為不帶 s 的正確名稱
-          publish-profile: ${{ secrets.AZURE_WEBAPP_PUBLISH_PROFILE }}
-          images: '${{ secrets.ACR_LOGIN_SERVER }}/pmps:${{ github.sha }}'
