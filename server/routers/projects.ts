@@ -9,16 +9,42 @@ import { OpportunityModel } from "../models/Opportunity";
 import mongoose from "mongoose";
 import { TRPCError } from "@trpc/server";
 import { approvalActions, srStatuses } from "../../shared/types";
+import {
+    assertAuthorized,
+    assertFound,
+    canAccessChangeRequest,
+    canAccessServiceRequest,
+    canManageServiceRequestStatus,
+    canManageTimesheet,
+    canReviewChangeRequest,
+    isAdminOrManager,
+} from "../_core/authorization";
 
 export const projectsRouter = router({
-    srList: protectedProcedure.query(async () => {
+    srList: protectedProcedure.query(async ({ ctx }) => {
         const items = await ServiceRequestModel.find().lean();
-        return items.map(item => ({
-            ...item,
-            id: item._id.toString(),
-            opportunityId: item.opportunityId?.toString(),
-            pmId: item.pmId.toString()
-        }));
+        const opportunityIds = [...new Set(items
+            .map(item => item.opportunityId?.toString())
+            .filter((id): id is string => !!id))];
+        const opportunities = opportunityIds.length > 0
+            ? await OpportunityModel.find({ _id: { $in: opportunityIds } })
+                .select("ownerId members presalesAssignments")
+                .lean()
+            : [];
+        const opportunityMap = new Map(opportunities.map(opp => [opp._id.toString(), opp]));
+
+        return items
+            .filter(item => canAccessServiceRequest(
+                ctx.user,
+                item,
+                item.opportunityId ? opportunityMap.get(item.opportunityId.toString()) : null
+            ))
+            .map(item => ({
+                ...item,
+                id: item._id.toString(),
+                opportunityId: item.opportunityId?.toString(),
+                pmId: item.pmId.toString()
+            }));
     }),
 
     createSR: roleProcedure(["admin", "business", "pm"])
@@ -47,12 +73,26 @@ export const projectsRouter = router({
             return { id: sr._id.toString() };
         }),
 
-    updateSRStatus: roleProcedure(["admin", "business", "pm", "manager"])
+    updateSRStatus: protectedProcedure
         .input(z.object({
             id: z.string(),
             status: z.enum(srStatuses)
         }))
-        .mutation(async ({ input }) => {
+        .mutation(async ({ input, ctx }) => {
+            const sr = assertFound(
+                await ServiceRequestModel.findById(input.id).lean(),
+                "找不到該服務請求"
+            );
+            const opportunity = sr.opportunityId
+                ? await OpportunityModel.findById(sr.opportunityId)
+                    .select("ownerId members presalesAssignments")
+                    .lean()
+                : null;
+            assertAuthorized(
+                canManageServiceRequestStatus(ctx.user, sr, opportunity),
+                "您沒有權限更新服務請求狀態"
+            );
+
             await ServiceRequestModel.updateOne(
                 { _id: input.id },
                 { $set: { status: input.status } }
@@ -87,7 +127,7 @@ export const projectsRouter = router({
             }));
         }),
 
-    reviewWbsVersion: roleProcedure(["admin", "manager"])
+    reviewWbsVersion: protectedProcedure
         .input(z.object({
             id: z.string(), // wbsVersion _id
             action: z.enum(approvalActions),
@@ -95,9 +135,14 @@ export const projectsRouter = router({
         }))
         .mutation(async ({ ctx, input }) => {
             const sr = await ServiceRequestModel.findOne({ "wbsVersions._id": input.id });
-            if (!sr) throw new TRPCError({ code: "NOT_FOUND" });
+            if (!sr) throw new TRPCError({ code: "NOT_FOUND", message: "找不到該 WBS 版本" });
+            assertAuthorized(
+                isAdminOrManager(ctx.user),
+                "您沒有權限審核此 WBS 版本"
+            );
 
             const version = sr.wbsVersions.id(input.id);
+            if (!version) throw new TRPCError({ code: "NOT_FOUND", message: "找不到該 WBS 版本" });
             if (version.status !== "submitted") {
                 throw new TRPCError({ code: "BAD_REQUEST", message: "此版本不在待審核狀態" });
             }
@@ -118,9 +163,19 @@ export const projectsRouter = router({
 
     srAttachmentsList: protectedProcedure
         .input(z.object({ srId: z.string() }))
-        .query(async ({ input }) => {
-            const sr = await ServiceRequestModel.findById(input.srId).select("attachments").lean();
-            if (!sr) return [];
+        .query(async ({ input, ctx }) => {
+            const sr = assertFound(
+                await ServiceRequestModel.findById(input.srId)
+                    .select("attachments pmId members wbsVersions.items.assigneeId changeRequests opportunityId")
+                    .lean(),
+                "找不到該服務請求"
+            );
+            const opportunity = sr.opportunityId
+                ? await OpportunityModel.findById(sr.opportunityId)
+                    .select("ownerId members presalesAssignments")
+                    .lean()
+                : null;
+            assertAuthorized(canAccessServiceRequest(ctx.user, sr, opportunity), "您沒有權限檢視附件");
             return (sr.attachments || []).map((a: any) => ({
                 ...a,
                 id: a._id.toString(),
@@ -138,6 +193,19 @@ export const projectsRouter = router({
             fileUrl: z.string()
         }))
         .mutation(async ({ ctx, input }) => {
+            const sr = assertFound(
+                await ServiceRequestModel.findById(input.srId)
+                    .select("pmId members wbsVersions.items.assigneeId changeRequests opportunityId")
+                    .lean(),
+                "找不到該服務請求"
+            );
+            const opportunity = sr.opportunityId
+                ? await OpportunityModel.findById(sr.opportunityId)
+                    .select("ownerId members presalesAssignments")
+                    .lean()
+                : null;
+            assertAuthorized(canAccessServiceRequest(ctx.user, sr, opportunity), "您沒有權限上傳附件");
+
             // Generating dummy fileKey for mongo structure consistency
             const fileKey = `uploads/${input.srId}/${Date.now()}-${input.fileName}`;
 
@@ -161,9 +229,17 @@ export const projectsRouter = router({
 
     srById: protectedProcedure
         .input(z.object({ id: z.string() }))
-        .query(async ({ input }) => {
-            const sr = await ServiceRequestModel.findById(input.id).lean();
-            if (!sr) throw new TRPCError({ code: "NOT_FOUND" });
+        .query(async ({ input, ctx }) => {
+            const sr = assertFound(
+                await ServiceRequestModel.findById(input.id).lean(),
+                "找不到該服務請求"
+            );
+            const opportunity = sr.opportunityId
+                ? await OpportunityModel.findById(sr.opportunityId)
+                    .select("ownerId members presalesAssignments")
+                    .lean()
+                : null;
+            assertAuthorized(canAccessServiceRequest(ctx.user, sr, opportunity), "您沒有權限檢視此服務請求");
 
             const wbsVersions = (sr.wbsVersions || []).map((v: any) => {
                 const totalEstimatedHours = (v.items || []).reduce((sum: number, item: any) => sum + item.estimatedHours, 0);
@@ -201,7 +277,13 @@ export const projectsRouter = router({
         }))
         .mutation(async ({ ctx, input }) => {
             const sr = await ServiceRequestModel.findById(input.srId);
-            if (!sr) throw new TRPCError({ code: "NOT_FOUND" });
+            if (!sr) throw new TRPCError({ code: "NOT_FOUND", message: "找不到該服務請求" });
+            const opportunity = sr.opportunityId
+                ? await OpportunityModel.findById(sr.opportunityId)
+                    .select("ownerId members presalesAssignments")
+                .lean()
+                : null;
+            assertAuthorized(canAccessServiceRequest(ctx.user, sr, opportunity), "您沒有權限提交 WBS 版本");
 
             const newVersion = {
                 versionNumber: input.versionNumber,
@@ -223,33 +305,37 @@ export const projectsRouter = router({
             return { success: true };
         }),
 
-    crList: protectedProcedure.query(async () => {
-        const result = await ServiceRequestModel.aggregate([
-            { $unwind: "$changeRequests" },
-            { $sort: { "changeRequests.createdAt": -1 } },
-            {
-                $project: {
-                    id: "$changeRequests._id",
-                    srId: "$_id",
-                    wbsItemId: "$changeRequests.wbsItemId",
-                    requesterId: "$changeRequests.requesterId",
-                    reason: "$changeRequests.reason",
-                    hoursAdjustment: "$changeRequests.hoursAdjustment",
-                    amountAdjustment: "$changeRequests.amountAdjustment",
-                    status: "$changeRequests.status",
-                    createdAt: "$changeRequests.createdAt",
-                    srTitle: "$title"
-                }
-            }
-        ]);
+    crList: protectedProcedure.query(async ({ ctx }) => {
+        const srs = await ServiceRequestModel.find()
+            .select("title pmId members wbsVersions.items.assigneeId changeRequests opportunityId")
+            .lean();
+        const opportunityIds = [...new Set(srs
+            .map(sr => sr.opportunityId?.toString())
+            .filter((id): id is string => !!id))];
+        const opportunities = opportunityIds.length > 0
+            ? await OpportunityModel.find({ _id: { $in: opportunityIds } })
+                .select("ownerId members presalesAssignments")
+                .lean()
+            : [];
+        const opportunityMap = new Map(opportunities.map(opp => [opp._id.toString(), opp]));
 
-        return result.map(cr => ({
-            ...cr,
-            id: cr.id.toString(),
-            srId: cr.srId.toString(),
-            wbsItemId: cr.wbsItemId?.toString(),
-            requesterId: cr.requesterId.toString()
-        }));
+        return srs.flatMap(sr => {
+            const opportunity = sr.opportunityId ? opportunityMap.get(sr.opportunityId.toString()) : null;
+            return (sr.changeRequests || [])
+                .filter((changeRequest: any) => canAccessChangeRequest(ctx.user, sr, changeRequest, opportunity))
+                .map((changeRequest: any) => ({
+                    id: changeRequest._id.toString(),
+                    srId: sr._id.toString(),
+                    wbsItemId: changeRequest.wbsItemId?.toString(),
+                    requesterId: changeRequest.requesterId.toString(),
+                    reason: changeRequest.reason,
+                    hoursAdjustment: changeRequest.hoursAdjustment,
+                    amountAdjustment: changeRequest.amountAdjustment,
+                    status: changeRequest.status,
+                    createdAt: changeRequest.createdAt,
+                    srTitle: sr.title
+                }));
+        }).sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
     }),
 
     createCr: roleProcedure(["admin", "pm", "tech", "presales"])
@@ -263,6 +349,12 @@ export const projectsRouter = router({
         .mutation(async ({ ctx, input }) => {
             const sr = await ServiceRequestModel.findById(input.srId);
             if (!sr) throw new TRPCError({ code: "NOT_FOUND", message: "找不到該服務請求" });
+            const opportunity = sr.opportunityId
+                ? await OpportunityModel.findById(sr.opportunityId)
+                    .select("ownerId members presalesAssignments")
+                    .lean()
+                : null;
+            assertAuthorized(canAccessServiceRequest(ctx.user, sr, opportunity), "您沒有權限建立變更請求");
 
             const crId = new mongoose.Types.ObjectId();
             sr.changeRequests.push({
@@ -299,19 +391,28 @@ export const projectsRouter = router({
             return { success: true };
         }),
 
-    reviewCr: roleProcedure(["admin", "manager", "business"])
+    reviewCr: protectedProcedure
         .input(z.object({
             srId: z.string(),
             crId: z.string(),
             action: z.enum(approvalActions),
             rejectionReason: z.string().optional()
         }))
-        .mutation(async ({ input }) => {
+        .mutation(async ({ ctx, input }) => {
             const sr = await ServiceRequestModel.findOne({ "_id": input.srId, "changeRequests._id": input.crId });
             if (!sr) throw new TRPCError({ code: "NOT_FOUND", message: "找不到該變更請求" });
+            const opportunity = sr.opportunityId
+                ? await OpportunityModel.findById(sr.opportunityId)
+                    .select("ownerId members presalesAssignments")
+                    .lean()
+                : null;
 
             const cr = sr.changeRequests.id(input.crId);
             if (!cr) throw new TRPCError({ code: "NOT_FOUND", message: "找不到該變更詳細項" });
+            assertAuthorized(
+                canReviewChangeRequest(ctx.user, cr, opportunity),
+                "您沒有權限審核此變更請求"
+            );
 
             if (input.action === "rejected") {
                 cr.status = "rejected";
@@ -407,6 +508,19 @@ export const projectsRouter = router({
             description: z.string()
         }))
         .mutation(async ({ ctx, input }) => {
+            const sr = assertFound(
+                await ServiceRequestModel.findById(input.srId)
+                    .select("pmId members wbsVersions.items.assigneeId changeRequests opportunityId")
+                    .lean(),
+                "找不到該服務請求"
+            );
+            const opportunity = sr.opportunityId
+                ? await OpportunityModel.findById(sr.opportunityId)
+                    .select("ownerId members presalesAssignments")
+                    .lean()
+                : null;
+            assertAuthorized(canAccessServiceRequest(ctx.user, sr, opportunity), "您沒有權限填寫此專案工時");
+
             const user = await UserModel.findById(ctx.user.id).select("costRate").lean();
             const hourlyRate = user?.costRate?.hourlyRate || 500;
 
@@ -428,9 +542,16 @@ export const projectsRouter = router({
     deleteProjectTimesheet: roleProcedure(["tech", "presales"])
         .input(z.object({ id: z.string() }))
         .mutation(async ({ ctx, input }) => {
-            const ts = await TimesheetModel.findById(input.id);
-            if (!ts) throw new TRPCError({ code: "NOT_FOUND" });
-            if (ts.techId.toString() !== ctx.user.id) throw new TRPCError({ code: "FORBIDDEN" });
+            const ts = assertFound(await TimesheetModel.findById(input.id).lean(), "找不到該專案工時");
+            const sr = ts.srId
+                ? await ServiceRequestModel.findById(ts.srId)
+                    .select("pmId")
+                    .lean()
+                : null;
+            assertAuthorized(
+                canManageTimesheet(ctx.user, ts, { serviceRequest: sr }),
+                "您沒有權限刪除此專案工時"
+            );
 
             await TimesheetModel.deleteOne({ _id: input.id });
             return { success: true };
