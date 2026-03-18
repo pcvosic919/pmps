@@ -25,7 +25,6 @@ type TestOpportunity = {
     estimatedValue: number;
 };
 
-type QueryValue = string | number | Date | mongoose.Types.ObjectId | null;
 type Query = Record<string, unknown>;
 
 const managerUser: TestUser = {
@@ -259,7 +258,7 @@ const paginate = ({
     const matched = sortOpportunities(opportunities.filter((item) => matchesQuery(item, query)), sortBy, sortOrder);
     const items = matched.slice(0, limit + 1);
     const pageItems = items.slice(0, limit);
-    const lastItem = pageItems.at(-1);
+    const lastItem = pageItems[pageItems.length - 1];
 
     return {
         query,
