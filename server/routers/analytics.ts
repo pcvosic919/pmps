@@ -6,7 +6,6 @@ import { UserModel } from "../models/User";
 import { NotificationModel } from "../models/Notification";
 import { SettlementLockModel } from "../models/SettlementLock";
 import { z } from "zod";
-import { GoogleGenerativeAI } from "@google/generative-ai";
 
 export const analyticsRouter = router({
     getUtilization: roleProcedure(["admin", "manager", "pm"]).query(async () => {
