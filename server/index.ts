@@ -5,14 +5,13 @@ import dotenv from "dotenv";
 import * as trpcExpress from "@trpc/server/adapters/express";
 import jwt from "jsonwebtoken";
 import path from "path";
+import mongoose from "mongoose";
 import { appRouter } from "./routers";
 import { createContext } from "./_core/trpc";
 import { connectDB } from "./db";
 import { notificationEvents } from "./_core/events";
 
 dotenv.config();
-
-void connectDB().catch(console.error);
 
 const app = express();
 app.use(cors());
@@ -34,13 +33,17 @@ app.get("/api/notifications/stream", (req, res) => {
     }
 
     try {
-        const decoded = jwt.verify(token, process.env.JWT_SECRET || "pmp-secret-key") as any;
+        const decoded = jwt.verify(token, process.env.JWT_SECRET || "pmp-secret-key") as { id: string };
         const userId = decoded.id;
 
         res.setHeader("Content-Type", "text/event-stream");
         res.setHeader("Cache-Control", "no-cache");
         res.setHeader("Connection", "keep-alive");
         res.flushHeaders();
+
+        const keepAlive = setInterval(() => {
+            res.write(": ping\n\n");
+        }, 30000);
 
         const onNotify = (data: any) => {
             if (data.userId === userId) {
@@ -51,6 +54,7 @@ app.get("/api/notifications/stream", (req, res) => {
         notificationEvents.on("notify", onNotify);
 
         req.on("close", () => {
+            clearInterval(keepAlive);
             notificationEvents.off("notify", onNotify);
         });
     } catch (_) {
@@ -60,8 +64,12 @@ app.get("/api/notifications/stream", (req, res) => {
 
 app.get("/api/health", async (_req, res) => {
     try {
-        const { UserModel } = await import("./models/User");
-        await UserModel.findOne().limit(1);
+        if (mongoose.connection.readyState !== 1) {
+            res.status(503).json({ status: "error", message: "Database not ready" });
+            return;
+        }
+
+        await mongoose.connection.db?.admin().ping();
         res.json({ status: "ok", message: "Database connected successfully" });
     } catch (_err) {
         res.status(500).json({ status: "error", message: "Database connection failed" });
@@ -82,6 +90,15 @@ app.get("*", (req, res) => {
 
 const PORT = process.env.PORT ? parseInt(process.env.PORT, 10) : 5000;
 
-app.listen(PORT, "0.0.0.0", () => {
-    console.log(`Server started on port ${PORT}`);
+async function startServer() {
+    await connectDB();
+
+    app.listen(PORT, "0.0.0.0", () => {
+        console.log(`Server started on port ${PORT}`);
+    });
+}
+
+void startServer().catch((error) => {
+    console.error("Failed to start server", error);
+    process.exit(1);
 });

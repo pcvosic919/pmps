@@ -2,45 +2,70 @@ import { useState, useEffect } from "react";
 import { trpc } from "../lib/trpc";
 import { Bell, CheckCircle2, Info, AlertTriangle, Clock } from "lucide-react";
 
+type NotificationItem = {
+    id: string;
+    type: string;
+    message: string;
+    isRead: boolean;
+    actionUrl?: string;
+    createdAt: string;
+    userId: string;
+};
+
 export function NotificationsPage() {
-    const { data, isLoading, refetch } = trpc.analytics.getNotifications.useQuery();
-    const notifications = (data || []) as any[];
+    const utils = trpc.useUtils();
+    const queryKey = { limit: 50 } as const;
+    const { data, isLoading } = trpc.analytics.getNotifications.useQuery(queryKey);
+    const notifications = (data || []) as NotificationItem[];
     const [filterType, setFilterType] = useState<string | null>(null);
 
     const markRead = trpc.analytics.markNotificationRead.useMutation({
-        onSuccess: () => refetch()
+        onSuccess: (_result, variables) => {
+            utils.analytics.getNotifications.setData(queryKey, (current) =>
+                current?.map((item) => item.id === variables.id ? { ...item, isRead: true } : item) ?? current
+            );
+        }
     });
     const markAllRead = trpc.analytics.markAllNotificationsRead.useMutation({
-        onSuccess: () => refetch()
+        onSuccess: () => {
+            utils.analytics.getNotifications.setData(queryKey, (current) =>
+                current?.map((item) => ({ ...item, isRead: true })) ?? current
+            );
+        }
     });
 
     useEffect(() => {
         const token = localStorage.getItem("pmp_auth_token");
         if (!token) return;
 
-        // 建立 SSE 連線
         const eventSource = new EventSource(`/api/notifications/stream?token=${token}`);
-        
-        eventSource.onmessage = () => {
-            refetch(); // 收到新通知刷新
+
+        eventSource.onmessage = (event) => {
+            const incoming = JSON.parse(event.data) as NotificationItem;
+
+            utils.analytics.getNotifications.setData(queryKey, (current) => {
+                const existing = current ?? [];
+                const withoutDuplicate = existing.filter((item) => item.id !== incoming.id);
+                return [incoming, ...withoutDuplicate].slice(0, queryKey.limit);
+            });
         };
 
         return () => {
             eventSource.close();
         };
-    }, [refetch]);
+    }, [utils]);
 
     if (isLoading) return <div className="p-8 text-center text-muted-foreground">載入通知中...</div>;
 
-    const unreadCount = notifications?.filter((n: any) => !n.isRead).length || 0;
-    const filteredNotifications = notifications?.filter((n: any) => !filterType || n.type === filterType);
+    const unreadCount = notifications.filter((n) => !n.isRead).length;
+    const filteredNotifications = notifications.filter((n) => !filterType || n.type === filterType);
 
     const getIcon = (type: string) => {
         switch (type) {
-            case 'warning': return <AlertTriangle className="w-5 h-5 text-amber-500" />;
-            case 'info': return <Info className="w-5 h-5 text-blue-500" />;
-            case 'todo': return <Clock className="w-5 h-5 text-indigo-500" />;
-            case 'approval': return <CheckCircle2 className="w-5 h-5 text-emerald-500" />;
+            case "warning": return <AlertTriangle className="w-5 h-5 text-amber-500" />;
+            case "info": return <Info className="w-5 h-5 text-blue-500" />;
+            case "todo": return <Clock className="w-5 h-5 text-indigo-500" />;
+            case "approval": return <CheckCircle2 className="w-5 h-5 text-emerald-500" />;
             default: return <Bell className="w-5 h-5 text-gray-500" />;
         }
     };
@@ -66,7 +91,6 @@ export function NotificationsPage() {
                 )}
             </div>
 
-            {/* 分類篩選 */}
             <div className="flex space-x-2">
                 {[
                     { label: "全部", value: null },
@@ -78,7 +102,7 @@ export function NotificationsPage() {
                     <button
                         key={btn.label}
                         onClick={() => setFilterType(btn.value)}
-                        className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-colors border ${filterType === btn.value ? 'bg-primary text-white border-primary shadow-sm' : 'bg-card text-muted-foreground border-border hover:bg-muted'}`}
+                        className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-colors border ${filterType === btn.value ? "bg-primary text-white border-primary shadow-sm" : "bg-card text-muted-foreground border-border hover:bg-muted"}`}
                     >
                         {btn.label}
                     </button>
@@ -86,22 +110,22 @@ export function NotificationsPage() {
             </div>
 
             <div className="bg-card border rounded-xl shadow-sm overflow-hidden">
-                {filteredNotifications?.length === 0 ? (
+                {filteredNotifications.length === 0 ? (
                     <div className="p-8 text-center text-muted-foreground">
                         目前沒有任何通知
                     </div>
                 ) : (
                     <ul className="divide-y divide-border">
-                        {filteredNotifications?.map((n: any) => (
+                        {filteredNotifications.map((n) => (
                             <li
                                 key={n.id}
-                                className={`p-4 flex items-start space-x-4 transition-colors ${!n.isRead ? 'bg-primary/5 hover:bg-primary/10' : 'hover:bg-muted/30'}`}
+                                className={`p-4 flex items-start space-x-4 transition-colors ${!n.isRead ? "bg-primary/5 hover:bg-primary/10" : "hover:bg-muted/30"}`}
                             >
                                 <div className="mt-1 flex-shrink-0">
                                     {getIcon(n.type)}
                                 </div>
                                 <div className="flex-1 min-w-0">
-                                    <p className={`text-sm ${!n.isRead ? 'font-semibold text-foreground' : 'text-muted-foreground'}`}>
+                                    <p className={`text-sm ${!n.isRead ? "font-semibold text-foreground" : "text-muted-foreground"}`}>
                                         {n.message}
                                     </p>
                                     <p className="text-xs text-muted-foreground mt-1">

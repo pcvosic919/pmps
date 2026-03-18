@@ -28,4 +28,9 @@ const TimesheetSchema = new Schema<ITimesheet>({
     wbsItemId: { type: Schema.Types.ObjectId }
 }, { timestamps: true });
 
+TimesheetSchema.index({ type: 1, workDate: 1 });
+TimesheetSchema.index({ techId: 1, type: 1, workDate: -1 });
+TimesheetSchema.index({ opportunityId: 1, type: 1, workDate: -1 });
+TimesheetSchema.index({ srId: 1, type: 1, workDate: -1 });
+
 export const TimesheetModel = mongoose.models.Timesheet || mongoose.model<ITimesheet>("Timesheet", TimesheetSchema);

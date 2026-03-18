@@ -153,7 +153,6 @@ export function OpportunitiesPage() {
                             const [field, order] = e.target.value.split("-");
                             setSortBy(field);
                             setSortOrder(order as "asc" | "desc");
-                            refetch(); // Trigger refresh with new sort
                         }}
                         className="text-sm border border-border rounded-md px-3 py-1.5 bg-background font-semibold hover:border-primary/50 transition-colors focus:outline-none cursor-pointer"
                     >

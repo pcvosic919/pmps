@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Link } from "wouter";
+import { Link, useLocation } from "wouter";
 import {
     Building2,
     Users,
@@ -49,6 +49,7 @@ const navItems = [
 
 export function AppLayout({ children }: AppLayoutProps) {
     const [sidebarOpen, setSidebarOpen] = useState(true);
+    const [location] = useLocation();
     const { instance } = useMsal();
 
     const handleLogout = async () => {
@@ -84,7 +85,7 @@ export function AppLayout({ children }: AppLayoutProps) {
                         <Link key={item.href} href={item.href}>
                             <a className={cn(
                                 "flex items-center px-4 py-2 mx-2 rounded-md transition-colors",
-                                window.location.pathname === item.href
+                                location === item.href
                                     ? "bg-primary text-primary-foreground"
                                     : "text-muted-foreground hover:bg-muted hover:text-foreground",
                                 !sidebarOpen && "justify-center px-0"
