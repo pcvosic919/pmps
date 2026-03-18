@@ -22,6 +22,7 @@ import {
 } from "lucide-react";
 import { cn } from "../lib/utils";
 import { useMsal } from "@azure/msal-react";
+import { useCurrentUser } from "../lib/useCurrentUser";
 
 interface AppLayoutProps {
     children: React.ReactNode;
@@ -51,6 +52,7 @@ export function AppLayout({ children }: AppLayoutProps) {
     const [sidebarOpen, setSidebarOpen] = useState(true);
     const [location] = useLocation();
     const { instance } = useMsal();
+    const { user } = useCurrentUser();
 
     const handleLogout = async () => {
         // 清除 Token
@@ -100,12 +102,12 @@ export function AppLayout({ children }: AppLayoutProps) {
                 <div className="p-4 border-t border-border">
                     <div className={cn("flex items-center", !sidebarOpen && "justify-center")}>
                         <div className="w-8 h-8 rounded-full bg-primary/20 flex items-center justify-center text-primary font-bold">
-                            A
+                            {(user?.name?.[0] || user?.email?.[0] || "U").toUpperCase()}
                         </div>
                         {sidebarOpen && (
                             <div className="ml-3 flex-1">
-                                <p className="text-sm font-medium leading-none">Admin User</p>
-                                <p className="text-xs text-muted-foreground mt-1">admin</p>
+                                <p className="text-sm font-medium leading-none">{user?.name || "使用者"}</p>
+                                <p className="text-xs text-muted-foreground mt-1">{user?.role || "loading"}</p>
                             </div>
                         )}
                         {sidebarOpen && (
@@ -127,8 +129,9 @@ export function AppLayout({ children }: AppLayoutProps) {
                         <button className="text-sm font-medium text-muted-foreground hover:text-foreground transition-colors">聯絡方式</button>
                     </div>
                     <div className="flex justify-end">
-                        {/* Future: notifications bell, theme toggle */}
-                        <div className="text-sm text-muted-foreground">Demo Environment</div>
+                        <div className="text-sm text-muted-foreground">
+                            {user ? `${user.name} · ${user.role}` : "載入使用者資訊中..."}
+                        </div>
                     </div>
                 </header>
 

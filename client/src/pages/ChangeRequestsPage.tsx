@@ -9,6 +9,7 @@ import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { useCurrentUser } from "../lib/useCurrentUser";
 
 const crSchema = z.object({
     srId: z.string().min(1, "請選擇關聯 SR"),
@@ -23,16 +24,9 @@ export function ChangeRequestsPage() {
     const { data, isLoading, refetch } = trpc.projects.crList.useQuery();
     const { data: srList } = trpc.projects.srList.useQuery();
     const crs = (data || []) as any[];
-
-    // Decode token for role checking
-    const token = localStorage.getItem("pmp_auth_token");
-    const user = token ? JSON.parse(atob(token.split('.')[1])) : null;
+    const { hasRole } = useCurrentUser();
 
     const canReview = (crStatus: string) => {
-        const role = user?.role;
-        const roles = user?.roles || [];
-        const hasRole = (r: string) => role === r || roles.includes(r);
-        
         if (hasRole("admin")) return true;
         if (crStatus === "pending_business" && hasRole("business")) return true;
         if (crStatus === "pending_manager" && hasRole("manager")) return true;

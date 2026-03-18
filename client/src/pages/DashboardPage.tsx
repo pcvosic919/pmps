@@ -1,52 +1,59 @@
 import { trpc } from "../lib/trpc";
 import { Link } from "wouter";
-import { CheckCircle2, AlertCircle, TrendingUp, Users } from "lucide-react";
+import { CheckCircle2, TrendingUp, Users, FolderKanban, Clock3 } from "lucide-react";
+import { useCurrentUser } from "../lib/useCurrentUser";
 
 export function DashboardPage() {
-    const { data: usersData, isLoading } = trpc.users.list.useQuery({ limit: 5 });
+    const { user, hasRole } = useCurrentUser();
+    const isAdminLike = hasRole("admin") || hasRole("manager");
+    const { data: usersData, isLoading } = trpc.users.list.useQuery(
+        { limit: 5 },
+        { enabled: isAdminLike }
+    );
 
-    // For demo: default to a business user view if we are "demo_business@demo.com", otherwise admin
-    // We'll simulate this by just rendering a role-based conditional UI.
-    // In a real app we'd fetch the current user's role from a `/api/me` or similar.
-    const isBusinessRole = false; // Mock toggle for demo
+    if (!user) {
+        return <div className="p-8 text-center text-muted-foreground">載入使用者資訊中...</div>;
+    }
 
-    if (isBusinessRole) {
+    if (!isAdminLike) {
         return (
             <div className="space-y-6">
                 <div>
-                    <h2 className="text-3xl font-bold tracking-tight">業務首頁 (Business Dashboard)</h2>
-                    <p className="text-muted-foreground mt-1">追蹤您的商機轉換與目標達成率</p>
+                    <h2 className="text-3xl font-bold tracking-tight">{user.name} 的工作台</h2>
+                    <p className="text-muted-foreground mt-1">依您的帳號權限顯示個人可存取的商機、專案與工時入口</p>
                 </div>
 
                 <div className="grid gap-4 md:grid-cols-3">
-                    <div className="p-6 bg-card border border-border shadow-sm rounded-xl hover:border-primary/50 transition-colors">
-                        <h3 className="font-medium text-sm text-muted-foreground mb-2">本季目標達成</h3>
-                        <div className="text-3xl font-bold text-primary">68%</div>
-                        <div className="w-full bg-muted rounded-full h-2 mt-3">
-                            <div className="bg-primary h-2 rounded-full" style={{ width: '68%' }}></div>
-                        </div>
-                    </div>
-                    <div className="p-6 bg-card border border-border shadow-sm rounded-xl hover:border-primary/50 transition-colors">
-                        <h3 className="font-medium text-sm text-muted-foreground mb-2 flex items-center">
-                            <AlertCircle className="w-4 h-4 mr-1 text-amber-500" />
-                            需推動商機
-                        </h3>
-                        <div className="text-3xl font-bold">3</div>
-                        <p className="text-xs text-muted-foreground mt-2">停滯超過 14 天</p>
-                    </div>
-                    <div className="p-6 bg-card border border-border shadow-sm rounded-xl hover:border-primary/50 transition-colors">
-                        <h3 className="font-medium text-sm text-muted-foreground mb-2 flex items-center">
-                            <CheckCircle2 className="w-4 h-4 mr-1 text-green-500" />
-                            已成交金額
-                        </h3>
-                        <div className="text-3xl font-bold">NT$ 2.4M</div>
-                        <p className="text-xs text-muted-foreground mt-2">超越去年同期 12%</p>
-                    </div>
-                </div>
-
-                <div className="bg-card border rounded-xl p-6 shadow-sm">
-                    <h3 className="text-lg font-bold mb-4">最近商機動態</h3>
-                    <p className="text-muted-foreground text-sm">此區塊將顯示您負責的商機狀態變更。請前往<Link href="/opportunities"><a className="text-primary hover:underline ml-1">商機管理</a></Link>查看所有項目。</p>
+                    <Link href="/opportunities">
+                        <a className="p-6 bg-card border border-border shadow-sm rounded-xl hover:border-primary/50 transition-colors">
+                            <h3 className="font-medium text-sm text-muted-foreground mb-2 flex items-center">
+                                <TrendingUp className="w-4 h-4 mr-1 text-primary" />
+                                我的商機 / 協作商機
+                            </h3>
+                            <div className="text-lg font-bold">查看商機管理</div>
+                            <p className="text-xs text-muted-foreground mt-2">追蹤自己可存取的商機與協銷進度</p>
+                        </a>
+                    </Link>
+                    <Link href="/projects">
+                        <a className="p-6 bg-card border border-border shadow-sm rounded-xl hover:border-primary/50 transition-colors">
+                            <h3 className="font-medium text-sm text-muted-foreground mb-2 flex items-center">
+                                <FolderKanban className="w-4 h-4 mr-1 text-primary" />
+                                我的專案
+                            </h3>
+                            <div className="text-lg font-bold">查看專案管理</div>
+                            <p className="text-xs text-muted-foreground mt-2">依您的帳號顯示可查看與可填報的專案</p>
+                        </a>
+                    </Link>
+                    <Link href={hasRole("presales") || hasRole("tech") ? "/project-timesheets" : "/notifications"}>
+                        <a className="p-6 bg-card border border-border shadow-sm rounded-xl hover:border-primary/50 transition-colors">
+                            <h3 className="font-medium text-sm text-muted-foreground mb-2 flex items-center">
+                                <Clock3 className="w-4 h-4 mr-1 text-primary" />
+                                我的待辦
+                            </h3>
+                            <div className="text-lg font-bold">前往常用入口</div>
+                            <p className="text-xs text-muted-foreground mt-2">快速進入工時填報、通知與專案作業</p>
+                        </a>
+                    </Link>
                 </div>
             </div>
         );
@@ -55,34 +62,34 @@ export function DashboardPage() {
     return (
         <div className="space-y-6">
             <div>
-                <h2 className="text-3xl font-bold tracking-tight">管理員儀表板 (Admin Dashboard)</h2>
+                <h2 className="text-3xl font-bold tracking-tight">管理儀表板</h2>
                 <p className="text-muted-foreground mt-1">系統全局概覽與使用者狀態</p>
             </div>
 
             <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
                 <div className="p-6 bg-card border border-border shadow-sm rounded-xl">
                     <h3 className="font-medium text-sm text-muted-foreground flex items-center justify-between">
-                        待指派商機
+                        待關注商機
                         <TrendingUp className="h-4 w-4 text-blue-500" />
                     </h3>
-                    <div className="text-2xl font-bold mt-2">12</div>
-                    <p className="text-xs text-muted-foreground mt-1 text-blue-500">+2% from last month</p>
+                    <div className="text-2xl font-bold mt-2">即時查看</div>
+                    <p className="text-xs text-muted-foreground mt-1 text-blue-500">請前往商機管理進行排序與篩選</p>
                 </div>
 
                 <div className="p-6 bg-card border border-border shadow-sm rounded-xl">
                     <h3 className="font-medium text-sm text-muted-foreground flex items-center justify-between">
-                        執行中 SR
+                        執行中專案
                         <Users className="h-4 w-4 text-green-500" />
                     </h3>
-                    <div className="text-2xl font-bold mt-2">8</div>
-                    <p className="text-xs text-muted-foreground mt-1 text-green-500">+18% from last month</p>
+                    <div className="text-2xl font-bold mt-2">依權限顯示</div>
+                    <p className="text-xs text-muted-foreground mt-1 text-green-500">專案列表已依帳號權限過濾</p>
                 </div>
             </div>
 
             <div className="mt-8">
-                <h3 className="text-xl font-bold mb-4">最新活躍使用者 (API 連線測試)</h3>
+                <h3 className="text-xl font-bold mb-4">最新活躍使用者</h3>
                 {isLoading ? (
-                    <div className="text-center py-10 text-muted-foreground">載入中... (Loading users)</div>
+                    <div className="text-center py-10 text-muted-foreground">載入中...</div>
                 ) : (
                     <div className="border border-border rounded-xl bg-card overflow-hidden shadow-sm">
                         <table className="w-full text-sm">
@@ -109,6 +116,13 @@ export function DashboardPage() {
                         </table>
                     </div>
                 )}
+            </div>
+
+            <div className="bg-card border rounded-xl p-6 shadow-sm">
+                <h3 className="text-lg font-bold mb-4 flex items-center"><CheckCircle2 className="w-4 h-4 mr-2 text-primary" />管理建議</h3>
+                <p className="text-sm text-muted-foreground">
+                    請持續檢查商機轉案後是否已鎖定、WBS 是否僅由主管審核，以及月結後工時是否禁止異動。
+                </p>
             </div>
         </div>
     );

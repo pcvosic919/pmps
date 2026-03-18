@@ -61,7 +61,7 @@ export function OpportunityDetailPage() {
 
     // ------ Mutations ------
     const assignMutation = trpc.opportunities.assignPresales.useMutation({
-        onSuccess: () => { refetchAssignments(); setShowAssignModal(false); setAssignTechId(""); setAssignHours("8"); setAssignError(""); },
+        onSuccess: () => { refetchAssignments(); refetchOpp(); setShowAssignModal(false); setAssignTechId(""); setAssignHours("8"); setAssignError(""); },
         onError: (err) => setAssignError(err.message || "指派失敗")
     });
 
@@ -127,6 +127,7 @@ export function OpportunityDetailPage() {
     if (!opp) return <div className="p-8 text-center text-red-500">找不到商機</div>;
 
     const currentStatus = OPP_STATUSES.find(s => s.value === opp.status) ?? OPP_STATUSES[0];
+    const isConverted = opp.status === "converted";
 
     const getTechName = (techId: string) => {
         const found = presalesList?.find((u: any) => u.id === techId);
@@ -213,13 +214,14 @@ export function OpportunityDetailPage() {
                             {/* Status badge with dropdown */}
                             <div className="relative">
                                 <button
-                                    onClick={() => setShowStatusDropdown(!showStatusDropdown)}
+                                    onClick={() => !isConverted && setShowStatusDropdown(!showStatusDropdown)}
+                                    disabled={isConverted}
                                     className={`px-3 py-1 rounded-full text-xs font-semibold border flex items-center gap-1 hover:opacity-80 transition-opacity ${currentStatus.color}`}
                                 >
                                     {currentStatus.label}
                                     <ChevronDown className="w-3 h-3" />
                                 </button>
-                                {showStatusDropdown && (
+                                {showStatusDropdown && !isConverted && (
                                     <div className="absolute top-full mt-1 left-0 bg-card border border-border rounded-lg shadow-lg z-10 min-w-[140px] py-1">
                                         {OPP_STATUSES.filter(s => s.value !== opp.status).map(s => (
                                             <button
@@ -241,11 +243,12 @@ export function OpportunityDetailPage() {
                     </div>
                     {/* 一鍵建 SR */}
                     <button
-                        onClick={() => { setShowSRModal(true); setSrTitle(opp.title + " - SR"); setSrError(""); }}
-                        className="flex items-center gap-2 px-4 py-2 bg-primary text-primary-foreground rounded-lg hover:bg-primary/90 transition-colors text-sm font-medium shadow-sm"
+                        onClick={() => { if (!isConverted) { setShowSRModal(true); setSrTitle(opp.title + " - SR"); setSrError(""); } }}
+                        disabled={isConverted}
+                        className="flex items-center gap-2 px-4 py-2 bg-primary text-primary-foreground rounded-lg hover:bg-primary/90 transition-colors text-sm font-medium shadow-sm disabled:opacity-50"
                     >
                         <FileText className="w-4 h-4" />
-                        一鍵建立 SR / 專案
+                        {isConverted ? "已轉案，請結案重建" : "一鍵建立 SR / 專案"}
                     </button>
                 </div>
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-6 pt-6 border-t border-border/50">
@@ -285,8 +288,9 @@ export function OpportunityDetailPage() {
                 <div className="bg-card border border-border/50 rounded-xl shadow-sm overflow-hidden flex flex-col">
                     <div className="p-4 border-b border-border/50 bg-muted/30 flex justify-between items-center">
                         <h3 className="font-bold flex items-center"><Briefcase className="w-5 h-5 mr-2 text-primary" />協銷指派</h3>
-                        <button onClick={() => { setShowAssignModal(true); setAssignError(""); }}
-                            className="text-xs font-medium text-primary hover:text-primary/80 flex items-center px-2 py-1 rounded hover:bg-primary/10 transition-colors">
+                        <button onClick={() => { if (!isConverted) { setShowAssignModal(true); setAssignError(""); } }}
+                            disabled={isConverted}
+                            className="text-xs font-medium text-primary hover:text-primary/80 flex items-center px-2 py-1 rounded hover:bg-primary/10 transition-colors disabled:opacity-50">
                             <Plus className="w-3 h-3 mr-1" /> 新增指派
                         </button>
                     </div>
@@ -315,8 +319,9 @@ export function OpportunityDetailPage() {
                 <div className="bg-card border border-border/50 rounded-xl shadow-sm overflow-hidden flex flex-col">
                     <div className="p-4 border-b border-border/50 bg-muted/30 flex justify-between items-center">
                         <h3 className="font-bold flex items-center"><Users className="w-5 h-5 mr-2 text-primary" />商機成員</h3>
-                        <button onClick={() => { setShowMemberModal(true); setMemberError(""); }}
-                            className="text-xs font-medium text-primary hover:text-primary/80 flex items-center px-2 py-1 rounded hover:bg-primary/10 transition-colors">
+                        <button onClick={() => { if (!isConverted) { setShowMemberModal(true); setMemberError(""); } }}
+                            disabled={isConverted}
+                            className="text-xs font-medium text-primary hover:text-primary/80 flex items-center px-2 py-1 rounded hover:bg-primary/10 transition-colors disabled:opacity-50">
                             <UserPlus className="w-3 h-3 mr-1" /> 新增成員
                         </button>
                     </div>
@@ -338,8 +343,9 @@ export function OpportunityDetailPage() {
                                             </div>
                                             {m.memberRole !== "owner" && (
                                                 <button
-                                                    onClick={() => removeMemberMutation.mutate({ memberId: m.id })}
-                                                    className="p-1 text-muted-foreground hover:text-red-500 opacity-0 group-hover:opacity-100 transition-all rounded"
+                                                    onClick={() => !isConverted && removeMemberMutation.mutate({ memberId: m.id })}
+                                                    disabled={isConverted}
+                                                    className="p-1 text-muted-foreground hover:text-red-500 opacity-0 group-hover:opacity-100 transition-all rounded disabled:opacity-40"
                                                     title="移除成員"
                                                 >
                                                     <Trash2 className="w-3.5 h-3.5" />

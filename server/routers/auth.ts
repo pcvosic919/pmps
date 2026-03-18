@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { router, publicProcedure } from "../_core/trpc";
+import { router, publicProcedure, protectedProcedure } from "../_core/trpc";
 import { UserModel } from "../models/User";
 import { TRPCError } from "@trpc/server";
 import jwt from "jsonwebtoken";
@@ -7,6 +7,15 @@ import jwt from "jsonwebtoken";
 const JWT_SECRET = process.env.JWT_SECRET || "default_secret_key_for_dev";
 
 export const authRouter = router({
+    me: protectedProcedure.query(async ({ ctx }) => ({
+        id: ctx.user.id,
+        email: ctx.user.email,
+        name: ctx.user.name,
+        role: ctx.user.role,
+        roles: ctx.user.roles,
+        isActive: ctx.user.isActive
+    })),
+
     login: publicProcedure
         .input(z.object({ email: z.string().email(), password: z.string() }))
         .mutation(async ({ input }) => {
@@ -21,7 +30,7 @@ export const authRouter = router({
             }
 
             const token = jwt.sign(
-                { id: user._id.toString(), email: user.email, role: user.role },
+                { id: user._id.toString(), email: user.email, role: user.role, roles: user.roles || [], name: user.name },
                 JWT_SECRET,
                 { expiresIn: "1d" }
             );
@@ -57,7 +66,7 @@ export const authRouter = router({
                 }
 
                 const token = jwt.sign(
-                    { id: user._id.toString(), email: user.email, role: user.role },
+                    { id: user._id.toString(), email: user.email, role: user.role, roles: user.roles || [], name: user.name },
                     JWT_SECRET,
                     { expiresIn: "1d" }
                 );

@@ -2,6 +2,7 @@ import { z } from "zod";
 import { router, protectedProcedure, roleProcedure } from "../_core/trpc";
 import { ServiceRequestModel } from "../models/ServiceRequest";
 import { NotificationModel } from "../models/Notification";
+import { SettlementLockModel } from "../models/SettlementLock";
 import { notificationEvents } from "../_core/events";
 import { TimesheetModel } from "../models/Timesheet";
 import { UserModel } from "../models/User";
@@ -17,8 +18,40 @@ import {
     canManageServiceRequestStatus,
     canManageTimesheet,
     canReviewChangeRequest,
-    isAdminOrManager,
 } from "../_core/authorization";
+
+const getMonthKey = (value: Date) => value.toISOString().slice(0, 7);
+
+const assertSettlementUnlocked = async (month: string, type: "presales" | "project") => {
+    const lock = await SettlementLockModel.findOne({ month, type, isLocked: true }).lean();
+    if (lock) {
+        throw new TRPCError({
+            code: "BAD_REQUEST",
+            message: `${month} 的${type === "project" ? "專案" : "協銷"}工時已鎖定，無法再異動`
+        });
+    }
+};
+
+const buildSrMembers = (creatorId: string, pmId: string) => {
+    const members: Array<{ userId: string; memberRole: "owner" | "assignee" }> = [
+        { userId: creatorId, memberRole: "owner" }
+    ];
+    if (pmId !== creatorId) {
+        members.push({ userId: pmId, memberRole: "assignee" as const });
+    }
+    return members;
+};
+
+const getEffectiveWbsVersion = (sr: any) => {
+    const versions = [...(sr.wbsVersions || [])];
+    if (versions.length === 0) {
+        return null;
+    }
+
+    const approvedVersions = versions.filter((version: any) => version.status === "approved");
+    const source = approvedVersions.length > 0 ? approvedVersions : versions;
+    return source.sort((left: any, right: any) => right.versionNumber - left.versionNumber)[0];
+};
 
 export const projectsRouter = router({
     srList: protectedProcedure.input(z.object({
@@ -72,13 +105,27 @@ export const projectsRouter = router({
             pmId: z.string(),
             opportunityId: z.string().optional()
         }))
-        .mutation(async ({ input }) => {
+        .mutation(async ({ input, ctx }) => {
+            if (input.opportunityId) {
+                const opportunity = assertFound(
+                    await OpportunityModel.findById(input.opportunityId)
+                        .select("ownerId members presalesAssignments status")
+                        .lean(),
+                    "找不到該商機"
+                );
+                assertAuthorized(canAccessServiceRequest(ctx.user, { members: buildSrMembers(ctx.user.id, input.pmId) }, opportunity), "您沒有權限從此商機建立 SR");
+                if (opportunity.status === "converted") {
+                    throw new TRPCError({ code: "BAD_REQUEST", message: "此商機已轉案，請勿重複建立 SR" });
+                }
+            }
+
             const sr = await ServiceRequestModel.create({
                 title: input.title,
                 contractAmount: input.contractAmount,
                 pmId: input.pmId,
                 opportunityId: input.opportunityId ? new mongoose.Types.ObjectId(input.opportunityId) : undefined,
-                status: "new"
+                status: "new",
+                members: buildSrMembers(ctx.user.id, input.pmId)
             });
 
             if (input.opportunityId) {
@@ -118,7 +165,7 @@ export const projectsRouter = router({
             return { success: true };
         }),
 
-    getWbsPendingReview: roleProcedure(["admin", "manager"])
+    getWbsPendingReview: roleProcedure(["manager"])
         .query(async () => {
             const pending = await ServiceRequestModel.aggregate([
                 { $unwind: "$wbsVersions" },
@@ -145,7 +192,7 @@ export const projectsRouter = router({
             }));
         }),
 
-    reviewWbsVersion: protectedProcedure
+    reviewWbsVersion: roleProcedure(["manager"])
         .input(z.object({
             id: z.string(), // wbsVersion _id
             action: z.enum(approvalActions),
@@ -154,10 +201,6 @@ export const projectsRouter = router({
         .mutation(async ({ ctx, input }) => {
             const sr = await ServiceRequestModel.findOne({ "wbsVersions._id": input.id });
             if (!sr) throw new TRPCError({ code: "NOT_FOUND", message: "找不到該 WBS 版本" });
-            assertAuthorized(
-                isAdminOrManager(ctx.user),
-                "您沒有權限審核此 WBS 版本"
-            );
 
             const version = sr.wbsVersions.id(input.id);
             if (!version) throw new TRPCError({ code: "NOT_FOUND", message: "找不到該 WBS 版本" });
@@ -460,26 +503,29 @@ export const projectsRouter = router({
 
     getMyProjectAssignments: protectedProcedure
         .query(async ({ ctx }) => {
-            const list = await ServiceRequestModel.aggregate([
-                { $unwind: "$wbsVersions" },
-                { $unwind: "$wbsVersions.items" },
-                { $match: { "wbsVersions.items.assigneeId": new mongoose.Types.ObjectId(ctx.user.id) } },
-                {
-                    $project: {
-                        id: "$wbsVersions.items._id",
-                        srId: "$_id",
-                        title: "$wbsVersions.items.title",
-                        estimatedHours: "$wbsVersions.items.estimatedHours",
-                        srTitle: "$title"
-                    }
-                }
-            ]);
+            const srs = await ServiceRequestModel.find({
+                "wbsVersions.items.assigneeId": new mongoose.Types.ObjectId(ctx.user.id)
+            })
+                .select("title wbsVersions")
+                .lean();
 
-            return list.map(item => ({
-                ...item,
-                id: item.id.toString(),
-                srId: item.srId.toString()
-            }));
+            return srs.flatMap((sr: any) => {
+                const effectiveVersion = getEffectiveWbsVersion(sr);
+                if (!effectiveVersion) {
+                    return [];
+                }
+
+                return (effectiveVersion.items || [])
+                    .filter((item: any) => item.assigneeId?.toString() === ctx.user.id)
+                    .map((item: any) => ({
+                        id: item._id.toString(),
+                        srId: sr._id.toString(),
+                        title: item.title,
+                        estimatedHours: item.estimatedHours,
+                        actualHours: item.actualHours || 0,
+                        srTitle: sr.title
+                    }));
+            });
         }),
 
     getMyProjectTimesheets: protectedProcedure
@@ -526,18 +572,33 @@ export const projectsRouter = router({
             description: z.string()
         }))
         .mutation(async ({ ctx, input }) => {
-            const sr = assertFound(
+            await assertSettlementUnlocked(getMonthKey(input.workDate), "project");
+
+            const sr: any = assertFound(
+                await ServiceRequestModel.findById(input.srId),
+                "找不到該服務請求"
+            );
+            const srAccessView = assertFound(
                 await ServiceRequestModel.findById(input.srId)
                     .select("pmId members wbsVersions.items.assigneeId changeRequests opportunityId")
                     .lean(),
                 "找不到該服務請求"
             );
-            const opportunity = sr.opportunityId
-                ? await OpportunityModel.findById(sr.opportunityId)
+            const opportunity = srAccessView.opportunityId
+                ? await OpportunityModel.findById(srAccessView.opportunityId)
                     .select("ownerId members presalesAssignments")
                     .lean()
                 : null;
-            assertAuthorized(canAccessServiceRequest(ctx.user, sr, opportunity), "您沒有權限填寫此專案工時");
+            assertAuthorized(canAccessServiceRequest(ctx.user, srAccessView, opportunity), "您沒有權限填寫此專案工時");
+
+            const effectiveVersion = getEffectiveWbsVersion(sr);
+            const wbsItem = effectiveVersion?.items?.id(input.wbsItemId);
+            if (!effectiveVersion || !wbsItem) {
+                throw new TRPCError({ code: "BAD_REQUEST", message: "找不到可填報的 WBS 項目" });
+            }
+            if (wbsItem.assigneeId?.toString() !== ctx.user.id) {
+                throw new TRPCError({ code: "FORBIDDEN", message: "您只能填寫指派給自己的 WBS 項目" });
+            }
 
             const user = await UserModel.findById(ctx.user.id).select("costRate").lean();
             const hourlyRate = user?.costRate?.hourlyRate || 500;
@@ -554,6 +615,10 @@ export const projectsRouter = router({
                 description: input.description,
                 costAmount: costAmount
             });
+
+            wbsItem.actualHours = (wbsItem.actualHours || 0) + input.hours;
+            sr.markModified("wbsVersions");
+            await sr.save();
             return { success: true };
         }),
 
@@ -561,15 +626,27 @@ export const projectsRouter = router({
         .input(z.object({ id: z.string() }))
         .mutation(async ({ ctx, input }) => {
             const ts = assertFound(await TimesheetModel.findById(input.id).lean(), "找不到該專案工時");
-            const sr = ts.srId
+            await assertSettlementUnlocked(getMonthKey(new Date(ts.workDate)), "project");
+            const serviceRequestDoc = ts.srId
                 ? await ServiceRequestModel.findById(ts.srId)
-                    .select("pmId")
-                    .lean()
+                    .select("pmId wbsVersions")
                 : null;
             assertAuthorized(
-                canManageTimesheet(ctx.user, ts, { serviceRequest: sr }),
+                canManageTimesheet(ctx.user, ts, { serviceRequest: serviceRequestDoc }),
                 "您沒有權限刪除此專案工時"
             );
+
+            if (serviceRequestDoc && ts.wbsItemId) {
+                for (const version of serviceRequestDoc.wbsVersions || []) {
+                    const item = version.items?.id(ts.wbsItemId);
+                    if (item) {
+                        item.actualHours = Math.max((item.actualHours || 0) - ts.hours, 0);
+                        serviceRequestDoc.markModified("wbsVersions");
+                        await serviceRequestDoc.save();
+                        break;
+                    }
+                }
+            }
 
             await TimesheetModel.deleteOne({ _id: input.id });
             return { success: true };

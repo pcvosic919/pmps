@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { router, protectedProcedure, roleProcedure } from "../_core/trpc";
 import { OpportunityModel } from "../models/Opportunity";
+import { SettlementLockModel } from "../models/SettlementLock";
 import { TimesheetModel } from "../models/Timesheet";
 import { ServiceRequestModel } from "../models/ServiceRequest";
 import { TRPCError } from "@trpc/server";
@@ -11,6 +12,7 @@ import {
     canAccessOpportunity,
     canManageOpportunity,
     canManageTimesheet,
+    hasAnyRole,
 } from "../_core/authorization";
 import { decodeCursor, encodeCursor, toObjectId } from "../_core/cursor";
 
@@ -37,6 +39,54 @@ const buildSearchQuery = (search?: string) => {
     };
 };
 
+const getAccessibleOpportunityQuery = (ctxUser: { id: string; role: string; roles: string[] }) => {
+    if (hasAnyRole(ctxUser as any, ["admin", "manager"])) {
+        return {};
+    }
+
+    return {
+        $or: [
+            { ownerId: toObjectId(ctxUser.id) },
+            { "members.userId": toObjectId(ctxUser.id) },
+            { "presalesAssignments.techId": toObjectId(ctxUser.id) }
+        ]
+    };
+};
+
+const assertOpportunityNotConverted = (opportunity: { status?: string }) => {
+    if (opportunity.status === "converted") {
+        throw new TRPCError({ code: "BAD_REQUEST", message: "已轉案的商機不可再修改，請結案重建" });
+    }
+};
+
+const assertOpportunityAssignable = (opportunity: { status?: string }) => {
+    if (["won", "lost", "converted"].includes(opportunity.status || "")) {
+        throw new TRPCError({ code: "BAD_REQUEST", message: "此商機目前狀態不可再指派協銷" });
+    }
+};
+
+const getMonthKey = (value: Date) => value.toISOString().slice(0, 7);
+
+const assertSettlementUnlocked = async (month: string, type: "presales" | "project") => {
+    const lock = await SettlementLockModel.findOne({ month, type, isLocked: true }).lean();
+    if (lock) {
+        throw new TRPCError({
+            code: "BAD_REQUEST",
+            message: `${month} 的${type === "presales" ? "協銷" : "專案"}工時已鎖定，無法再異動`
+        });
+    }
+};
+
+const buildSrMembers = (creatorId: string, pmId: string) => {
+    const members: Array<{ userId: string; memberRole: "owner" | "assignee" }> = [
+        { userId: creatorId, memberRole: "owner" }
+    ];
+    if (pmId !== creatorId) {
+        members.push({ userId: pmId, memberRole: "assignee" as const });
+    }
+    return members;
+};
+
 export const opportunitiesRouter = router({
     list: protectedProcedure
         .input(listInput)
@@ -47,8 +97,16 @@ export const opportunitiesRouter = router({
             const sortOrder = input?.sortOrder || "desc";
             const direction = sortOrder === "desc" ? -1 : 1;
             const cursor = input?.cursor ? decodeCursor(input.cursor) : null;
+            const clauses: Record<string, unknown>[] = [];
+            const searchQuery = buildSearchQuery(search);
+            const accessQuery = getAccessibleOpportunityQuery(ctx.user);
 
-            const query: Record<string, unknown> = buildSearchQuery(search);
+            if (Object.keys(searchQuery).length > 0) {
+                clauses.push(searchQuery);
+            }
+            if (Object.keys(accessQuery).length > 0) {
+                clauses.push(accessQuery);
+            }
 
             if (cursor) {
                 const comparisonOperator = direction === 1 ? "$gt" : "$lt";
@@ -58,14 +116,10 @@ export const opportunitiesRouter = router({
                         { [sortBy]: cursor.value, _id: { [comparisonOperator]: toObjectId(cursor.id) } }
                     ]
                 };
-
-                if (Object.keys(query).length > 0) {
-                    Object.assign(query, { $and: [buildSearchQuery(search), cursorFilter] });
-                    delete query.$or;
-                } else {
-                    Object.assign(query, cursorFilter);
-                }
+                clauses.push(cursorFilter);
             }
+
+            const query = clauses.length > 0 ? { $and: clauses } : {};
 
             const items = await OpportunityModel.find(query)
                 .select("title customerName estimatedValue status expectedCloseDate ownerId createdAt members presalesAssignments")
@@ -73,9 +127,8 @@ export const opportunitiesRouter = router({
                 .limit(limit + 1)
                 .lean();
 
-            const accessibleItems = items.filter(opp => canAccessOpportunity(ctx.user, opp));
-            const pageItems = accessibleItems.slice(0, limit);
-            const hasMore = accessibleItems.length > limit;
+            const pageItems = items.slice(0, limit);
+            const hasMore = items.length > limit;
             const lastItem = pageItems[pageItems.length - 1];
 
             return {
@@ -163,7 +216,16 @@ export const opportunitiesRouter = router({
             userId: z.string(),
             memberRole: z.enum(memberRoles).default("watcher")
         }))
-        .mutation(async ({ input }) => {
+        .mutation(async ({ input, ctx }) => {
+            const opportunity = assertFound(
+                await OpportunityModel.findById(input.opportunityId)
+                    .select("ownerId members presalesAssignments status")
+                    .lean(),
+                "找不到該商機"
+            );
+            assertAuthorized(canManageOpportunity(ctx.user, opportunity), "您沒有權限新增商機成員");
+            assertOpportunityNotConverted(opportunity);
+
             const existing = await OpportunityModel.findOne({
                 _id: input.opportunityId,
                 "members.userId": input.userId
@@ -181,7 +243,16 @@ export const opportunitiesRouter = router({
 
     removeMember: roleProcedure(["admin", "business", "manager"])
         .input(z.object({ memberId: z.string() }))
-        .mutation(async ({ input }) => {
+        .mutation(async ({ input, ctx }) => {
+            const opportunity = assertFound(
+                await OpportunityModel.findOne({ "members._id": input.memberId })
+                    .select("ownerId members presalesAssignments status")
+                    .lean(),
+                "找不到該商機"
+            );
+            assertAuthorized(canManageOpportunity(ctx.user, opportunity), "您沒有權限移除此商機成員");
+            assertOpportunityNotConverted(opportunity);
+
             await OpportunityModel.updateOne(
                 { "members._id": input.memberId },
                 { $pull: { members: { _id: input.memberId } } }
@@ -282,15 +353,20 @@ export const opportunitiesRouter = router({
         .mutation(async ({ input, ctx }) => {
             const opportunity = assertFound(
                 await OpportunityModel.findById(input.opportunityId)
-                    .select("ownerId members presalesAssignments")
+                    .select("ownerId members presalesAssignments status")
                     .lean(),
                 "找不到該商機"
             );
             assertAuthorized(canManageOpportunity(ctx.user, opportunity), "您沒有權限指派售前");
+            assertOpportunityNotConverted(opportunity);
+            assertOpportunityAssignable(opportunity);
 
             await OpportunityModel.updateOne(
                 { _id: input.opportunityId },
-                { $push: { presalesAssignments: { techId: input.techId, estimatedHours: input.estimatedHours } } }
+                {
+                    $push: { presalesAssignments: { techId: input.techId, estimatedHours: input.estimatedHours } },
+                    $set: { status: "presales_active" }
+                }
             );
 
             const existing = await OpportunityModel.findOne({
@@ -314,10 +390,21 @@ export const opportunitiesRouter = router({
             contractAmount: z.number(),
             pmId: z.string()
         }))
-        .mutation(async ({ input }) => {
+        .mutation(async ({ input, ctx }) => {
+            const opportunity = assertFound(
+                await OpportunityModel.findById(input.opportunityId)
+                    .select("ownerId members presalesAssignments status")
+                    .lean(),
+                "找不到該商機"
+            );
+            assertAuthorized(canManageOpportunity(ctx.user, opportunity), "您沒有權限從此商機建立 SR");
+            assertOpportunityNotConverted(opportunity);
+
             const result = await ServiceRequestModel.create({
                 ...input,
-                opportunityId: input.opportunityId
+                opportunityId: input.opportunityId,
+                members: buildSrMembers(ctx.user.id, input.pmId),
+                status: "new"
             });
 
             await OpportunityModel.updateOne(
@@ -336,11 +423,12 @@ export const opportunitiesRouter = router({
         .mutation(async ({ input, ctx }) => {
             const opportunity = assertFound(
                 await OpportunityModel.findById(input.id)
-                    .select("ownerId members")
+                    .select("ownerId members status")
                     .lean(),
                 "找不到該商機"
             );
             assertAuthorized(canManageOpportunity(ctx.user, opportunity), "您沒有權限更新商機狀態");
+            assertOpportunityNotConverted(opportunity);
 
             await OpportunityModel.updateOne(
                 { _id: input.id },
@@ -359,11 +447,20 @@ export const opportunitiesRouter = router({
         .mutation(async ({ ctx, input }) => {
             const opportunity = assertFound(
                 await OpportunityModel.findById(input.opportunityId)
-                    .select("ownerId members presalesAssignments")
+                    .select("ownerId members presalesAssignments status")
                     .lean(),
                 "找不到該商機"
             );
-            assertAuthorized(canManageTimesheet(ctx.user, opportunity), "您沒有權限填寫此工時");
+            assertSettlementUnlocked(getMonthKey(input.workDate), "presales");
+            assertOpportunityNotConverted(opportunity);
+
+            const isAssignedPresales = (opportunity.presalesAssignments || []).some((assignment: any) =>
+                assignment.techId?.toString() === ctx.user.id
+            );
+            assertAuthorized(
+                canManageOpportunity(ctx.user, opportunity) || isAssignedPresales || hasAnyRole(ctx.user, ["admin", "manager"]),
+                "您沒有權限填寫此工時"
+            );
 
             await TimesheetModel.create({
                 type: "presales",
@@ -381,6 +478,7 @@ export const opportunitiesRouter = router({
         .input(z.object({ id: z.string() }))
         .mutation(async ({ ctx, input }) => {
             const ts = assertFound(await TimesheetModel.findById(input.id).lean(), "找不到該協銷工時");
+            await assertSettlementUnlocked(getMonthKey(new Date(ts.workDate)), "presales");
             const opportunity = ts.opportunityId
                 ? await OpportunityModel.findById(ts.opportunityId)
                     .select("ownerId members presalesAssignments")
