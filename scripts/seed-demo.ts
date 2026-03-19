@@ -3,6 +3,7 @@ import { connectDB, disconnectDB, getMongoUri } from "../server/db";
 import { UserModel } from "../server/models/User";
 import { OpportunityModel } from "../server/models/Opportunity";
 import { roles, type Role } from "../shared/types";
+import { hashPassword } from "../server/_core/password";
 
 dotenv.config();
 
@@ -51,10 +52,11 @@ async function seed() {
             }
         }
 
+        const hashedPassword = await hashPassword("password123");
         const createdUsers = await UserModel.insertMany(
             demoUsers.map((user) => ({
                 ...user,
-                password: "password123",
+                password: hashedPassword,
                 provider: "manual",
                 isActive: true,
             }))

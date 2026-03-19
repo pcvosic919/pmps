@@ -3,13 +3,13 @@ import express from "express";
 import cors from "cors";
 import dotenv from "dotenv";
 import * as trpcExpress from "@trpc/server/adapters/express";
-import jwt from "jsonwebtoken";
 import path from "path";
 import mongoose from "mongoose";
 import { appRouter } from "./routers";
 import { createContext } from "./_core/trpc";
 import { connectDB } from "./db";
 import { notificationEvents } from "./_core/events";
+import { verifyNotificationStreamToken } from "./_core/tokens";
 
 dotenv.config();
 
@@ -33,8 +33,8 @@ app.get("/api/notifications/stream", (req, res) => {
     }
 
     try {
-        const decoded = jwt.verify(token, process.env.JWT_SECRET || "pmp-secret-key") as { id: string };
-        const userId = decoded.id;
+        const decoded = verifyNotificationStreamToken(token);
+        const userId = decoded.sub;
 
         res.setHeader("Content-Type", "text/event-stream");
         res.setHeader("Cache-Control", "no-cache");

@@ -7,16 +7,6 @@ settings:
 importers:
 
   .:
-    dependencies:
-      '@hookform/resolvers':
-        specifier: ^5.2.2
-        version: 5.2.2(react-hook-form@7.71.2(react@19.2.4))
-      react-hook-form:
-        specifier: ^7.71.2
-        version: 7.71.2(react@19.2.4)
-      zod:
-        specifier: ^4.3.6
-        version: 4.3.6
     devDependencies:
       '@types/node':
         specifier: ^22.8.4
@@ -39,15 +29,12 @@ importers:
       '@azure/msal-react':
         specifier: ^5.0.7
         version: 5.0.7(@azure/msal-browser@5.5.0)(react@19.2.4)
-      '@dispatch/server':
-        specifier: workspace:*
-        version: link:../server
       '@dispatch/shared':
         specifier: workspace:*
         version: link:../shared
       '@hookform/resolvers':
-        specifier: ^2.9.11
-        version: 2.9.11(react-hook-form@7.71.2(react@19.2.4))
+        specifier: ^5.2.2
+        version: 5.2.2(react-hook-form@7.71.2(react@19.2.4))
       '@radix-ui/react-dialog':
         specifier: ^1.1.15
         version: 1.1.15(@types/react-dom@19.2.3(@types/react@19.2.14))(@types/react@19.2.14)(react-dom@19.2.4(react@19.2.4))(react@19.2.4)
@@ -184,9 +171,6 @@ importers:
       mongoose:
         specifier: ^9.3.0
         version: 9.3.0
-      mysql2:
-        specifier: ^3.11.3
-        version: 3.19.1(@types/node@24.12.0)
       zod:
         specifier: ^3.25.76
         version: 3.25.76

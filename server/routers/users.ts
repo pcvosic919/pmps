@@ -16,16 +16,15 @@ const userListInput = z.object({
 }).optional();
 
 const buildSearchQuery = (search?: string) => {
-    if (!search) {
+    const keyword = search?.trim();
+    if (!keyword) {
         return {};
     }
 
     return {
-        $or: [
-            { name: { $regex: search, $options: "i" } },
-            { email: { $regex: search, $options: "i" } },
-            { department: { $regex: search, $options: "i" } }
-        ]
+        $text: {
+            $search: keyword
+        }
     };
 };
 

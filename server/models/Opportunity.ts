@@ -52,6 +52,8 @@ const OpportunitySchema = new Schema<IOpportunity>({
 OpportunitySchema.index({ ownerId: 1, status: 1, createdAt: -1 });
 OpportunitySchema.index({ status: 1, createdAt: -1 });
 OpportunitySchema.index({ estimatedValue: -1, _id: -1 });
-OpportunitySchema.index({ "presalesAssignments.techId": 1 });
+OpportunitySchema.index({ "members.userId": 1, createdAt: -1 });
+OpportunitySchema.index({ "presalesAssignments.techId": 1, createdAt: -1 });
+OpportunitySchema.index({ title: "text", customerName: "text" });
 
 export const OpportunityModel = mongoose.models.Opportunity || mongoose.model<IOpportunity>("Opportunity", OpportunitySchema);

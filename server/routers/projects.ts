@@ -19,6 +19,8 @@ import {
     hasAnyRole,
 } from "../_core/authorization";
 import { createNotification, createNotifications } from "../_core/notifications";
+import { getAccessibleOpportunityQuery } from "./opportunities.listing";
+import { toObjectId } from "../_core/cursor";
 
 const getMonthKey = (value: Date) => value.toISOString().slice(0, 7);
 
@@ -53,6 +55,63 @@ const getEffectiveWbsVersion = (sr: any) => {
     return source.sort((left: any, right: any) => right.versionNumber - left.versionNumber)[0];
 };
 
+const buildServiceRequestSearchQuery = (search?: string) => {
+    const keyword = search?.trim();
+    if (!keyword) {
+        return {};
+    }
+
+    return {
+        $text: {
+            $search: keyword
+        }
+    };
+};
+
+const buildServiceRequestQuery = async ({
+    user,
+    search,
+    status
+}: {
+    user: { id: string; role: string; roles: string[] };
+    search?: string;
+    status?: string;
+}) => {
+    const clauses: Record<string, unknown>[] = [];
+    const searchQuery = buildServiceRequestSearchQuery(search);
+    if (Object.keys(searchQuery).length > 0) {
+        clauses.push(searchQuery);
+    }
+
+    if (status) {
+        clauses.push({ status });
+    }
+
+    if (!hasAnyRole(user as any, ["admin", "manager", "pm"])) {
+        const userObjectId = toObjectId(user.id);
+        const accessibleOpportunities = await OpportunityModel.find(
+            getAccessibleOpportunityQuery(user as any),
+            { _id: 1 }
+        ).lean();
+        const accessibleOpportunityIds = accessibleOpportunities.map((item) => item._id);
+
+        const accessClauses: Record<string, unknown>[] = [
+            { pmId: userObjectId },
+            { "members.userId": userObjectId },
+            { "changeRequests.requesterId": userObjectId },
+            { "wbsVersions.items.assigneeId": userObjectId }
+        ];
+
+        if (accessibleOpportunityIds.length > 0) {
+            accessClauses.push({ opportunityId: { $in: accessibleOpportunityIds } });
+        }
+
+        clauses.push({ $or: accessClauses });
+    }
+
+    return clauses.length > 0 ? { $and: clauses } : {};
+};
+
 const getManagerIds = async () => {
     const managers = await UserModel.find(
         { $or: [{ role: "manager" }, { roles: "manager" }], isActive: true },
@@ -68,13 +127,11 @@ export const projectsRouter = router({
         status: z.enum(srStatuses).optional(),
         limit: z.number().min(1).max(200).optional()
     }).optional()).query(async ({ ctx, input }) => {
-        const query: Record<string, unknown> = {};
-        if (input?.search) {
-            query.title = { $regex: input.search, $options: "i" };
-        }
-        if (input?.status) {
-            query.status = input.status;
-        }
+        const query = await buildServiceRequestQuery({
+            user: ctx.user,
+            search: input?.search,
+            status: input?.status
+        });
 
         const items = await ServiceRequestModel.find(
             query,
@@ -83,30 +140,13 @@ export const projectsRouter = router({
             .sort({ createdAt: -1, _id: -1 })
             .limit(input?.limit ?? 200)
             .lean();
-        const opportunityIds = [...new Set(items
-            .map(item => item.opportunityId?.toString())
-            .filter((id): id is string => !!id))];
-        const opportunities = opportunityIds.length > 0
-            ? await OpportunityModel.find({ _id: { $in: opportunityIds } })
-                .select("ownerId members presalesAssignments")
-                .lean()
-            : [];
-        const opportunityMap = new Map(opportunities.map(opp => [opp._id.toString(), opp]));
 
-        const canViewAllProjects = hasAnyRole(ctx.user, ["admin", "manager", "pm"]);
-
-        return items
-            .filter(item => canViewAllProjects || canAccessServiceRequest(
-                ctx.user,
-                item,
-                item.opportunityId ? opportunityMap.get(item.opportunityId.toString()) : null
-            ))
-            .map(item => ({
-                ...item,
-                id: item._id.toString(),
-                opportunityId: item.opportunityId?.toString(),
-                pmId: item.pmId.toString()
-            }));
+        return items.map(item => ({
+            ...item,
+            id: item._id.toString(),
+            opportunityId: item.opportunityId?.toString(),
+            pmId: item.pmId.toString()
+        }));
     }),
 
     createSR: roleProcedure(["admin", "business", "pm"])

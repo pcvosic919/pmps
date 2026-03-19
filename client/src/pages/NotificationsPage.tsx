@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { trpc } from "../lib/trpc";
 import { Bell, CheckCircle2, Info, AlertTriangle, Clock } from "lucide-react";
 
@@ -14,8 +14,12 @@ type NotificationItem = {
 
 export function NotificationsPage() {
     const utils = trpc.useUtils();
-    const queryKey = { limit: 50 } as const;
+    const queryKey = useMemo(() => ({ limit: 50 } as const), []);
     const { data, isLoading } = trpc.analytics.getNotifications.useQuery(queryKey);
+    const { data: streamToken } = trpc.auth.streamToken.useQuery(undefined, {
+        staleTime: 5 * 60 * 1000,
+        refetchOnWindowFocus: false
+    });
     const notifications = (data || []) as NotificationItem[];
     const [filterType, setFilterType] = useState<string | null>(null);
 
@@ -35,10 +39,9 @@ export function NotificationsPage() {
     });
 
     useEffect(() => {
-        const token = localStorage.getItem("pmp_auth_token");
-        if (!token) return;
+        if (!streamToken?.token) return;
 
-        const eventSource = new EventSource(`/api/notifications/stream?token=${token}`);
+        const eventSource = new EventSource(`/api/notifications/stream?token=${streamToken.token}`);
 
         eventSource.onmessage = (event) => {
             const incoming = JSON.parse(event.data) as NotificationItem;
@@ -53,7 +56,7 @@ export function NotificationsPage() {
         return () => {
             eventSource.close();
         };
-    }, [utils]);
+    }, [queryKey, streamToken?.token, utils]);
 
     if (isLoading) return <div className="p-8 text-center text-muted-foreground">載入通知中...</div>;
 

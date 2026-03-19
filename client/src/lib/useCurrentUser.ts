@@ -1,9 +1,7 @@
-import { trpc } from "./trpc";
+import { useAuth } from "./auth";
 
 export function useCurrentUser() {
-    const { data: user, ...rest } = trpc.auth.me.useQuery(undefined, {
-        retry: false
-    });
+    const { user, isLoading } = useAuth();
 
     const hasRole = (role: string) =>
         !!user && (user.role === role || user.roles.includes(role as never));
@@ -11,6 +9,6 @@ export function useCurrentUser() {
     return {
         user,
         hasRole,
-        ...rest
+        isLoading,
     };
 }

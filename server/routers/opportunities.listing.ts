@@ -26,15 +26,15 @@ const normalizeCursorValue = (sortBy: OpportunitySortField, value: CursorValue) 
 };
 
 export const buildOpportunitySearchQuery = (search?: string) => {
-    if (!search) {
+    const keyword = search?.trim();
+    if (!keyword) {
         return {};
     }
 
     return {
-        $or: [
-            { title: { $regex: search, $options: "i" } },
-            { customerName: { $regex: search, $options: "i" } }
-        ]
+        $text: {
+            $search: keyword
+        }
     };
 };
 

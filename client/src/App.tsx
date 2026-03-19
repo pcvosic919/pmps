@@ -1,5 +1,5 @@
-import { Suspense, lazy, useEffect, useState } from "react";
-import { QueryCache, QueryClient, QueryClientProvider, MutationCache } from "@tanstack/react-query";
+import { Suspense, lazy } from "react";
+import { MutationCache, QueryCache, QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { httpBatchLink } from "@trpc/client";
 import { trpc } from "./lib/trpc";
 import { Route, Switch, useLocation } from "wouter";
@@ -8,6 +8,8 @@ import { MsalProvider } from "@azure/msal-react";
 import { msalInstance } from "./lib/msal";
 import { Toaster, toast } from "react-hot-toast";
 import { useCurrentUser } from "./lib/useCurrentUser";
+import { AuthProvider, useAuth } from "./lib/auth";
+import { useEffect, useState } from "react";
 
 const LoginPage = lazy(() => import("./pages/LoginPage").then((module) => ({ default: module.LoginPage })));
 const UserManagementPage = lazy(() => import("./pages/UserManagementPage").then((module) => ({ default: module.UserManagementPage })));
@@ -91,13 +93,57 @@ function createAppQueryClient(onUnauthorized: () => void) {
   });
 }
 
-export default function App() {
+function AppShell() {
   const [location, setLocation] = useLocation();
-  const [token, setToken] = useState(() => localStorage.getItem("pmp_auth_token"));
+  const { isAuthenticated } = useAuth();
 
+  useEffect(() => {
+    if (!isAuthenticated && location !== "/login") {
+      setLocation("/login");
+      return;
+    }
+
+    if (isAuthenticated && location === "/login") {
+      setLocation("/");
+    }
+  }, [isAuthenticated, location, setLocation]);
+
+  return (
+    <Suspense fallback={<AppLoadingFallback />}>
+      {location === "/login" ? (
+        <LoginPage />
+      ) : (
+        <AppLayout>
+          <Switch>
+            <Route path="/" component={DashboardPage} />
+            <Route path="/resources" component={ResourcesPage} />
+            <Route path="/users" component={UserManagementPage} />
+            <Route path="/cost-rates" component={CostRatesPage} />
+            <Route path="/utilization" component={UtilizationPage} />
+            <Route path="/settlements" component={SettlementsPage} />
+            <Route path="/notifications" component={NotificationsPage} />
+            <Route path="/system-settings" component={SystemSettingsPage} />
+            <Route path="/custom-fields" component={CustomFieldsPage} />
+            <Route path="/opportunities" component={OpportunitiesPage} />
+            <Route path="/opportunities/:id" component={OpportunityDetailPage} />
+            <Route path="/projects" component={ProjectManagementRoute} />
+            <Route path="/service-requests" component={ServiceRequestsPage} />
+            <Route path="/service-requests/:id" component={WbsManagementPage} />
+            <Route path="/change-requests" component={ChangeRequestsPage} />
+            <Route path="/presales-timesheets" component={PresalesTimesheetsPage} />
+            <Route path="/project-timesheets" component={ProjectTimesheetsPage} />
+            <Route path="/kpi" component={KpiDashboardPage} />
+            <Route path="/:rest*" component={NotFound} />
+          </Switch>
+        </AppLayout>
+      )}
+    </Suspense>
+  );
+}
+
+export default function App() {
   const handleUnauthorized = () => {
     localStorage.removeItem("pmp_auth_token");
-    setToken(null);
     window.location.href = "/login";
   };
 
@@ -117,52 +163,13 @@ export default function App() {
     }),
   );
 
-  useEffect(() => {
-    const syncToken = () => setToken(localStorage.getItem("pmp_auth_token"));
-    window.addEventListener("storage", syncToken);
-    syncToken();
-    return () => window.removeEventListener("storage", syncToken);
-  }, []);
-
-  useEffect(() => {
-    if (!token && location !== "/login") {
-      setLocation("/login");
-    }
-  }, [location, setLocation, token]);
-
   return (
     <MsalProvider instance={msalInstance}>
       <trpc.Provider client={trpcClient} queryClient={queryClient}>
         <QueryClientProvider client={queryClient}>
-          <Suspense fallback={<AppLoadingFallback />}>
-            {location === "/login" ? (
-              <LoginPage />
-            ) : (
-              <AppLayout>
-                <Switch>
-                  <Route path="/" component={DashboardPage} />
-                  <Route path="/resources" component={ResourcesPage} />
-                  <Route path="/users" component={UserManagementPage} />
-                  <Route path="/cost-rates" component={CostRatesPage} />
-                  <Route path="/utilization" component={UtilizationPage} />
-                  <Route path="/settlements" component={SettlementsPage} />
-                  <Route path="/notifications" component={NotificationsPage} />
-                  <Route path="/system-settings" component={SystemSettingsPage} />
-                  <Route path="/custom-fields" component={CustomFieldsPage} />
-                  <Route path="/opportunities" component={OpportunitiesPage} />
-                  <Route path="/opportunities/:id" component={OpportunityDetailPage} />
-                  <Route path="/projects" component={ProjectManagementRoute} />
-                  <Route path="/service-requests" component={ServiceRequestsPage} />
-                  <Route path="/service-requests/:id" component={WbsManagementPage} />
-                  <Route path="/change-requests" component={ChangeRequestsPage} />
-                  <Route path="/presales-timesheets" component={PresalesTimesheetsPage} />
-                  <Route path="/project-timesheets" component={ProjectTimesheetsPage} />
-                  <Route path="/kpi" component={KpiDashboardPage} />
-                  <Route path="/:rest*" component={NotFound} />
-                </Switch>
-              </AppLayout>
-            )}
-          </Suspense>
+          <AuthProvider>
+            <AppShell />
+          </AuthProvider>
           <Toaster position="bottom-right" />
         </QueryClientProvider>
       </trpc.Provider>
