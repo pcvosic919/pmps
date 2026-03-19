@@ -1,9 +1,7 @@
 import { z } from "zod";
 import { router, protectedProcedure, roleProcedure } from "../_core/trpc";
 import { ServiceRequestModel } from "../models/ServiceRequest";
-import { NotificationModel } from "../models/Notification";
 import { SettlementLockModel } from "../models/SettlementLock";
-import { notificationEvents } from "../_core/events";
 import { TimesheetModel } from "../models/Timesheet";
 import { UserModel } from "../models/User";
 import { OpportunityModel } from "../models/Opportunity";
@@ -18,7 +16,9 @@ import {
     canManageServiceRequestStatus,
     canManageTimesheet,
     canReviewChangeRequest,
+    hasAnyRole,
 } from "../_core/authorization";
+import { createNotification, createNotifications } from "../_core/notifications";
 
 const getMonthKey = (value: Date) => value.toISOString().slice(0, 7);
 
@@ -53,6 +53,15 @@ const getEffectiveWbsVersion = (sr: any) => {
     return source.sort((left: any, right: any) => right.versionNumber - left.versionNumber)[0];
 };
 
+const getManagerIds = async () => {
+    const managers = await UserModel.find(
+        { $or: [{ role: "manager" }, { roles: "manager" }], isActive: true },
+        { _id: 1 }
+    ).lean();
+
+    return [...new Set(managers.map((manager: any) => manager._id.toString()))];
+};
+
 export const projectsRouter = router({
     srList: protectedProcedure.input(z.object({
         search: z.string().trim().optional(),
@@ -84,8 +93,10 @@ export const projectsRouter = router({
             : [];
         const opportunityMap = new Map(opportunities.map(opp => [opp._id.toString(), opp]));
 
+        const canViewAllProjects = hasAnyRole(ctx.user, ["admin", "manager", "pm"]);
+
         return items
-            .filter(item => canAccessServiceRequest(
+            .filter(item => canViewAllProjects || canAccessServiceRequest(
                 ctx.user,
                 item,
                 item.opportunityId ? opportunityMap.get(item.opportunityId.toString()) : null
@@ -134,6 +145,13 @@ export const projectsRouter = router({
                     { $set: { status: "converted" } }
                 );
             }
+
+            await createNotification({
+                userId: input.pmId,
+                type: "approval",
+                message: `已建立新專案「${input.title}」，請前往專案管理確認與安排 WBS。`,
+                actionUrl: "/projects"
+            });
 
             return { id: sr._id.toString() };
         }),
@@ -218,6 +236,17 @@ export const projectsRouter = router({
                     }
                 }
             );
+
+            const recipients = [sr.pmId?.toString(), version.submittedBy?.toString()]
+                .filter((value): value is string => !!value);
+            await createNotifications(recipients.map((userId) => ({
+                userId,
+                type: input.action === "approved" ? "approval" : "warning",
+                message: input.action === "approved"
+                    ? `專案「${sr.title}」的 WBS v${version.versionNumber} 已核准。`
+                    : `專案「${sr.title}」的 WBS v${version.versionNumber} 已退回，請檢查原因後重新送審。`,
+                actionUrl: `/service-requests/${sr._id.toString()}`
+            })));
 
             return { success: true };
         }),
@@ -362,7 +391,14 @@ export const projectsRouter = router({
                 { $push: { wbsVersions: newVersion } }
             );
 
-            // Re-fetch to get new version id handle (Optional, but returning true is fine)
+            const managerIds = await getManagerIds();
+            await createNotifications(managerIds.map((userId) => ({
+                userId,
+                type: "approval",
+                message: `專案「${sr.title}」送出 WBS v${input.versionNumber}，待主管審核。`,
+                actionUrl: `/service-requests/${input.srId}`
+            })));
+
             return { success: true };
         }),
 
@@ -430,22 +466,12 @@ export const projectsRouter = router({
 
             await sr.save();
 
-            // 即時通知：若專案有 PM ID，發送通知給 PM
             if (sr.pmId) {
-                const notif = await NotificationModel.create({
-                    userId: sr.pmId,
+                await createNotification({
+                    userId: sr.pmId.toString(),
                     type: "approval",
                     message: `[CR變更] 服務請求 ${sr.title} 有新的預算調整申請，等候業務審批中。`,
-                    actionUrl: "/change-requests",
-                    isRead: false
-                });
-
-                notificationEvents.emit('notify', {
-                    userId: sr.pmId.toString(),
-                    id: notif._id.toString(),
-                    type: notif.type,
-                    message: notif.message,
-                    createdAt: notif.createdAt
+                    actionUrl: "/change-requests"
                 });
             }
 
@@ -498,6 +524,15 @@ export const projectsRouter = router({
             }
 
             await sr.save();
+
+            await createNotification({
+                userId: cr.requesterId.toString(),
+                type: input.action === "approved" ? "approval" : "warning",
+                message: input.action === "approved"
+                    ? `您的 CR 申請（專案：${sr.title}）已更新為 ${cr.status === "pending_manager" ? "待主管審核" : "已核准"}。`
+                    : `您的 CR 申請（專案：${sr.title}）已被退回，請檢查原因後重新調整。`,
+                actionUrl: "/change-requests"
+            });
             return { success: true };
         }),
 

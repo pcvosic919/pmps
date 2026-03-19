@@ -6,6 +6,7 @@ import {
     CheckCircle2, Clock, XCircle, RefreshCw, Search
 } from "lucide-react";
 import { useDebounce } from "../lib/useDebounce";
+import { useCurrentUser } from "../lib/useCurrentUser";
 
 const SR_STATUSES = [
     { value: "new", label: "待指派", color: "bg-blue-100 text-blue-800 border-blue-200" },
@@ -17,6 +18,8 @@ const SR_STATUSES = [
 type SRStatus = typeof SR_STATUSES[number]["value"];
 
 export function ProjectManagementPage() {
+    const { user } = useCurrentUser();
+    const isManager = !!user && (user.role === "manager" || user.roles.includes("manager"));
     const [search, setSearch] = useState("");
     const [filterStatus, setFilterStatus] = useState<string>("all");
     const [changingStatus, setChangingStatus] = useState<string | null>(null);
@@ -30,6 +33,7 @@ export function ProjectManagementPage() {
 
     const { data: srs, isLoading, refetch } = trpc.projects.srList.useQuery(queryInput);
     const { data: allSrs } = trpc.projects.srList.useQuery({ limit: 200 });
+    const { data: pendingWbs } = trpc.projects.getWbsPendingReview.useQuery(undefined, { enabled: isManager });
     const updateStatus = trpc.projects.updateSRStatus.useMutation({ onSuccess: () => refetch() });
 
     const getStatusInfo = (status: string) =>
@@ -61,7 +65,7 @@ export function ProjectManagementPage() {
                     <h2 className="text-3xl font-bold tracking-tight bg-clip-text text-transparent bg-gradient-to-r from-primary to-primary/60">
                         專案管理
                     </h2>
-                    <p className="text-muted-foreground mt-1">管理所有服務請求（SR）的執行狀態與進度</p>
+                    <p className="text-muted-foreground mt-1">集中查閱所有專案，並由 Manager / PM 持續追蹤進度與審核狀態</p>
                 </div>
             </div>
 
@@ -78,6 +82,19 @@ export function ProjectManagementPage() {
                     </div>
                 ))}
             </div>
+
+            {isManager && (
+                <div className="bg-card border border-border/50 rounded-xl p-4 flex items-center justify-between gap-4">
+                    <div>
+                        <p className="text-sm font-medium text-foreground">待審核 WBS 版本</p>
+                        <p className="text-sm text-muted-foreground mt-1">所有送審中的版本已集中於專案管理，可直接進入各專案查閱。</p>
+                    </div>
+                    <div className="text-right">
+                        <p className="text-3xl font-bold text-primary">{pendingWbs?.length ?? 0}</p>
+                        <p className="text-xs text-muted-foreground">筆待審核</p>
+                    </div>
+                </div>
+            )}
 
             <div className="flex flex-col sm:flex-row gap-3">
                 <div className="relative flex-1">

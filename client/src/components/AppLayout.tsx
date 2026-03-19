@@ -16,7 +16,6 @@ import {
     FileSpreadsheet,
     Bell,
     Settings2,
-    Sparkles,
     FolderKanban,
     LogOut
 } from "lucide-react";
@@ -31,7 +30,7 @@ interface AppLayoutProps {
 const navItems = [
     { icon: LayoutDashboard, label: "儀表板", href: "/" },
     { icon: Building2, label: "商機管理", href: "/opportunities" },
-    { icon: FolderKanban, label: "專案管理", href: "/projects" },
+    { icon: FolderKanban, label: "專案管理", href: "/projects", roles: ["manager", "pm"] },
     { icon: Users, label: "資源池", href: "/resources" },
     { icon: Settings, label: "帳號管理", href: "/users" },
     { icon: CreditCard, label: "費率設定", href: "/cost-rates" },
@@ -42,7 +41,6 @@ const navItems = [
     { icon: FileCheck, label: "變更單 (CR)", href: "/change-requests" },
     { icon: PieChart, label: "KPI 儀表板", href: "/kpi" },
     { icon: FileSpreadsheet, label: "月度結算", href: "/settlements" },
-    { icon: Sparkles, label: "AI 報表故事", href: "/reportstory" },
     { icon: Bell, label: "通知中心", href: "/notifications" },
     { icon: Settings2, label: "自訂欄位", href: "/custom-fields" },
     { icon: Settings, label: "系統設定", href: "/system-settings" },
@@ -53,6 +51,14 @@ export function AppLayout({ children }: AppLayoutProps) {
     const [location] = useLocation();
     const { instance } = useMsal();
     const { user } = useCurrentUser();
+
+    const visibleNavItems = navItems.filter((item) => {
+        if (!item.roles || item.roles.length === 0) {
+            return true;
+        }
+
+        return item.roles.some((role) => user && (user.role === role || user.roles.includes(role as never)));
+    });
 
     const handleLogout = async () => {
         // 清除 Token
@@ -83,7 +89,7 @@ export function AppLayout({ children }: AppLayoutProps) {
                 </div>
 
                 <nav className="flex-1 overflow-y-auto py-4 space-y-1">
-                    {navItems.map((item) => (
+                    {visibleNavItems.map((item) => (
                         <Link key={item.href} href={item.href}>
                             <a className={cn(
                                 "flex items-center px-4 py-2 mx-2 rounded-md transition-colors",
