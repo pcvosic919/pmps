@@ -52,6 +52,10 @@ export function LoginPage() {
     const [isLoading, setIsLoading] = useState(false);
 
     // Mutations
+    const { data: demoStatus } = trpc.auth.demoStatus.useQuery(undefined, {
+        staleTime: 60_000,
+        retry: false,
+    });
     const loginMutation = trpc.auth.login.useMutation();
     const entraLoginMutation = trpc.auth.entraLogin.useMutation();
     const demoLoginMutation = trpc.auth.demoLogin.useMutation();
