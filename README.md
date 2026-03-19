@@ -60,8 +60,12 @@ PMPsystem/
 # 安裝依賴
 pnpm install
 
-# 設定 MongoDB 連線（未設定時預設使用 mongodb://localhost:27017/pmp_system）
-echo "MONGODB_URI=mongodb://localhost:27017/pmp_system" > .env
+# 建立開發環境變數
+cat <<'EOF' > .env
+MONGODB_URI=mongodb://localhost:27017/pmp_system
+JWT_SECRET=replace-with-a-long-random-secret
+DEMO_LOGIN_ENABLED=true
+EOF
 
 # （可選）建立 Demo 資料
 pnpm seed:demo
@@ -95,6 +99,7 @@ pnpm seed:demo     # 寫入 MongoDB demo 資料
 |---|---|---|
 | `MONGODB_URI` | **是** | Cosmos DB / MongoDB 完整連線字串 (需啟動 SSL) |
 | `JWT_SECRET` | **是** | JWT 與通知 SSE 短效 Token 簽章密鑰，未設定時服務不會啟動 |
+| `DEMO_LOGIN_ENABLED` | 否 | 設為 `true` 時允許登入頁顯示並使用 Demo 快速登入（建議僅測試環境） |
 | `GEMINI_API_KEY` | 否 | Google AI Studio 密鑰 (用於 AI 報表故事分析) |
 | `PORT` | 否 | 容器 Port，預設為 `5000` |
 
@@ -290,14 +295,74 @@ server/
 
 ## 🔐 認證機制 (目前)
 
-目前使用 **Demo 模式**，前端 HTTP 請求固定帶入：
+目前前端會將登入成功取得的 JWT 儲存於 `localStorage`，並在呼叫 API 時帶入：
 ```
-Authorization: Bearer demo_admin@demo.com
+Authorization: Bearer <pmp_auth_token>
 ```
 
-伺服器端從 Header 解析 email，查詢後放入 `ctx.user`，tRPC `protectedProcedure` 以此判斷是否登入，`roleProcedure` 額外驗證角色。
+伺服器端會驗證 JWT，還原使用者資訊並放入 `ctx.user`；tRPC `protectedProcedure` 以此判斷是否登入，`roleProcedure` 額外驗證角色。
 
-> ⚠️ 生產環境需替換為真實 JWT/OAuth 驗證機制。
+### 支援的登入方式
+- **帳密登入**：手動帳號使用 email + password。
+- **Microsoft Entra ID**：以 Microsoft Access Token 換取本系統 JWT。
+- **Demo 快速登入**：測試/開發環境可直接選擇預設角色，一鍵取得 JWT；需先執行 `pnpm seed:demo` 建立 Demo 帳號。
+
+### Demo 帳號
+- `demo_admin@demo.com`
+- `demo_manager@demo.com`
+- `demo_business@demo.com`
+- `demo_pm@demo.com`
+- `demo_tech@demo.com`
+
+> 預設 Demo 密碼：`password123`
+
+> ⚠️ `DEMO_LOGIN_ENABLED` 建議只在測試環境開啟；正式環境請關閉。
+> ⚠️ 若缺少 `JWT_SECRET`，登入 API 會拒絕簽發 Token，前端將只顯示通用錯誤訊息，不會直接暴露內部環境變數名稱。
+
+### 如何啟用 Demo 快速登入
+
+#### 本機開發
+```bash
+cat <<'EOF' >> .env
+DEMO_LOGIN_ENABLED=true
+JWT_SECRET=replace-with-a-long-random-secret
+MONGODB_URI=mongodb://localhost:27017/pmp_system
+EOF
+
+pnpm seed:demo
+pnpm dev
+```
+
+#### Azure App Service
+1. 進入 **App Service → Settings → Environment variables**。
+2. 新增或確認：
+   - `DEMO_LOGIN_ENABLED=true`
+   - `JWT_SECRET=<長且隨機的密鑰>`
+   - `MONGODB_URI=<MongoDB / Cosmos DB 連線字串>`
+3. 儲存後重新啟動 App Service。
+4. 確保資料庫中已建立 Demo 帳號（可先在可連線資料庫的環境執行 `pnpm seed:demo`）。
+
+---
+
+## 👩‍💻 使用者操作指引
+
+### 首次登入
+1. 管理員先確認 `.env` / App Service 已設定 `MONGODB_URI` 與 `JWT_SECRET`。
+2. 若是測試環境，可點選登入頁的 **Demo 快速登入**。
+3. 若是正式環境，請使用手動帳號密碼或 Microsoft Entra ID。
+
+### 導覽與首頁
+- 側邊欄已依功能分組為「工作台 / 商機售前 / 專案工時 / 分析結算 / 系統管理」。
+- 手機版可透過左上角漢堡選單展開導覽。
+- 頂部頭像選單可進入通知中心、系統設定與登出。
+
+### 通知與待辦
+- 通知中心支援未讀數與即時更新。
+- 首頁會顯示待審核、待辦與風險提醒，協助快速進入高優先項目。
+
+### KPI 儀表板
+- 可切換顯示模組。
+- 支援將目前 KPI 指標匯出為 CSV，方便彙整報表。
 
 ---
 

@@ -1,15 +1,53 @@
+import { useMemo, useState } from "react";
 import { trpc } from "../lib/trpc";
 import { Link } from "wouter";
-import { CheckCircle2, TrendingUp, Users, FolderKanban, Clock3 } from "lucide-react";
+import { AlertTriangle, CheckCircle2, Clock3, FolderKanban, Search, TrendingUp, Users } from "lucide-react";
 import { useCurrentUser } from "../lib/useCurrentUser";
 
 export function DashboardPage() {
     const { user, hasRole } = useCurrentUser();
     const isAdminLike = hasRole("admin") || hasRole("manager");
+    const [searchTerm, setSearchTerm] = useState("");
+    const [sortBy, setSortBy] = useState<"name" | "email" | "role">("name");
     const { data: usersData, isLoading } = trpc.users.list.useQuery(
-        { limit: 5 },
+        { limit: 8, search: searchTerm, sortBy, sortOrder: "asc" },
         { enabled: isAdminLike }
     );
+    const { data: notifications } = trpc.analytics.getNotifications.useQuery(
+        { limit: 20 },
+        { enabled: !!user }
+    );
+
+    const unreadNotifications = notifications?.filter((item) => !item.isRead) ?? [];
+    const approvalNotifications = unreadNotifications.filter((item) => item.type === "approval");
+    const todoNotifications = unreadNotifications.filter((item) => item.type === "todo");
+    const warningNotifications = unreadNotifications.filter((item) => item.type === "warning");
+    const managementCards = useMemo(() => [
+        {
+            label: "待審核 / 待核准",
+            value: approvalNotifications.length,
+            helper: "包含 WBS 與流程核准提醒",
+            href: "/notifications",
+            icon: CheckCircle2,
+            tone: "text-emerald-600"
+        },
+        {
+            label: "待辦事項",
+            value: todoNotifications.length,
+            helper: "建議優先處理的工作項目",
+            href: hasRole("presales") || hasRole("tech") ? "/project-timesheets" : "/notifications",
+            icon: Clock3,
+            tone: "text-indigo-600"
+        },
+        {
+            label: "風險 / 警示",
+            value: warningNotifications.length,
+            helper: "需要立即關注的異常或提醒",
+            href: "/notifications",
+            icon: AlertTriangle,
+            tone: "text-amber-600"
+        }
+    ], [approvalNotifications.length, todoNotifications.length, warningNotifications.length, hasRole]);
 
     if (!user) {
         return <div className="p-8 text-center text-muted-foreground">載入使用者資訊中...</div>;
@@ -55,6 +93,23 @@ export function DashboardPage() {
                         </a>
                     </Link>
                 </div>
+
+                <div className="grid gap-4 md:grid-cols-3">
+                    {managementCards.map((card) => (
+                        <Link key={card.label} href={card.href}>
+                            <a className="rounded-xl border border-border bg-card p-5 shadow-sm hover:border-primary/40 transition-colors">
+                                <div className="flex items-center justify-between">
+                                    <div>
+                                        <div className="text-sm font-medium text-muted-foreground">{card.label}</div>
+                                        <div className="mt-2 text-2xl font-bold">{card.value}</div>
+                                    </div>
+                                    <card.icon className={`h-5 w-5 ${card.tone}`} />
+                                </div>
+                                <p className="mt-2 text-xs text-muted-foreground">{card.helper}</p>
+                            </a>
+                        </Link>
+                    ))}
+                </div>
             </div>
         );
     }
@@ -86,8 +141,51 @@ export function DashboardPage() {
                 </div>
             </div>
 
+            <div className="grid gap-4 md:grid-cols-3">
+                {managementCards.map((card) => (
+                    <Link key={card.label} href={card.href}>
+                        <a className="rounded-xl border border-border bg-card p-5 shadow-sm hover:border-primary/40 transition-colors">
+                            <div className="flex items-center justify-between">
+                                <div>
+                                    <div className="text-sm font-medium text-muted-foreground">{card.label}</div>
+                                    <div className="mt-2 text-2xl font-bold">{card.value}</div>
+                                </div>
+                                <card.icon className={`h-5 w-5 ${card.tone}`} />
+                            </div>
+                            <p className="mt-2 text-xs text-muted-foreground">{card.helper}</p>
+                        </a>
+                    </Link>
+                ))}
+            </div>
+
             <div className="mt-8">
-                <h3 className="text-xl font-bold mb-4">最新活躍使用者</h3>
+                <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between mb-4">
+                    <div>
+                        <h3 className="text-xl font-bold">最新活躍使用者</h3>
+                        <p className="text-sm text-muted-foreground mt-1">可直接搜尋姓名、信箱，並切換排序欄位。</p>
+                    </div>
+                    <div className="flex flex-col gap-3 sm:flex-row">
+                        <div className="relative min-w-[240px]">
+                            <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                            <input
+                                type="search"
+                                value={searchTerm}
+                                onChange={(e) => setSearchTerm(e.target.value)}
+                                placeholder="搜尋使用者..."
+                                className="w-full rounded-lg border border-border bg-background pl-9 pr-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/30"
+                            />
+                        </div>
+                        <select
+                            value={sortBy}
+                            onChange={(e) => setSortBy(e.target.value as "name" | "email" | "role")}
+                            className="rounded-lg border border-border bg-background px-3 py-2 text-sm font-medium focus:outline-none focus:ring-2 focus:ring-primary/30"
+                        >
+                            <option value="name">依姓名排序</option>
+                            <option value="email">依 Email 排序</option>
+                            <option value="role">依角色排序</option>
+                        </select>
+                    </div>
+                </div>
                 {isLoading ? (
                     <div className="text-center py-10 text-muted-foreground">載入中...</div>
                 ) : (
