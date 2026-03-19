@@ -319,29 +319,6 @@ Authorization: Bearer <pmp_auth_token>
 > ⚠️ `DEMO_LOGIN_ENABLED` 建議只在測試環境開啟；正式環境請關閉。
 > ⚠️ 若缺少 `JWT_SECRET`，登入 API 會拒絕簽發 Token，前端將只顯示通用錯誤訊息，不會直接暴露內部環境變數名稱。
 
-### 如何啟用 Demo 快速登入
-
-#### 本機開發
-```bash
-cat <<'EOF' >> .env
-DEMO_LOGIN_ENABLED=true
-JWT_SECRET=replace-with-a-long-random-secret
-MONGODB_URI=mongodb://localhost:27017/pmp_system
-EOF
-
-pnpm seed:demo
-pnpm dev
-```
-
-#### Azure App Service
-1. 進入 **App Service → Settings → Environment variables**。
-2. 新增或確認：
-   - `DEMO_LOGIN_ENABLED=true`
-   - `JWT_SECRET=<長且隨機的密鑰>`
-   - `MONGODB_URI=<MongoDB / Cosmos DB 連線字串>`
-3. 儲存後重新啟動 App Service。
-4. 確保資料庫中已建立 Demo 帳號（可先在可連線資料庫的環境執行 `pnpm seed:demo`）。
-
 ---
 
 ## 👩‍💻 使用者操作指引

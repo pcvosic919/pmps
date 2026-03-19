@@ -2,7 +2,7 @@ import { useState } from "react";
 import { trpc } from "../lib/trpc";
 import { useMsal } from "@azure/msal-react";
 import { loginRequest } from "../lib/msal";
-import { CircleHelp, LogIn, Mail, Lock, ShieldAlert, Rocket } from "lucide-react";
+import { LogIn, Mail, Lock, ShieldAlert, Rocket } from "lucide-react";
 import { useAuth } from "../lib/auth";
 
 const DEMO_ACCOUNTS = [
@@ -178,51 +178,32 @@ export function LoginPage() {
                     <div className="rounded-xl border border-primary/20 bg-primary/5 p-4 space-y-3">
                         <div className="flex items-start gap-3">
                             <div className="rounded-full bg-primary/10 p-2 text-primary">
-                                {demoStatus?.enabled ? <Rocket className="w-4 h-4" /> : <CircleHelp className="w-4 h-4" />}
+                                <Rocket className="w-4 h-4" />
                             </div>
                             <div>
-                                <h2 className="text-sm font-semibold">{demoStatus?.enabled ? "快速體驗 Demo" : "此環境尚未開放 Demo"}</h2>
+                                <h2 className="text-sm font-semibold">快速體驗 Demo</h2>
                                 <p className="text-xs text-muted-foreground mt-1">
-                                    {demoStatus?.enabled
-                                        ? "一鍵登入測試角色，系統會自動寫入合法 JWT，不需要手動輸入測試帳密。"
-                                        : "若你是管理員，可依下方步驟啟用 Demo 體驗；一般使用者請改用正式帳號登入。"}
+                                    一鍵登入測試角色，系統會自動寫入合法 JWT，不需要手動輸入測試帳密。
                                 </p>
                             </div>
                         </div>
-
-                        {demoStatus?.enabled ? (
-                            <>
-                                <div className="grid gap-2 sm:grid-cols-2">
-                                    {DEMO_ACCOUNTS.map((account) => (
-                                        <button
-                                            key={account.email}
-                                            type="button"
-                                            disabled={isLoading}
-                                            onClick={() => handleDemoLogin(account.email)}
-                                            className="rounded-lg border border-border bg-background px-3 py-2 text-left transition-colors hover:border-primary/40 hover:bg-primary/5 disabled:opacity-50"
-                                        >
-                                            <div className="text-sm font-medium">Demo {account.label}</div>
-                                            <div className="text-[11px] text-muted-foreground mt-1">{account.helper}</div>
-                                        </button>
-                                    ))}
-                                </div>
-                                <p className="text-[11px] text-muted-foreground">
-                                    {demoStatus?.seeded
-                                        ? "已偵測到 Demo 帳號，可直接使用上方快速登入。"
-                                        : "尚未建立 Demo 資料，請先執行資料初始化。"}
-                                </p>
-                            </>
-                        ) : (
-                            <div className="rounded-lg border border-dashed border-border bg-background/80 p-3">
-                                <div className="text-xs font-semibold text-foreground">管理員啟用方式</div>
-                                <ol className="mt-2 space-y-1 list-decimal pl-4 text-[11px] text-muted-foreground">
-                                    <li>在本機 `.env` 或 Azure App Service 新增 `DEMO_LOGIN_ENABLED=true`。</li>
-                                    <li>確認已設定 `JWT_SECRET` 與 `MONGODB_URI`。</li>
-                                    <li>執行 `pnpm seed:demo` 建立 Demo 帳號資料。</li>
-                                    <li>重新部署或重啟服務後，再回到此頁使用 Demo 快速登入。</li>
-                                </ol>
-                            </div>
-                        )}
+                        <div className="grid gap-2 sm:grid-cols-2">
+                            {DEMO_ACCOUNTS.map((account) => (
+                                <button
+                                    key={account.email}
+                                    type="button"
+                                    disabled={isLoading}
+                                    onClick={() => handleDemoLogin(account.email)}
+                                    className="rounded-lg border border-border bg-background px-3 py-2 text-left transition-colors hover:border-primary/40 hover:bg-primary/5 disabled:opacity-50"
+                                >
+                                    <div className="text-sm font-medium">Demo {account.label}</div>
+                                    <div className="text-[11px] text-muted-foreground mt-1">{account.helper}</div>
+                                </button>
+                            ))}
+                        </div>
+                        <p className="text-[11px] text-muted-foreground">
+                            若尚未建立 Demo 資料，請先執行資料初始化。
+                        </p>
                     </div>
 
                     <div className="relative my-4">
