@@ -4,6 +4,41 @@ import { UserModel } from "../models/User";
 import { TRPCError } from "@trpc/server";
 import { isPasswordHash, verifyPassword, hashPassword } from "../_core/password";
 import { signNotificationStreamToken, signSessionToken } from "../_core/tokens";
+import { roles } from "../../shared/types";
+
+const SYSTEM_CONFIG_ERROR_MESSAGE = "系統設定不完整，請聯絡管理員";
+
+const issueSession = (user: {
+    _id: { toString(): string };
+    email: string;
+    name: string;
+    role: (typeof roles)[number];
+    roles?: (typeof roles)[number][];
+}) => {
+    try {
+        const token = signSessionToken({
+            sub: user._id.toString(),
+            email: user.email,
+            role: user.role,
+            roles: user.roles || [],
+            name: user.name
+        });
+
+        return {
+            token,
+            user: { id: user._id.toString(), name: user.name, email: user.email, role: user.role }
+        };
+    } catch (error) {
+        console.error("Failed to issue session token", error);
+        throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: SYSTEM_CONFIG_ERROR_MESSAGE });
+    }
+};
+
+const demoLoginInput = z.object({
+    email: z.string().email()
+});
+
+const demoEmailPattern = /^demo_[a-z0-9]+@demo\.com$/i;
 
 export const authRouter = router({
     me: protectedProcedure.query(async ({ ctx }) => ({
@@ -35,15 +70,27 @@ export const authRouter = router({
                 );
             }
 
-            const token = signSessionToken({
-                sub: user._id.toString(),
-                email: user.email,
-                role: user.role,
-                roles: user.roles || [],
-                name: user.name
-            });
+            return issueSession(user);
+        }),
 
-            return { token, user: { id: user._id.toString(), name: user.name, email: user.email, role: user.role } };
+    demoLogin: publicProcedure
+        .input(demoLoginInput)
+        .mutation(async ({ input }) => {
+            const demoEnabled = process.env.DEMO_LOGIN_ENABLED === "true" || process.env.NODE_ENV !== "production";
+            if (!demoEnabled) {
+                throw new TRPCError({ code: "FORBIDDEN", message: "Demo 登入目前未開放" });
+            }
+
+            if (!demoEmailPattern.test(input.email)) {
+                throw new TRPCError({ code: "BAD_REQUEST", message: "僅允許使用 Demo 帳號登入" });
+            }
+
+            const user = await UserModel.findOne({ email: input.email, isActive: true }).lean();
+            if (!user) {
+                throw new TRPCError({ code: "NOT_FOUND", message: "找不到指定的 Demo 帳號，請先執行 Demo 資料初始化" });
+            }
+
+            return issueSession(user);
         }),
 
     streamToken: protectedProcedure.query(({ ctx }) => ({
@@ -77,18 +124,11 @@ export const authRouter = router({
                     throw new TRPCError({ code: "UNAUTHORIZED", message: `系統中找不到此 Email 組件：${email}` });
                 }
 
-                const token = signSessionToken({
-                    sub: user._id.toString(),
-                    email: user.email,
-                    role: user.role,
-                    roles: user.roles || [],
-                    name: user.name
-                });
-
-                return { token, user: { id: user._id.toString(), name: user.name, email: user.email, role: user.role } };
+                return issueSession(user);
             } catch (error) {
                 if (error instanceof TRPCError) throw error;
-                throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Entra ID 登入時發生錯誤" });
+                console.error("Entra ID login failed", error);
+                throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: SYSTEM_CONFIG_ERROR_MESSAGE });
             }
         })
 });
