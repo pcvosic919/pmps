@@ -1,11 +1,14 @@
 import { useState, useMemo } from "react";
 import { trpc } from "../lib/trpc";
 import { cn } from "../lib/utils";
+import { useCurrentUser } from "../lib/useCurrentUser";
 
 import { Clock, Plus, Trash2, AlertCircle } from "lucide-react";
 
 export function PresalesTimesheetsPage() {
     const utils = trpc.useContext();
+    const { user } = useCurrentUser();
+    const canViewAllTimesheets = !!user && (user.role === "manager" || user.role === "pm" || user.roles.includes("manager") || user.roles.includes("pm"));
     const [isSubmitting, setIsSubmitting] = useState(false);
     const [viewMode, setViewMode] = useState<"list" | "week" | "month">("list");
 
@@ -17,7 +20,10 @@ export function PresalesTimesheetsPage() {
 
     // Fetches
     const { data: assignments } = trpc.opportunities.getMyPresalesAssignments.useQuery();
-    const { data: timesheets, isLoading: loadingTimesheets } = trpc.opportunities.getMyPresalesTimesheets.useQuery();
+    const myTimesheetsQuery = trpc.opportunities.getMyPresalesTimesheets.useQuery(undefined, { enabled: !canViewAllTimesheets });
+    const allTimesheetsQuery = trpc.opportunities.getPresalesTimesheetOverview.useQuery(undefined, { enabled: canViewAllTimesheets });
+    const timesheets = (canViewAllTimesheets ? allTimesheetsQuery.data : myTimesheetsQuery.data) || [];
+    const loadingTimesheets = canViewAllTimesheets ? allTimesheetsQuery.isLoading : myTimesheetsQuery.isLoading;
 
     // Grouped timesheets for week/month view
     const groupedTimesheets = useMemo(() => {
@@ -44,6 +50,7 @@ export function PresalesTimesheetsPage() {
     const logTime = trpc.opportunities.logPresalesTime.useMutation({
         onSuccess: () => {
             utils.opportunities.getMyPresalesTimesheets.invalidate();
+            utils.opportunities.getPresalesTimesheetOverview.invalidate();
             setSelectedOppId("");
             setHours("");
             setDescription("");
@@ -53,6 +60,7 @@ export function PresalesTimesheetsPage() {
     const deleteTime = trpc.opportunities.deletePresalesTimesheet.useMutation({
         onSuccess: () => {
             utils.opportunities.getMyPresalesTimesheets.invalidate();
+            utils.opportunities.getPresalesTimesheetOverview.invalidate();
         }
     });
 
@@ -81,7 +89,7 @@ export function PresalesTimesheetsPage() {
                         <Clock className="w-8 h-8 text-primary" />
                         協銷工時填寫
                     </h2>
-                    <p className="text-muted-foreground mt-1">回報您在協銷商機上花費的時間</p>
+                    <p className="text-muted-foreground mt-1">{canViewAllTimesheets ? "集中查看團隊協銷工時紀錄與填報內容" : "回報您在協銷商機上花費的時間"}</p>
                 </div>
             </div>
 
@@ -168,7 +176,7 @@ export function PresalesTimesheetsPage() {
                 <div className="md:col-span-2 space-y-4">
                     <div className="bg-card border border-border rounded-xl p-6 shadow-sm min-h-full">
                         <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-6">
-                            <h3 className="text-xl font-bold">我的填報紀錄</h3>
+                            <h3 className="text-xl font-bold">{canViewAllTimesheets ? "協銷工時紀錄總覽" : "我的填報紀錄"}</h3>
                             <div className="flex bg-muted/50 p-1 rounded-lg border border-border text-xs">
                                 <button 
                                     type="button"
@@ -215,6 +223,7 @@ export function PresalesTimesheetsPage() {
                                                     <div className="flex items-center gap-2 mb-1">
                                                         <span className="font-semibold text-primary">{t.opportunityTitle}</span>
                                                         <span className="text-xs bg-muted px-2 py-0.5 rounded text-muted-foreground">{t.customerName}</span>
+                                                        {t.techName && <span className="text-xs bg-primary/10 px-2 py-0.5 rounded text-primary">{t.techName}</span>}
                                                     </div>
                                                     <p className="text-sm">{t.description}</p>
                                                     <div className="flex items-center gap-4 mt-2 text-xs text-muted-foreground">
@@ -223,16 +232,18 @@ export function PresalesTimesheetsPage() {
                                                         <span>約 NT$ {t.costAmount?.toLocaleString()}</span>
                                                     </div>
                                                 </div>
-                                                <div className="flex items-center gap-2">
-                                                    <button
-                                                        onClick={() => deleteTime.mutate({ id: t.id })}
-                                                        className="p-2 text-muted-foreground hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-950/30 rounded-md transition-colors"
-                                                        title="刪除"
-                                                        disabled={deleteTime.isPending}
-                                                    >
-                                                        <Trash2 className="w-4 h-4" />
-                                                    </button>
-                                                </div>
+                                                {!canViewAllTimesheets && (
+                                                    <div className="flex items-center gap-2">
+                                                        <button
+                                                            onClick={() => deleteTime.mutate({ id: t.id })}
+                                                            className="p-2 text-muted-foreground hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-950/30 rounded-md transition-colors"
+                                                            title="刪除"
+                                                            disabled={deleteTime.isPending}
+                                                        >
+                                                            <Trash2 className="w-4 h-4" />
+                                                        </button>
+                                                    </div>
+                                                )}
                                             </div>
                                         ))}
                                     </div>
@@ -251,18 +262,21 @@ export function PresalesTimesheetsPage() {
                                                                 <div className="flex items-center gap-2 mb-0.5">
                                                                     <span className="font-semibold">{t.opportunityTitle}</span>
                                                                     <span className="text-xs bg-muted px-1.5 py-0.5 rounded text-muted-foreground">{t.customerName}</span>
+                                                                    {t.techName && <span className="text-xs bg-primary/10 px-1.5 py-0.5 rounded text-primary">{t.techName}</span>}
                                                                 </div>
                                                                 <p className="text-muted-foreground text-xs">{t.description}</p>
                                                             </div>
                                                             <div className="flex items-center justify-between md:justify-end gap-4 min-w-[120px]">
                                                                 <div className="text-xs text-muted-foreground font-medium">{t.hours} hr / {new Date(t.workDate).toLocaleDateString()}</div>
-                                                                <button
-                                                                    onClick={() => deleteTime.mutate({ id: t.id })}
-                                                                    className="p-1.5 text-muted-foreground hover:text-red-500 rounded-md transition-colors"
-                                                                    disabled={deleteTime.isPending}
-                                                                >
-                                                                    <Trash2 className="w-3.5 h-3.5" />
-                                                                </button>
+                                                                {!canViewAllTimesheets && (
+                                                                    <button
+                                                                        onClick={() => deleteTime.mutate({ id: t.id })}
+                                                                        className="p-1.5 text-muted-foreground hover:text-red-500 rounded-md transition-colors"
+                                                                        disabled={deleteTime.isPending}
+                                                                    >
+                                                                        <Trash2 className="w-3.5 h-3.5" />
+                                                                    </button>
+                                                                )}
                                                             </div>
                                                         </div>
                                                     ))}

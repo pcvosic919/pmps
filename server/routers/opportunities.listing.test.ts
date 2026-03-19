@@ -312,6 +312,35 @@ describe("buildOpportunityListQuery", () => {
             user: managerUser,
         })).toEqual({});
     });
+
+    it("建立時間排序的游標會轉回 Date，避免 Mongo 查詢抓不到商機", () => {
+        const cursor = encodeCursor("000000000000000000000006", "2025-01-02T00:00:00.000Z");
+        const query = buildOpportunityListQuery({
+            cursor: decodeCursor(cursor),
+            sortBy: "createdAt",
+            sortOrder: "desc",
+            user: memberUser,
+        });
+
+        expect(query).toEqual({
+            $and: [
+                {
+                    $or: [
+                        { ownerId: memberObjectId },
+                        { "members.userId": memberObjectId },
+                        { "presalesAssignments.techId": memberObjectId },
+                    ],
+                },
+                {
+                    $or: [
+                        { createdAt: { $lt: new Date("2025-01-02T00:00:00.000Z") } },
+                        { createdAt: new Date("2025-01-02T00:00:00.000Z"), _id: { $lt: new mongoose.Types.ObjectId("000000000000000000000006") } },
+                    ],
+                },
+            ],
+        });
+    });
+
 });
 
 describe("opportunity list pagination regression", () => {

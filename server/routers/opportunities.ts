@@ -15,6 +15,7 @@ import {
     hasAnyRole,
 } from "../_core/authorization";
 import { decodeCursor, encodeCursor } from "../_core/cursor";
+import { createNotification } from "../_core/notifications";
 import {
     buildOpportunityListQuery,
     opportunitySortFields,
@@ -278,6 +279,29 @@ export const opportunitiesRouter = router({
             }));
         }),
 
+
+    getPresalesTimesheetOverview: roleProcedure(["admin", "manager", "pm"])
+        .query(async () => {
+            const items = await TimesheetModel.find({ type: "presales" })
+                .populate("opportunityId", "title customerName")
+                .populate("techId", "name email")
+                .sort({ workDate: -1, _id: -1 })
+                .lean();
+
+            return items.map((t: any) => ({
+                id: t._id.toString(),
+                opportunityId: t.opportunityId?._id.toString(),
+                techId: t.techId?._id?.toString() || t.techId?.toString(),
+                techName: t.techId?.name || t.techId?.email || "未知人員",
+                workDate: t.workDate,
+                hours: t.hours,
+                description: t.description,
+                costAmount: t.costAmount,
+                opportunityTitle: t.opportunityId?.title || "未知商機",
+                customerName: t.opportunityId?.customerName || ""
+            }));
+        }),
+
     getMyPresalesAssignments: protectedProcedure
         .query(async ({ ctx }) => {
             const opps = await OpportunityModel.find({
@@ -312,7 +336,7 @@ export const opportunitiesRouter = router({
         .mutation(async ({ input, ctx }) => {
             const opportunity = assertFound(
                 await OpportunityModel.findById(input.opportunityId)
-                    .select("ownerId members presalesAssignments status")
+                    .select("title ownerId members presalesAssignments status")
                     .lean(),
                 "找不到該商機"
             );
@@ -339,6 +363,13 @@ export const opportunitiesRouter = router({
                     { $push: { members: { userId: input.techId, memberRole: "assignee" } } }
                 );
             }
+
+            await createNotification({
+                userId: input.techId,
+                type: "todo",
+                message: `您已被指派為商機「${opportunity.title}」的協銷人員，請開始安排支援工時。`,
+                actionUrl: `/opportunities/${input.opportunityId}`
+            });
             return { success: true };
         }),
 
@@ -352,7 +383,7 @@ export const opportunitiesRouter = router({
         .mutation(async ({ input, ctx }) => {
             const opportunity = assertFound(
                 await OpportunityModel.findById(input.opportunityId)
-                    .select("ownerId members presalesAssignments status")
+                    .select("title ownerId members presalesAssignments status")
                     .lean(),
                 "找不到該商機"
             );
@@ -370,6 +401,13 @@ export const opportunitiesRouter = router({
                 { _id: input.opportunityId },
                 { $set: { status: "converted" } }
             );
+
+            await createNotification({
+                userId: input.pmId,
+                type: "approval",
+                message: `商機「${opportunity.title}」已轉為專案「${input.title}」，請前往專案管理確認後續規劃。`,
+                actionUrl: "/projects"
+            });
 
             return { id: result._id.toString() };
         }),

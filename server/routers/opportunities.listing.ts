@@ -17,6 +17,14 @@ type OpportunityListCursor = {
     value: CursorValue;
 };
 
+const normalizeCursorValue = (sortBy: OpportunitySortField, value: CursorValue) => {
+    if (sortBy === "createdAt" && typeof value === "string") {
+        return new Date(value);
+    }
+
+    return value;
+};
+
 export const buildOpportunitySearchQuery = (search?: string) => {
     if (!search) {
         return {};
@@ -77,8 +85,8 @@ export const buildOpportunityListQuery = ({
 
         clauses.push({
             $or: [
-                { [sortBy]: { [comparisonOperator]: cursor.value } },
-                { [sortBy]: cursor.value, _id: { [comparisonOperator]: toObjectId(cursor.id) } }
+                { [sortBy]: { [comparisonOperator]: normalizeCursorValue(sortBy, cursor.value) } },
+                { [sortBy]: normalizeCursorValue(sortBy, cursor.value), _id: { [comparisonOperator]: toObjectId(cursor.id) } }
             ]
         });
     }

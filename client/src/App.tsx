@@ -7,6 +7,7 @@ import { AppLayout } from "./components/AppLayout";
 import { MsalProvider } from "@azure/msal-react";
 import { msalInstance } from "./lib/msal";
 import { Toaster, toast } from "react-hot-toast";
+import { useCurrentUser } from "./lib/useCurrentUser";
 
 const LoginPage = lazy(() => import("./pages/LoginPage").then((module) => ({ default: module.LoginPage })));
 const UserManagementPage = lazy(() => import("./pages/UserManagementPage").then((module) => ({ default: module.UserManagementPage })));
@@ -16,7 +17,6 @@ const SettlementsPage = lazy(() => import("./pages/SettlementsPage").then((modul
 const NotificationsPage = lazy(() => import("./pages/NotificationsPage").then((module) => ({ default: module.NotificationsPage })));
 const SystemSettingsPage = lazy(() => import("./pages/SystemSettingsPage").then((module) => ({ default: module.SystemSettingsPage })));
 const CustomFieldsPage = lazy(() => import("./pages/CustomFieldsPage").then((module) => ({ default: module.CustomFieldsPage })));
-const ReportStoryPage = lazy(() => import("./pages/ReportStoryPage").then((module) => ({ default: module.ReportStoryPage })));
 const OpportunitiesPage = lazy(() => import("./pages/OpportunitiesPage").then((module) => ({ default: module.OpportunitiesPage })));
 const ServiceRequestsPage = lazy(() => import("./pages/ServiceRequestsPage").then((module) => ({ default: module.ServiceRequestsPage })));
 const ProjectTimesheetsPage = lazy(() => import("./pages/ProjectTimesheetsPage").then((module) => ({ default: module.ProjectTimesheetsPage })));
@@ -44,6 +44,25 @@ function AppLoadingFallback() {
       載入頁面中...
     </div>
   );
+}
+
+function RestrictedPage({ message = "您沒有權限檢視此頁面" }: { message?: string }) {
+  return (
+    <div className="flex min-h-[40vh] items-center justify-center rounded-xl border border-dashed bg-card text-muted-foreground">
+      {message}
+    </div>
+  );
+}
+
+function ProjectManagementRoute() {
+  const { user, isLoading } = useCurrentUser();
+
+  if (isLoading) {
+    return <AppLoadingFallback />;
+  }
+
+  const canAccess = !!user && (user.role === "manager" || user.role === "pm" || user.roles.includes("manager") || user.roles.includes("pm"));
+  return canAccess ? <ProjectManagementPage /> : <RestrictedPage message="只有 Manager 與 PM 可以檢視專案管理。" />;
 }
 
 function createAppQueryClient(onUnauthorized: () => void) {
@@ -130,10 +149,9 @@ export default function App() {
                   <Route path="/notifications" component={NotificationsPage} />
                   <Route path="/system-settings" component={SystemSettingsPage} />
                   <Route path="/custom-fields" component={CustomFieldsPage} />
-                  <Route path="/reportstory" component={ReportStoryPage} />
                   <Route path="/opportunities" component={OpportunitiesPage} />
                   <Route path="/opportunities/:id" component={OpportunityDetailPage} />
-                  <Route path="/projects" component={ProjectManagementPage} />
+                  <Route path="/projects" component={ProjectManagementRoute} />
                   <Route path="/service-requests" component={ServiceRequestsPage} />
                   <Route path="/service-requests/:id" component={WbsManagementPage} />
                   <Route path="/change-requests" component={ChangeRequestsPage} />
