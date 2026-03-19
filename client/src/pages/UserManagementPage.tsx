@@ -70,13 +70,11 @@ export function UserManagementPage() {
     const [editingUser, setEditingUser] = useState<any | null>(null);
     const [isCreatingUser, setIsCreatingUser] = useState(false);
 
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const createForm = useForm<any>({
         resolver: zodResolver(userSchema) as any,
         defaultValues: { name: "", email: "", department: "", role: "user", isActive: true, roles: [] }
     });
 
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const editForm = useForm<any>({
         resolver: zodResolver(editUserSchema) as any,
         defaultValues: { department: "", role: "user", isActive: true, roles: [] }

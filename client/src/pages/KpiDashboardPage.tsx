@@ -1,12 +1,19 @@
+import { useMemo, useState } from "react";
 import { trpc } from "../lib/trpc";
 import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip as RechartsTooltip, BarChart, Bar, LineChart, Line, XAxis, YAxis, CartesianGrid } from "recharts";
-import { TrendingUp, Users, AlertTriangle, CheckCircle, PieChart as PieChartIcon } from "lucide-react";
+import { TrendingUp, Users, AlertTriangle, CheckCircle, PieChart as PieChartIcon, Download } from "lucide-react";
 
 export function KpiDashboardPage() {
     const { data: kpiData, isLoading: kpiLoading } = trpc.analytics.getKpiData.useQuery();
     const { data: utData, isLoading: utLoading } = trpc.analytics.getUtilization.useQuery();
     const { data: trendData, isLoading: trendLoading } = trpc.analytics.getWinRateTrend.useQuery();
     const { data: costRevData, isLoading: costRevLoading } = trpc.analytics.getCostVsRevenuePerPerson.useQuery();
+    const [visibleCharts, setVisibleCharts] = useState({
+        opportunityMix: true,
+        utilization: true,
+        winRateTrend: true,
+        costVsRevenue: true,
+    });
 
     const oppData = [
         { name: '進行中 / 協銷中', value: kpiData?.pendingOpps || 0, color: '#3b82f6' },
@@ -19,6 +26,33 @@ export function KpiDashboardPage() {
         稼動率: u.utilizationRate,
         target: 80
     })) || [];
+    const exportRows = useMemo(() => {
+        const rows = [
+            ["metric", "value"],
+            ["win_rate", String(kpiData?.winRate || 0)],
+            ["active_projects", String(kpiData?.activeProjects || 0)],
+            ["total_revenue", String(kpiData?.totalRevenue || 0)],
+            ["total_margin", String(kpiData?.totalMargin || 0)],
+            ["margin_percent", String(kpiData?.marginPercent || 0)],
+            ["unlocked_utilization_count", String(utData?.length || 0)],
+        ];
+
+        trendData?.forEach((item) => {
+            rows.push([`trend_${item.month}`, String(item.winRate)]);
+        });
+
+        return rows.map((cols) => cols.join(",")).join("\n");
+    }, [kpiData, trendData, utData]);
+
+    const handleExport = () => {
+        const blob = new Blob([exportRows], { type: "text/csv;charset=utf-8;" });
+        const url = URL.createObjectURL(blob);
+        const anchor = document.createElement("a");
+        anchor.href = url;
+        anchor.download = `kpi-dashboard-${new Date().toISOString().slice(0, 10)}.csv`;
+        anchor.click();
+        URL.revokeObjectURL(url);
+    };
 
     if (kpiLoading || utLoading || trendLoading || costRevLoading) {
         return <div className="p-8 text-center text-muted-foreground">載入 KPI 數據中...</div>;
@@ -30,6 +64,38 @@ export function KpiDashboardPage() {
                 <div>
                     <h2 className="text-3xl font-bold tracking-tight bg-clip-text text-transparent bg-gradient-to-r from-primary to-primary/60">KPI 儀表板</h2>
                     <p className="text-muted-foreground mt-1">追蹤商機分析、毛利與技術人員稼動率</p>
+                </div>
+                <button
+                    type="button"
+                    onClick={handleExport}
+                    className="inline-flex items-center gap-2 rounded-lg border border-border px-4 py-2 text-sm font-medium hover:bg-muted"
+                >
+                    <Download className="h-4 w-4" />
+                    匯出 CSV
+                </button>
+            </div>
+
+            <div className="bg-card border border-border rounded-xl p-4 shadow-sm">
+                <div className="text-sm font-semibold">顯示模組</div>
+                <div className="mt-3 flex flex-wrap gap-2">
+                    {[
+                        { key: "opportunityMix", label: "商機狀態" },
+                        { key: "utilization", label: "稼動率" },
+                        { key: "winRateTrend", label: "勝率趨勢" },
+                        { key: "costVsRevenue", label: "成本 vs 營收" }
+                    ].map((option) => {
+                        const enabled = visibleCharts[option.key as keyof typeof visibleCharts];
+                        return (
+                            <button
+                                key={option.key}
+                                type="button"
+                                onClick={() => setVisibleCharts((current) => ({ ...current, [option.key]: !enabled }))}
+                                className={`rounded-full px-3 py-1.5 text-sm font-medium border transition-colors ${enabled ? "border-primary bg-primary/10 text-primary" : "border-border text-muted-foreground hover:bg-muted"}`}
+                            >
+                                {enabled ? "顯示中" : "已隱藏"} · {option.label}
+                            </button>
+                        );
+                    })}
                 </div>
             </div>
 
@@ -74,6 +140,7 @@ export function KpiDashboardPage() {
 
             <div className="grid md:grid-cols-2 gap-6">
                 {/* Opp Status Pie Chart */}
+                {visibleCharts.opportunityMix && (
                 <div className="bg-card border border-border rounded-xl p-6 shadow-sm">
                     <h3 className="text-lg font-bold mb-6 flex items-center">
                         <PieChartIcon className="w-5 h-5 mr-2 text-muted-foreground" />
@@ -108,8 +175,10 @@ export function KpiDashboardPage() {
                         ))}
                     </div>
                 </div>
+                )}
 
                 {/* Utilization Bar Chart */}
+                {visibleCharts.utilization && (
                 <div className="bg-card border border-border rounded-xl p-6 shadow-sm">
                     <h3 className="text-lg font-bold mb-6 flex items-center">
                         <Users className="w-5 h-5 mr-2 text-muted-foreground" />
@@ -127,10 +196,12 @@ export function KpiDashboardPage() {
                         </ResponsiveContainer>
                     </div>
                 </div>
+                )}
             </div>
 
             <div className="grid md:grid-cols-2 gap-6">
                 {/* Win Rate Trend Line Chart */}
+                {visibleCharts.winRateTrend && (
                 <div className="bg-card border border-border rounded-xl p-6 shadow-sm">
                     <h3 className="text-lg font-bold mb-6 flex items-center">
                         <TrendingUp className="w-5 h-5 mr-2 text-muted-foreground" />
@@ -148,8 +219,10 @@ export function KpiDashboardPage() {
                         </ResponsiveContainer>
                     </div>
                 </div>
+                )}
 
                 {/* Cost vs Revenue Bar Chart */}
+                {visibleCharts.costVsRevenue && (
                 <div className="bg-card border border-border rounded-xl p-6 shadow-sm">
                     <h3 className="text-lg font-bold mb-6 flex items-center">
                         <PieChartIcon className="w-5 h-5 mr-2 text-muted-foreground" />
@@ -168,6 +241,7 @@ export function KpiDashboardPage() {
                         </ResponsiveContainer>
                     </div>
                 </div>
+                )}
             </div>
         </div>
     );

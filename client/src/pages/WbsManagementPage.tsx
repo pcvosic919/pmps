@@ -7,7 +7,7 @@ import toast from "react-hot-toast";
 import { useCurrentUser } from "../lib/useCurrentUser";
 
 export function WbsManagementPage() {
-    const [_match, params] = useRoute("/service-requests/:id");
+    const [, params] = useRoute("/service-requests/:id");
     const srId = params?.id || "";
     const utils = trpc.useContext();
     const { hasRole } = useCurrentUser();
@@ -64,6 +64,9 @@ export function WbsManagementPage() {
     const nextVersionNumber = sr.wbsVersions && sr.wbsVersions.length > 0
         ? Math.max(...sr.wbsVersions.map((v: any) => v.version)) + 1
         : 1;
+    const latestVersion = sr.wbsVersions?.length
+        ? [...sr.wbsVersions].sort((a: any, b: any) => b.version - a.version)[0]
+        : null;
 
     const getStatusColor = (status: string) => {
         switch (status) {
@@ -87,6 +90,39 @@ export function WbsManagementPage() {
         setDraftItems(newItems);
     };
     const handleRemoveDraftItem = (index: number) => setDraftItems(draftItems.filter((_, i) => i !== index));
+    const handleStartBuild = () => {
+        if (latestVersion?.items?.length) {
+            setDraftItems(latestVersion.items.map((item: any) => ({
+                title: item.title,
+                estimatedHours: item.estimatedHours,
+                assigneeId: item.assigneeId
+            })));
+        } else {
+            setDraftItems([]);
+        }
+        setIsBuildingVersion(true);
+    };
+
+    const getComparisonMeta = (version: any) => {
+        const compareWithId = compareTargets[version.id];
+        const compareWithVer = compareWithId ? sr.wbsVersions.find((v: any) => v.id === compareWithId) : null;
+
+        if (!compareWithVer) {
+            return null;
+        }
+
+        const compareByTitle = new Map(compareWithVer.items.map((item: any) => [item.title, item]));
+        const currentByTitle = new Map(version.items.map((item: any) => [item.title, item]));
+
+        const added = version.items.filter((item: any) => !compareByTitle.has(item.title));
+        const removed = compareWithVer.items.filter((item: any) => !currentByTitle.has(item.title));
+        const changed = version.items.filter((item: any) => {
+            const prev = compareByTitle.get(item.title) as any;
+            return prev && (prev.estimatedHours !== item.estimatedHours || prev.assigneeId !== item.assigneeId);
+        });
+
+        return { compareWithVer, added, removed, changed };
+    };
 
     const handleSaveVersion = () => {
         if (draftItems.length === 0) { toast.error("請至少新增一項任務"); return; }
@@ -210,7 +246,7 @@ export function WbsManagementPage() {
                         <>
                             <div className="flex justify-between items-center bg-card p-4 rounded-xl shadow-sm border border-border">
                                 <h3 className="font-bold text-lg flex items-center"><FileText className="w-5 h-5 mr-2 text-primary" />WBS 版本歷史</h3>
-                                <button onClick={() => setIsBuildingVersion(true)}
+                                <button onClick={handleStartBuild}
                                     className="bg-primary text-primary-foreground hover:bg-primary/90 px-4 py-2 rounded-md inline-flex items-center text-sm font-medium transition-colors">
                                     <Plus className="w-4 h-4 mr-2" />建立 v{nextVersionNumber} 版本
                                 </button>
@@ -218,7 +254,11 @@ export function WbsManagementPage() {
 
                             <div className="space-y-3">
                                 {sr.wbsVersions && sr.wbsVersions.length > 0 ? (
-                                    sr.wbsVersions.sort((a: any, b: any) => b.version - a.version).map((version: any) => (
+                                    sr.wbsVersions.sort((a: any, b: any) => b.version - a.version).map((version: any) => {
+                                        const compareWithId = compareTargets[version.id];
+                                        const comparison = getComparisonMeta(version);
+
+                                        return (
                                         <div key={version.id} className="bg-card border border-border rounded-xl p-5 hover:border-primary/50 transition-colors shadow-sm flex flex-col gap-4">
                                             <div className="flex items-center justify-between flex-wrap gap-3">
                                                 <div>
@@ -228,8 +268,8 @@ export function WbsManagementPage() {
                                                             {getStatusText(version.status)}
                                                         </span>
                                                         {sr.wbsVersions.length > 1 && (
-                                                            <select 
-                                                                value={compareTargets[version.id] || ""}
+                                                            <select
+                                                                value={compareWithId || ""}
                                                                 onChange={(e) => setCompareTargets({...compareTargets, [version.id]: e.target.value})}
                                                                 className="text-xs border border-border rounded px-1.5 py-0.5 bg-background font-medium hover:border-primary/50 transition-colors focus:outline-none"
                                                             >
@@ -277,17 +317,46 @@ export function WbsManagementPage() {
                                                 )}
                                             </div>
 
+                                            {comparison && (
+                                                <div className="grid gap-2 sm:grid-cols-3">
+                                                    <div className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-800">
+                                                        新增項目 <span className="ml-1 font-bold">{comparison.added.length}</span>
+                                                    </div>
+                                                    <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
+                                                        調整項目 <span className="ml-1 font-bold">{comparison.changed.length}</span>
+                                                    </div>
+                                                    <div className="rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-800">
+                                                        移除項目 <span className="ml-1 font-bold">{comparison.removed.length}</span>
+                                                    </div>
+                                                </div>
+                                            )}
+
                                             {version.items && version.items.length > 0 && (
                                                 <div className="bg-muted/30 rounded-lg p-3 space-y-2 mt-2">
                                                     {version.items.map((item: any) => {
-                                                        const compareWithId = compareTargets[version.id];
-                                                        const compareWithVer = compareWithId ? sr.wbsVersions.find((v: any) => v.id === compareWithId) : null;
+                                                        const compareWithVer = comparison?.compareWithVer ?? null;
                                                         const compareItem = compareWithVer?.items.find((i: any) => i.title === item.title);
                                                         const hourDiff = compareItem ? item.estimatedHours - compareItem.estimatedHours : null;
+                                                        const assigneeChanged = compareItem && compareItem.assigneeId !== item.assigneeId;
+                                                        const isAdded = !!comparison && comparison.added.some((addedItem: any) => addedItem.title === item.title);
 
                                                         return (
-                                                            <div key={item.id} className="text-sm flex justify-between items-center bg-background border border-border p-2 rounded hover:shadow-sm transition-shadow">
-                                                                <div className="font-medium">{item.title}</div>
+                                                            <div key={item.id} className={`
+                                                                text-sm flex justify-between items-center bg-background border p-2 rounded hover:shadow-sm transition-shadow
+                                                                ${isAdded ? "border-emerald-300 bg-emerald-50/60" : "border-border"}
+                                                            `}>
+                                                                <div>
+                                                                    <div className="font-medium flex items-center gap-2">
+                                                                        {item.title}
+                                                                        {isAdded && <span className="rounded bg-emerald-100 px-1.5 py-0.5 text-[10px] font-semibold text-emerald-700">新增</span>}
+                                                                        {assigneeChanged && <span className="rounded bg-blue-100 px-1.5 py-0.5 text-[10px] font-semibold text-blue-700">改派</span>}
+                                                                    </div>
+                                                                    {compareItem && assigneeChanged && (
+                                                                        <div className="mt-1 text-[11px] text-muted-foreground">
+                                                                            指派變更：{techs?.find(t => t.id === compareItem.assigneeId)?.name || "未指派"} → {techs?.find(t => t.id === item.assigneeId)?.name || "未指派"}
+                                                                        </div>
+                                                                    )}
+                                                                </div>
                                                                 <div className="flex items-center gap-4 text-xs text-muted-foreground">
                                                                     {hourDiff !== null && hourDiff !== 0 && (
                                                                         <span className={`font-bold px-1.5 py-0.5 rounded flex items-center text-[10px] ${hourDiff > 0 ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'}`}>
@@ -300,10 +369,22 @@ export function WbsManagementPage() {
                                                             </div>
                                                         );
                                                     })}
+                                                    {comparison && comparison.removed.length > 0 && (
+                                                        <div className="rounded-lg border border-dashed border-rose-300 bg-rose-50/70 p-3">
+                                                            <div className="text-xs font-semibold text-rose-700 mb-2">相較於 v{comparison.compareWithVer.version} 已移除的項目</div>
+                                                            <div className="flex flex-wrap gap-2">
+                                                                {comparison.removed.map((item: any) => (
+                                                                    <span key={item.id} className="rounded-full bg-white px-2 py-1 text-[11px] text-rose-700 border border-rose-200">
+                                                                        {item.title} · {item.estimatedHours}h
+                                                                    </span>
+                                                                ))}
+                                                            </div>
+                                                        </div>
+                                                    )}
                                                 </div>
                                             )}
                                         </div>
-                                    ))
+                                    )})
                                 ) : (
                                     <div className="p-8 text-center bg-muted/30 border border-dashed rounded-xl">
                                         <p className="text-muted-foreground">目前還沒有任何 WBS 版本，請建立以開始派工</p>
@@ -322,7 +403,10 @@ export function WbsManagementPage() {
                                 </button>
                             </div>
                             <div className="p-4 space-y-4 flex-1">
-                                <p className="text-sm text-muted-foreground">在此規劃專案的工作分解結構 (WBS)，包含各項子任務、預估工時，並指派給對應的技術人員。</p>
+                                <div className="rounded-lg border border-primary/15 bg-primary/5 px-4 py-3 text-sm text-muted-foreground">
+                                    在此規劃專案的工作分解結構 (WBS)，包含各項子任務、預估工時，並指派給對應的技術人員。
+                                    {latestVersion?.items?.length ? ` 已自動帶入 v${latestVersion.version} 作為草稿基底，可直接微調後送審。` : ""}
+                                </div>
                                 {draftItems.length === 0 ? (
                                     <div className="text-center p-8 border border-dashed rounded-lg bg-background">
                                         <p className="text-muted-foreground mb-4">目前沒有任何任務項目</p>
