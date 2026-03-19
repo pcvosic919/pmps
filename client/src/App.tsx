@@ -1,4 +1,4 @@
-import { Suspense, lazy } from "react";
+import { Suspense, lazy, useEffect, useState, type ComponentType } from "react";
 import { MutationCache, QueryCache, QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { httpBatchLink } from "@trpc/client";
 import { trpc } from "./lib/trpc";
@@ -9,7 +9,6 @@ import { msalInstance } from "./lib/msal";
 import { Toaster, toast } from "react-hot-toast";
 import { useCurrentUser } from "./lib/useCurrentUser";
 import { AuthProvider, useAuth } from "./lib/auth";
-import { useEffect, useState } from "react";
 
 const LoginPage = lazy(() => import("./pages/LoginPage").then((module) => ({ default: module.LoginPage })));
 const UserManagementPage = lazy(() => import("./pages/UserManagementPage").then((module) => ({ default: module.UserManagementPage })));
@@ -30,6 +29,21 @@ const DashboardPage = lazy(() => import("./pages/DashboardPage").then((module) =
 const ResourcesPage = lazy(() => import("./pages/ResourcesPage").then((module) => ({ default: module.ResourcesPage })));
 const OpportunityDetailPage = lazy(() => import("./pages/OpportunityDetailPage").then((module) => ({ default: module.OpportunityDetailPage })));
 const ProjectManagementPage = lazy(() => import("./pages/ProjectManagementPage").then((module) => ({ default: module.ProjectManagementPage })));
+
+type ActiveRouteDefinition = {
+  path: string;
+  component: ComponentType;
+  pageFile: string;
+  lifecycle: "保留 / 上線" | "保留 / 上線（權限控管）";
+  notes: string;
+};
+
+type PageInventoryEntry = {
+  pageFile: string;
+  status: "保留 / 上線" | "保留 / 上線（權限控管）" | "移除" | "合併後移除";
+  route: string;
+  notes: string;
+};
 
 function NotFound() {
   return (
@@ -66,6 +80,42 @@ function ProjectManagementRoute() {
   const canAccess = !!user && (user.role === "manager" || user.role === "pm" || user.roles.includes("manager") || user.roles.includes("pm"));
   return canAccess ? <ProjectManagementPage /> : <RestrictedPage message="只有 Manager 與 PM 可以檢視專案管理。" />;
 }
+
+const activeRoutes: ActiveRouteDefinition[] = [
+  { path: "/", component: DashboardPage, pageFile: "DashboardPage.tsx", lifecycle: "保留 / 上線", notes: "主儀表板首頁。" },
+  { path: "/resources", component: ResourcesPage, pageFile: "ResourcesPage.tsx", lifecycle: "保留 / 上線", notes: "資源池與人力配置視圖。" },
+  { path: "/users", component: UserManagementPage, pageFile: "UserManagementPage.tsx", lifecycle: "保留 / 上線", notes: "正式帳號管理頁，取代舊版 UsersPage。" },
+  { path: "/cost-rates", component: CostRatesPage, pageFile: "CostRatesPage.tsx", lifecycle: "保留 / 上線", notes: "費率設定。" },
+  { path: "/utilization", component: UtilizationPage, pageFile: "UtilizationPage.tsx", lifecycle: "保留 / 上線", notes: "稼動率看板。" },
+  { path: "/settlements", component: SettlementsPage, pageFile: "SettlementsPage.tsx", lifecycle: "保留 / 上線", notes: "月度結算。" },
+  { path: "/notifications", component: NotificationsPage, pageFile: "NotificationsPage.tsx", lifecycle: "保留 / 上線", notes: "通知中心。" },
+  { path: "/system-settings", component: SystemSettingsPage, pageFile: "SystemSettingsPage.tsx", lifecycle: "保留 / 上線", notes: "系統設定。" },
+  { path: "/custom-fields", component: CustomFieldsPage, pageFile: "CustomFieldsPage.tsx", lifecycle: "保留 / 上線", notes: "自訂欄位管理。" },
+  { path: "/opportunities", component: OpportunitiesPage, pageFile: "OpportunitiesPage.tsx", lifecycle: "保留 / 上線", notes: "商機清單。" },
+  { path: "/opportunities/:id", component: OpportunityDetailPage, pageFile: "OpportunityDetailPage.tsx", lifecycle: "保留 / 上線", notes: "商機詳情。" },
+  { path: "/projects", component: ProjectManagementRoute, pageFile: "ProjectManagementPage.tsx", lifecycle: "保留 / 上線（權限控管）", notes: "正式專案管理入口，僅 Manager / PM 可見。" },
+  { path: "/service-requests", component: ServiceRequestsPage, pageFile: "ServiceRequestsPage.tsx", lifecycle: "保留 / 上線", notes: "SR 清單。" },
+  { path: "/service-requests/:id", component: WbsManagementPage, pageFile: "WbsManagementPage.tsx", lifecycle: "保留 / 上線", notes: "SR 對應 WBS 管理。" },
+  { path: "/change-requests", component: ChangeRequestsPage, pageFile: "ChangeRequestsPage.tsx", lifecycle: "保留 / 上線", notes: "CR 清單與審核。" },
+  { path: "/presales-timesheets", component: PresalesTimesheetsPage, pageFile: "PresalesTimesheetsPage.tsx", lifecycle: "保留 / 上線", notes: "協銷工時填報。" },
+  { path: "/project-timesheets", component: ProjectTimesheetsPage, pageFile: "ProjectTimesheetsPage.tsx", lifecycle: "保留 / 上線", notes: "專案工時填報。" },
+  { path: "/kpi", component: KpiDashboardPage, pageFile: "KpiDashboardPage.tsx", lifecycle: "保留 / 上線", notes: "KPI 儀表板。" },
+];
+
+// `client/src/App.tsx` is the source of truth for routed pages; README and navigation
+// should stay aligned with this inventory to avoid stale placeholder pages.
+export const pageInventory: PageInventoryEntry[] = [
+  ...activeRoutes.map(({ pageFile, lifecycle, path, notes }) => ({
+    pageFile,
+    status: lifecycle,
+    route: path,
+    notes,
+  })),
+  { pageFile: "LoginPage.tsx", status: "保留 / 上線", route: "/login", notes: "登入頁，由 AppShell 於未登入時直接切換。" },
+  { pageFile: "UsersPage.tsx", status: "合併後移除", route: "—", notes: "舊版帳號管理雛形，功能已由 UserManagementPage 完整取代。" },
+  { pageFile: "TimesheetsPage.tsx", status: "合併後移除", route: "—", notes: "工時入口已拆成 presales / project 兩個正式頁面，不再保留入口殼層。" },
+  { pageFile: "ReportStoryPage.tsx", status: "移除", route: "—", notes: "AI 報表故事已停用，不再提供路由或 README 導覽說明。" },
+];
 
 function createAppQueryClient(onUnauthorized: () => void) {
   return new QueryClient({
@@ -115,24 +165,9 @@ function AppShell() {
       ) : (
         <AppLayout>
           <Switch>
-            <Route path="/" component={DashboardPage} />
-            <Route path="/resources" component={ResourcesPage} />
-            <Route path="/users" component={UserManagementPage} />
-            <Route path="/cost-rates" component={CostRatesPage} />
-            <Route path="/utilization" component={UtilizationPage} />
-            <Route path="/settlements" component={SettlementsPage} />
-            <Route path="/notifications" component={NotificationsPage} />
-            <Route path="/system-settings" component={SystemSettingsPage} />
-            <Route path="/custom-fields" component={CustomFieldsPage} />
-            <Route path="/opportunities" component={OpportunitiesPage} />
-            <Route path="/opportunities/:id" component={OpportunityDetailPage} />
-            <Route path="/projects" component={ProjectManagementRoute} />
-            <Route path="/service-requests" component={ServiceRequestsPage} />
-            <Route path="/service-requests/:id" component={WbsManagementPage} />
-            <Route path="/change-requests" component={ChangeRequestsPage} />
-            <Route path="/presales-timesheets" component={PresalesTimesheetsPage} />
-            <Route path="/project-timesheets" component={ProjectTimesheetsPage} />
-            <Route path="/kpi" component={KpiDashboardPage} />
+            {activeRoutes.map((route) => (
+              <Route key={route.path} path={route.path} component={route.component} />
+            ))}
             <Route path="/:rest*" component={NotFound} />
           </Switch>
         </AppLayout>

@@ -6,7 +6,7 @@
 
 ## 📋 系統簡介
 
-PMP System 是針對 IT 服務商設計的全流程專案管理平台，覆蓋從 **商機售前 → 服務請求 → WBS/工時管理 → 成本結算** 的完整工作流，並提供 KPI 看板與 AI 報表故事功能。
+PMP System 是針對 IT 服務商設計的全流程專案管理平台，覆蓋從 **商機售前 → 服務請求 → WBS/工時管理 → 成本結算** 的完整工作流，並提供 KPI 看板、通知與結算管理等正式模組。
 
 ---
 
@@ -110,25 +110,58 @@ pnpm seed:demo     # 寫入 MongoDB demo 資料
 
 ## 📱 頁面路由
 
-| 路徑 | 元件 | 說明 |
-|---|---|---|
-| `/` | `DashboardPage` | 儀表板首頁 |
-| `/opportunities` | `OpportunitiesPage` | 商機清單 (無限捲動) |
-| `/opportunities/:id` | `OpportunityDetailPage` | 商機詳情 + 成員管理 |
-| `/resources` | `ResourcesPage` | 資源池看板 |
-| `/service-requests` | `ServiceRequestsPage` | SR 服務請求清單 |
-| `/service-requests/:id` | `WbsManagementPage` | SR WBS 版本管理 |
-| `/change-requests` | `ChangeRequestsPage` | 變更請求審核 |
-| `/presales-timesheets` | `PresalesTimesheetsPage` | 協銷工時填報 |
-| `/project-timesheets` | `ProjectTimesheetsPage` | 專案工時填報 |
-| `/users` | `UserManagementPage` | 用戶管理 (無限捲動) |
-| `/cost-rates` | `CostRatesPage` | 費率設定 |
-| `/utilization` | `UtilizationPage` | 稼動率看板 |
-| `/kpi` | `KpiDashboardPage` | KPI 分析儀表板 |
-| `/settlements` | `SettlementsPage` | 月度成本結算 |
-| `/notifications` | `NotificationsPage` | 通知中心 |
-| `/system-settings` | `SystemSettingsPage` | 系統設定 |
-| `/custom-fields` | `CustomFieldsPage` | 自訂欄位管理 |
+以下路由表以 `client/src/App.tsx` 的 route inventory 為唯一準則，並與側欄、頂部導覽保持同步。
+
+### 正式上線路由
+
+| 路徑 | 元件 | 狀態 | 說明 |
+|---|---|---|---|
+| `/` | `DashboardPage` | 上線 | 儀表板首頁 |
+| `/resources` | `ResourcesPage` | 上線 | 資源池看板 |
+| `/users` | `UserManagementPage` | 上線 | 用戶管理 (無限捲動) |
+| `/cost-rates` | `CostRatesPage` | 上線 | 費率設定 |
+| `/utilization` | `UtilizationPage` | 上線 | 稼動率看板 |
+| `/settlements` | `SettlementsPage` | 上線 | 月度成本結算 |
+| `/notifications` | `NotificationsPage` | 上線 | 通知中心 |
+| `/system-settings` | `SystemSettingsPage` | 上線 | 系統設定 |
+| `/custom-fields` | `CustomFieldsPage` | 上線 | 自訂欄位管理 |
+| `/opportunities` | `OpportunitiesPage` | 上線 | 商機清單 (無限捲動) |
+| `/opportunities/:id` | `OpportunityDetailPage` | 上線 | 商機詳情 + 成員管理 |
+| `/projects` | `ProjectManagementPage` | 上線（限 Manager / PM） | 正式專案管理入口 |
+| `/service-requests` | `ServiceRequestsPage` | 上線 | SR 服務請求清單 |
+| `/service-requests/:id` | `WbsManagementPage` | 上線 | SR WBS 版本管理 |
+| `/change-requests` | `ChangeRequestsPage` | 上線 | 變更請求審核 |
+| `/presales-timesheets` | `PresalesTimesheetsPage` | 上線 | 協銷工時填報 |
+| `/project-timesheets` | `ProjectTimesheetsPage` | 上線 | 專案工時填報 |
+| `/kpi` | `KpiDashboardPage` | 上線 | KPI 分析儀表板 |
+| `/login` | `LoginPage` | 上線 | 驗證入口，不顯示於主導覽 |
+
+### 頁面檔存廢盤點
+
+| 頁面檔 | 決策 | 路由 | 說明 |
+|---|---|---|---|
+| `DashboardPage.tsx` | 保留 / 上線 | `/` | 主儀表板首頁 |
+| `ResourcesPage.tsx` | 保留 / 上線 | `/resources` | 資源池模組 |
+| `UserManagementPage.tsx` | 保留 / 上線 | `/users` | 正式帳號管理頁 |
+| `CostRatesPage.tsx` | 保留 / 上線 | `/cost-rates` | 費率設定 |
+| `UtilizationPage.tsx` | 保留 / 上線 | `/utilization` | 稼動率分析 |
+| `SettlementsPage.tsx` | 保留 / 上線 | `/settlements` | 月結模組 |
+| `NotificationsPage.tsx` | 保留 / 上線 | `/notifications` | 通知中心 |
+| `SystemSettingsPage.tsx` | 保留 / 上線 | `/system-settings` | 系統設定 |
+| `CustomFieldsPage.tsx` | 保留 / 上線 | `/custom-fields` | 自訂欄位設定 |
+| `OpportunitiesPage.tsx` | 保留 / 上線 | `/opportunities` | 商機清單 |
+| `OpportunityDetailPage.tsx` | 保留 / 上線 | `/opportunities/:id` | 商機詳情 |
+| `ProjectManagementPage.tsx` | 保留 / 上線 | `/projects` | 正式專案管理入口 |
+| `ServiceRequestsPage.tsx` | 保留 / 上線 | `/service-requests` | SR 清單 |
+| `WbsManagementPage.tsx` | 保留 / 上線 | `/service-requests/:id` | WBS 管理 |
+| `ChangeRequestsPage.tsx` | 保留 / 上線 | `/change-requests` | CR 模組 |
+| `PresalesTimesheetsPage.tsx` | 保留 / 上線 | `/presales-timesheets` | 協銷工時 |
+| `ProjectTimesheetsPage.tsx` | 保留 / 上線 | `/project-timesheets` | 專案工時 |
+| `KpiDashboardPage.tsx` | 保留 / 上線 | `/kpi` | KPI 儀表板 |
+| `LoginPage.tsx` | 保留 / 上線 | `/login` | 登入頁 |
+| `UsersPage.tsx` | 合併後移除 | — | 舊版帳號管理雛形，已由 `UserManagementPage.tsx` 取代 |
+| `TimesheetsPage.tsx` | 合併後移除 | — | 已拆為協銷 / 專案工時兩個正式頁面 |
+| `ReportStoryPage.tsx` | 正式移除 | — | AI 報表故事功能停用，不保留路由與文件 |
 
 ---
 
@@ -153,7 +186,7 @@ customfields           # 自訂欄位定義
 ```
 
 > 註：舊版 Drizzle / SQLite schema 已移除，不再作為初始化流程或開發依據。
-> 註：AI 報表故事頁面已停用，文件不再列為正式導覽路由。
+> 註：AI 報表故事與其他歷史頁面已自 route inventory 與檔案系統正式移除。
 
 ### 角色系統 (Roles)
 ```
@@ -227,7 +260,7 @@ client/src/
 ├── lib/
 │   ├── trpc.ts              # tRPC client 設定
 │   └── utils.ts             # cn() 工具函數
-├── pages/                   # 20 個頁面元件
+├── pages/                   # 正式上線頁面元件（已移除歷史佔位頁）
 ├── App.tsx                  # 根元件 + 路由
 ├── main.tsx                 # Entry point
 └── index.css                # 全域樣式 + Tailwind
