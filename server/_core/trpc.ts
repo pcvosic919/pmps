@@ -2,9 +2,7 @@ import { initTRPC, TRPCError } from "@trpc/server";
 import { CreateExpressContextOptions } from "@trpc/server/adapters/express";
 import { UserModel } from "../models/User";
 import { Role } from "../../shared/types";
-import jwt from "jsonwebtoken";
-
-const JWT_SECRET = process.env.JWT_SECRET || "default_secret_key_for_dev";
+import { verifySessionToken } from "./tokens";
 
 // User session type
 export type UserSession = {
@@ -27,8 +25,8 @@ export const createContext = async ({ req, res }: CreateExpressContextOptions) =
     if (authHeader && authHeader.startsWith("Bearer ")) {
         try {
             const token = authHeader.split(" ")[1];
-            const decoded = jwt.verify(token, JWT_SECRET) as { id: string, email: string, role: string };
-            const dbUser = await UserModel.findById(decoded.id).lean();
+            const decoded = verifySessionToken(token);
+            const dbUser = await UserModel.findById(decoded.sub).lean();
 
             if (dbUser && dbUser.isActive) {
                 user = {

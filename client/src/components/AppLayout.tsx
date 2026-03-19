@@ -22,6 +22,7 @@ import {
 import { cn } from "../lib/utils";
 import { useMsal } from "@azure/msal-react";
 import { useCurrentUser } from "../lib/useCurrentUser";
+import { useAuth } from "../lib/auth";
 
 interface AppLayoutProps {
     children: React.ReactNode;
@@ -50,6 +51,7 @@ export function AppLayout({ children }: AppLayoutProps) {
     const [sidebarOpen, setSidebarOpen] = useState(true);
     const [location] = useLocation();
     const { instance } = useMsal();
+    const { clearAuth } = useAuth();
     const { user } = useCurrentUser();
 
     const visibleNavItems = navItems.filter((item) => {
@@ -61,12 +63,11 @@ export function AppLayout({ children }: AppLayoutProps) {
     });
 
     const handleLogout = async () => {
-        // 清除 Token
-        localStorage.removeItem("pmp_auth_token");
+        clearAuth();
         // 如果有 MSAL 會話，也進行登出
         try {
             await instance.logoutPopup();
-        } catch (e) {
+        } catch {
             // popup blocked or failed, fallback to reload
         }
         window.location.href = "/login";

@@ -94,7 +94,8 @@
 - [ ] 共用 Dialog/Form 元件抽取 (目前 UserManagementPage, OpportunitiesPage 有大量重複結構)
 - [ ] `react-hook-form` 在各頁面的型別 `useForm<any>` 降回嚴格型別 (待套件版本對齊後)
 - [ ] 移除所有 `as any` 型別斷言 (套件版本穩定後重構)
-- [ ] 加入 ESLint + Prettier 設定統一格式
+- [x] 加入 ESLint 設定並補齊 workspace lint/typecheck/test scripts
+- [ ] Prettier 設定統一格式
 
 ### 測試
 - [ ] 後端 router 單元測試 (vitest 已設定，零覆蓋率)
@@ -138,5 +139,5 @@
 - [x] NotificationsPage — 通知頁面
 - [x] SystemSettingsPage — 系統設定
 - [x] CustomFieldsPage — 自訂欄位
-- [x] ReportStoryPage — AI 報表故事
+- [x] ReportStoryPage — AI 報表故事（已停用並自導覽移除）
 - [x] TypeScript Build 全數通過 (exit code 0)

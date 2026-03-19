@@ -2,9 +2,8 @@ import { z } from "zod";
 import { router, publicProcedure, protectedProcedure } from "../_core/trpc";
 import { UserModel } from "../models/User";
 import { TRPCError } from "@trpc/server";
-import jwt from "jsonwebtoken";
-
-const JWT_SECRET = process.env.JWT_SECRET || "default_secret_key_for_dev";
+import { isPasswordHash, verifyPassword, hashPassword } from "../_core/password";
+import { signNotificationStreamToken, signSessionToken } from "../_core/tokens";
 
 export const authRouter = router({
     me: protectedProcedure.query(async ({ ctx }) => ({
@@ -24,19 +23,32 @@ export const authRouter = router({
                 throw new TRPCError({ code: "UNAUTHORIZED", message: "使用者不存在或密碼錯誤" });
             }
             
-            // 基礎驗證，搭配 seed 資料
-            if (input.password !== "password123" && user.password !== input.password) {
+            const isValidPassword = await verifyPassword(input.password, user.password);
+            if (!isValidPassword) {
                 throw new TRPCError({ code: "UNAUTHORIZED", message: "使用者不存在或密碼錯誤" });
             }
 
-            const token = jwt.sign(
-                { id: user._id.toString(), email: user.email, role: user.role, roles: user.roles || [], name: user.name },
-                JWT_SECRET,
-                { expiresIn: "1d" }
-            );
+            if (user.password && !isPasswordHash(user.password)) {
+                await UserModel.updateOne(
+                    { _id: user._id },
+                    { $set: { password: await hashPassword(input.password) } }
+                );
+            }
+
+            const token = signSessionToken({
+                sub: user._id.toString(),
+                email: user.email,
+                role: user.role,
+                roles: user.roles || [],
+                name: user.name
+            });
 
             return { token, user: { id: user._id.toString(), name: user.name, email: user.email, role: user.role } };
         }),
+
+    streamToken: protectedProcedure.query(({ ctx }) => ({
+        token: signNotificationStreamToken(ctx.user.id)
+    })),
 
     entraLogin: publicProcedure
         .input(z.object({ accessToken: z.string() }))
@@ -65,11 +77,13 @@ export const authRouter = router({
                     throw new TRPCError({ code: "UNAUTHORIZED", message: `系統中找不到此 Email 組件：${email}` });
                 }
 
-                const token = jwt.sign(
-                    { id: user._id.toString(), email: user.email, role: user.role, roles: user.roles || [], name: user.name },
-                    JWT_SECRET,
-                    { expiresIn: "1d" }
-                );
+                const token = signSessionToken({
+                    sub: user._id.toString(),
+                    email: user.email,
+                    role: user.role,
+                    roles: user.roles || [],
+                    name: user.name
+                });
 
                 return { token, user: { id: user._id.toString(), name: user.name, email: user.email, role: user.role } };
             } catch (error) {

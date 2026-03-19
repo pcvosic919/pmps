@@ -61,7 +61,7 @@ export function ResourcesPage() {
             setLocalSkills(s => ({ ...s, [userId]: editData.skills }));
             setLocalDepts(s => ({ ...s, [userId]: editData.department }));
             setEditingId(null);
-        } catch (e) {
+        } catch {
             // still save locally even if API fails
             setLocalSkills(s => ({ ...s, [userId]: editData.skills }));
             setLocalDepts(s => ({ ...s, [userId]: editData.department }));

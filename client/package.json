@@ -7,12 +7,13 @@
     "dev": "vite",
     "build": "tsc -b && vite build",
     "lint": "eslint .",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "typecheck": "tsc -b",
+    "test": "pnpm exec vitest run --passWithNoTests"
   },
   "dependencies": {
     "@azure/msal-browser": "^5.5.0",
     "@azure/msal-react": "^5.0.7",
-    "@dispatch/server": "workspace:*",
     "@dispatch/shared": "workspace:*",
     "@hookform/resolvers": "^2.9.11",
     "@radix-ui/react-dialog": "^1.1.15",

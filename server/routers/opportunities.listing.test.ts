@@ -27,6 +27,8 @@ type TestOpportunity = {
 
 type Query = Record<string, unknown>;
 
+const searchableFields = ["title", "customerName"] as const;
+
 const managerUser: TestUser = {
     id: new mongoose.Types.ObjectId().toString(),
     role: "manager",
@@ -210,6 +212,11 @@ const matchesQuery = (doc: TestOpportunity, query: Query): boolean => {
             return (condition as Query[]).some((clause) => matchesQuery(doc, clause));
         }
 
+        if (key === "$text") {
+            const search = String((condition as { $search?: string }).$search ?? "").toLowerCase();
+            return searchableFields.some((field) => String(doc[field] ?? "").toLowerCase().includes(search));
+        }
+
         return matchFieldCondition(getFieldValues(doc, key.split(".")), condition);
     });
 };
@@ -283,10 +290,9 @@ describe("buildOpportunityListQuery", () => {
         expect(query).toEqual({
             $and: [
                 {
-                    $or: [
-                        { title: { $regex: "target", $options: "i" } },
-                        { customerName: { $regex: "target", $options: "i" } },
-                    ],
+                    $text: {
+                        $search: "target",
+                    },
                 },
                 {
                     $or: [

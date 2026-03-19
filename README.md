@@ -94,6 +94,7 @@ pnpm seed:demo     # 寫入 MongoDB demo 資料
 | 變數名稱 | 必填 | 說明 |
 |---|---|---|
 | `MONGODB_URI` | **是** | Cosmos DB / MongoDB 完整連線字串 (需啟動 SSL) |
+| `JWT_SECRET` | **是** | JWT 與通知 SSE 短效 Token 簽章密鑰，未設定時服務不會啟動 |
 | `GEMINI_API_KEY` | 否 | Google AI Studio 密鑰 (用於 AI 報表故事分析) |
 | `PORT` | 否 | 容器 Port，預設為 `5000` |
 
@@ -128,7 +129,6 @@ pnpm seed:demo     # 寫入 MongoDB demo 資料
 | `/notifications` | `NotificationsPage` | 通知中心 |
 | `/system-settings` | `SystemSettingsPage` | 系統設定 |
 | `/custom-fields` | `CustomFieldsPage` | 自訂欄位管理 |
-| `/reportstory` | `ReportStoryPage` | AI 報表故事 |
 
 ---
 
@@ -153,6 +153,7 @@ customfields           # 自訂欄位定義
 ```
 
 > 註：舊版 Drizzle / SQLite schema 已移除，不再作為初始化流程或開發依據。
+> 註：AI 報表故事頁面已停用，文件不再列為正式導覽路由。
 
 ### 角色系統 (Roles)
 ```

@@ -103,7 +103,10 @@ const ServiceRequestSchema = new Schema<IServiceRequest>({
 }, { timestamps: true });
 
 ServiceRequestSchema.index({ pmId: 1, status: 1, createdAt: -1 });
-ServiceRequestSchema.index({ opportunityId: 1 });
+ServiceRequestSchema.index({ opportunityId: 1, createdAt: -1 });
+ServiceRequestSchema.index({ "members.userId": 1, createdAt: -1 });
+ServiceRequestSchema.index({ "changeRequests.requesterId": 1, createdAt: -1 });
 ServiceRequestSchema.index({ createdAt: -1 });
+ServiceRequestSchema.index({ title: "text" });
 
 export const ServiceRequestModel = mongoose.models.ServiceRequest || mongoose.model<IServiceRequest>("ServiceRequest", ServiceRequestSchema);

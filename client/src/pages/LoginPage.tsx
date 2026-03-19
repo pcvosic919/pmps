@@ -3,9 +3,11 @@ import { trpc } from "../lib/trpc";
 import { useMsal } from "@azure/msal-react";
 import { loginRequest } from "../lib/msal";
 import { LogIn, Mail, Lock, ShieldAlert } from "lucide-react";
+import { useAuth } from "../lib/auth";
 
 export function LoginPage() {
     const { instance } = useMsal();
+    const { setAuthToken } = useAuth();
     
     // Form state
     const [email, setEmail] = useState("");
@@ -18,9 +20,7 @@ export function LoginPage() {
     const entraLoginMutation = trpc.auth.entraLogin.useMutation();
 
     const handleLoginSuccess = (token: string) => {
-        // 保存 Token 到 localStorage
-        localStorage.setItem("pmp_auth_token", token);
-        // 跳轉至首頁 (儀表板)
+        setAuthToken(token);
         window.location.href = "/";
     };
 
