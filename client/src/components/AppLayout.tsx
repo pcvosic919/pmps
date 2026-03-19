@@ -17,7 +17,8 @@ import {
     Bell,
     Settings2,
     FolderKanban,
-    LogOut
+    LogOut,
+    Info
 } from "lucide-react";
 import { cn } from "../lib/utils";
 import { useMsal } from "@azure/msal-react";
@@ -27,6 +28,13 @@ import { useAuth } from "../lib/auth";
 interface AppLayoutProps {
     children: React.ReactNode;
 }
+
+type TopNavItem = {
+    label: string;
+    helper: string;
+    href?: string;
+    disabled?: boolean;
+};
 
 const navItems = [
     { icon: LayoutDashboard, label: "儀表板", href: "/" },
@@ -47,6 +55,13 @@ const navItems = [
     { icon: Settings, label: "系統設定", href: "/system-settings" },
 ];
 
+const topNavItems: TopNavItem[] = [
+    { label: "首頁", href: "/", helper: "返回儀表板總覽" },
+    { label: "通知中心", href: "/notifications", helper: "查看系統通知與提醒" },
+    { label: "系統設定", href: "/system-settings", helper: "維護平台設定" },
+    { label: "公司資訊", helper: "內容建置中，暫不提供頁面", disabled: true },
+];
+
 export function AppLayout({ children }: AppLayoutProps) {
     const [sidebarOpen, setSidebarOpen] = useState(true);
     const [location] = useLocation();
@@ -64,7 +79,6 @@ export function AppLayout({ children }: AppLayoutProps) {
 
     const handleLogout = async () => {
         clearAuth();
-        // 如果有 MSAL 會話，也進行登出
         try {
             await instance.logoutPopup();
         } catch {
@@ -75,7 +89,6 @@ export function AppLayout({ children }: AppLayoutProps) {
 
     return (
         <div className="min-h-screen bg-background text-foreground flex">
-            {/* Sidebar */}
             <aside
                 className={cn(
                     "bg-card border-r border-border transition-all duration-300 flex flex-col",
@@ -126,14 +139,33 @@ export function AppLayout({ children }: AppLayoutProps) {
                 </div>
             </aside>
 
-            {/* Main Content */}
             <div className="flex-1 flex flex-col overflow-hidden">
-                {/* Top Navbar */}
-                <header className="h-14 bg-card border-b border-border flex items-center justify-between px-6">
-                    <div className="flex items-center space-x-6">
-                        <Link href="/"><a className="text-sm font-medium text-foreground hover:text-primary transition-colors">首頁</a></Link>
-                        <button className="text-sm font-medium text-muted-foreground hover:text-foreground transition-colors">關於我們</button>
-                        <button className="text-sm font-medium text-muted-foreground hover:text-foreground transition-colors">聯絡方式</button>
+                <header className="h-14 bg-card border-b border-border flex items-center justify-between px-6 gap-6">
+                    <div className="flex flex-wrap items-center gap-3">
+                        {topNavItems.map((item) => item.disabled || !item.href ? (
+                            <span
+                                key={item.label}
+                                className="inline-flex items-center gap-2 rounded-full border border-dashed border-border px-3 py-1 text-sm text-muted-foreground"
+                                title={item.helper}
+                            >
+                                <Info className="h-3.5 w-3.5" />
+                                {item.label}（暫未提供）
+                            </span>
+                        ) : (
+                            <Link key={item.href} href={item.href}>
+                                <a
+                                    className={cn(
+                                        "rounded-full px-3 py-1 text-sm font-medium transition-colors",
+                                        location === item.href
+                                            ? "bg-primary text-primary-foreground"
+                                            : "text-muted-foreground hover:bg-muted hover:text-foreground"
+                                    )}
+                                    title={item.helper}
+                                >
+                                    {item.label}
+                                </a>
+                            </Link>
+                        ))}
                     </div>
                     <div className="flex justify-end">
                         <div className="text-sm text-muted-foreground">
@@ -142,7 +174,6 @@ export function AppLayout({ children }: AppLayoutProps) {
                     </div>
                 </header>
 
-                {/* Page Content */}
                 <main className="flex-1 overflow-auto p-6 bg-muted/20">
                     {children}
                 </main>
