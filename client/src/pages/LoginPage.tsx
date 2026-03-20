@@ -4,6 +4,8 @@ import { useMsal } from "@azure/msal-react";
 import { loginRequest } from "../lib/msal";
 import { CircleHelp, LogIn, Mail, Lock, ShieldAlert, Rocket } from "lucide-react";
 import { useAuth } from "../lib/auth";
+import { useLocation } from "wouter";
+import type { Role } from "../../../shared/types";
 
 const DEMO_ACCOUNTS = [
     { label: "管理員", email: "demo_admin@demo.com", helper: "可查看全部模組與系統設定" },
@@ -43,7 +45,8 @@ const toFriendlyErrorMessage = (message: string) => {
 
 export function LoginPage() {
     const { instance } = useMsal();
-    const { setAuthToken } = useAuth();
+    const { setAuthSession } = useAuth();
+    const [, setLocation] = useLocation();
     
     // Form state
     const [email, setEmail] = useState("");
@@ -64,9 +67,9 @@ export function LoginPage() {
     const entraLoginMutation = trpc.auth.entraLogin.useMutation();
     const demoLoginMutation = trpc.auth.demoLogin.useMutation();
 
-    const handleLoginSuccess = (token: string) => {
-        setAuthToken(token);
-        window.location.href = "/";
+    const handleLoginSuccess = (payload: { token: string; user?: { id: string; email: string; name: string; role: Role; roles: Role[]; isActive: boolean } | null }) => {
+        setAuthSession(payload.token, payload.user ?? null);
+        setLocation("/");
     };
 
     const handleSubmit = async (e: React.FormEvent) => {
@@ -77,7 +80,7 @@ export function LoginPage() {
         setIsLoading(true);
         try {
             const res = await loginMutation.mutateAsync({ email, password });
-            handleLoginSuccess(res.token);
+            handleLoginSuccess(res);
         } catch (err: any) {
             setError(toFriendlyErrorMessage(err.message || ""));
         } finally {
@@ -90,7 +93,7 @@ export function LoginPage() {
         setIsLoading(true);
         try {
             const res = await demoLoginMutation.mutateAsync({ email: demoEmail });
-            handleLoginSuccess(res.token);
+            handleLoginSuccess(res);
         } catch (err: any) {
             setError(toFriendlyErrorMessage(err.message || ""));
         } finally {
@@ -107,13 +110,22 @@ export function LoginPage() {
         setError("");
         setIsLoading(true);
         try {
-            // 彈出 MS 登入窗
             const loginResponse = await instance.loginPopup(loginRequest);
-            const accessToken = loginResponse.accessToken;
+            const account = loginResponse.account;
+            const tokenResponse = loginResponse.accessToken
+                ? loginResponse
+                : account
+                    ? await instance.acquireTokenSilent({ ...loginRequest, account })
+                        .catch(() => instance.acquireTokenPopup({ ...loginRequest, account }))
+                    : null;
 
-            // 後端換取本系統 JWT
+            const accessToken = tokenResponse?.accessToken;
+            if (!accessToken) {
+                throw new Error("無法取得 Microsoft access token");
+            }
+
             const res = await entraLoginMutation.mutateAsync({ accessToken });
-            handleLoginSuccess(res.token);
+            handleLoginSuccess(res);
         } catch (err: any) {
             if (err.name !== "BrowserAuthError") { // 略過使用者取消登入
                 setError(toFriendlyErrorMessage(err.message || ""));
