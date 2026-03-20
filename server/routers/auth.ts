@@ -5,6 +5,7 @@ import { TRPCError } from "@trpc/server";
 import { isPasswordHash, verifyPassword, hashPassword } from "../_core/password";
 import { signNotificationStreamToken, signSessionToken } from "../_core/tokens";
 import { roles } from "../../shared/types";
+import { assertEntraSsoConfigured, fetchGraphUserProfile, getEntraSettings } from "../_core/entra";
 
 const SYSTEM_CONFIG_ERROR_MESSAGE = "系統設定不完整，請聯絡管理員";
 
@@ -42,6 +43,18 @@ const demoEmailPattern = /^demo_[a-z0-9]+@demo\.com$/i;
 const getDemoLoginEnabled = () => process.env.DEMO_LOGIN_ENABLED === "true" || process.env.NODE_ENV !== "production";
 
 export const authRouter = router({
+    entraConfig: publicProcedure.query(async () => {
+        const settings = await getEntraSettings();
+        const hasClientConfig = !!settings.clientId && !!settings.tenantId;
+
+        return {
+            enabled: settings.enabled && hasClientConfig,
+            tenantId: settings.tenantId,
+            clientId: settings.clientId,
+            syncConfigured: settings.enabled && hasClientConfig && !!settings.clientSecret
+        };
+    }),
+
     me: protectedProcedure.query(async ({ ctx }) => ({
         id: ctx.user.id,
         email: ctx.user.email,
@@ -119,27 +132,53 @@ export const authRouter = router({
         .input(z.object({ accessToken: z.string() }))
         .mutation(async ({ input }) => {
             try {
-                // 調用 Microsoft Graph 驗證 accessToken 節點
-                const response = await fetch("https://graph.microsoft.com/v1.0/me", {
-                    headers: {
-                        Authorization: `Bearer ${input.accessToken}`
-                    }
-                });
+                const settings = await getEntraSettings();
+                assertEntraSsoConfigured(settings);
 
-                if (!response.ok) {
-                    throw new TRPCError({ code: "UNAUTHORIZED", message: "Microsoft Entra ID 驗證失敗" });
-                }
-
-                const me = await response.json() as any;
+                const me = await fetchGraphUserProfile(input.accessToken);
                 const email = me.mail || me.userPrincipalName;
 
                 if (!email) {
                     throw new TRPCError({ code: "UNAUTHORIZED", message: "無法從 Microsoft 帳號獲取 Email" });
                 }
 
-                const user = await UserModel.findOne({ email }).lean();
+                const existingUser = await UserModel.findOne({
+                    $or: [{ providerId: me.id }, { email }]
+                });
+
+                const user = existingUser
+                    ? await UserModel.findByIdAndUpdate(
+                        existingUser._id,
+                        {
+                            $set: {
+                                email,
+                                name: me.displayName || existingUser.name || email,
+                                department: me.department || existingUser.department,
+                                title: me.jobTitle || existingUser.title,
+                                provider: "entra",
+                                providerId: me.id
+                            }
+                        },
+                        { new: true }
+                    ).lean()
+                    : await UserModel.create({
+                        email,
+                        name: me.displayName || email,
+                        department: me.department || "",
+                        title: me.jobTitle || "",
+                        role: "user",
+                        roles: [],
+                        provider: "entra",
+                        providerId: me.id,
+                        isActive: true
+                    }).then((createdUser) => createdUser.toObject());
+
                 if (!user) {
-                    throw new TRPCError({ code: "UNAUTHORIZED", message: `系統中找不到此 Email 組件：${email}` });
+                    throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "建立登入使用者失敗" });
+                }
+
+                if (!user.isActive) {
+                    throw new TRPCError({ code: "FORBIDDEN", message: "此帳號已停用，請聯絡管理員" });
                 }
 
                 return issueSession(user);

@@ -1,24 +1,38 @@
 import { Configuration, PublicClientApplication } from "@azure/msal-browser";
 
-export const msalConfig: Configuration = {
-    auth: {
-        // @ts-ignore
-        clientId: import.meta.env.VITE_ENTRA_CLIENT_ID || "your-entra-client-id",
-        // @ts-ignore
-        authority: `https://login.microsoftonline.com/${import.meta.env.VITE_ENTRA_TENANT_ID || "organizations"}`, 
-        redirectUri: window.location.origin, 
-    },
-    cache: {
-        cacheLocation: "localStorage",
-    }
+export type RuntimeEntraConfig = {
+    clientId?: string;
+    tenantId?: string;
 };
 
-// 登入時請求的 Scope
+const FALLBACK_CLIENT_ID = "your-entra-client-id";
+const FALLBACK_TENANT_ID = "organizations";
+const runtimeEnv = (import.meta as ImportMeta & { env?: Record<string, string | undefined> }).env || {};
+
+export function createMsalConfig(config?: RuntimeEntraConfig): Configuration {
+    const clientId = config?.clientId || runtimeEnv.VITE_ENTRA_CLIENT_ID || FALLBACK_CLIENT_ID;
+    const tenantId = config?.tenantId || runtimeEnv.VITE_ENTRA_TENANT_ID || FALLBACK_TENANT_ID;
+
+    return {
+        auth: {
+            clientId,
+            authority: `https://login.microsoftonline.com/${tenantId}`,
+            redirectUri: window.location.origin
+        },
+        cache: {
+            cacheLocation: "localStorage"
+        }
+    };
+}
+
+export function createMsalInstance(config?: RuntimeEntraConfig) {
+    const instance = new PublicClientApplication(createMsalConfig(config));
+    instance.initialize().catch(console.error);
+    return instance;
+}
+
 export const loginRequest = {
     scopes: ["User.Read"]
 };
 
-export const msalInstance = new PublicClientApplication(msalConfig);
-
-// 確保初始化 (由於 msal-browser v3 需要 init)
-msalInstance.initialize().catch(console.error);
+export const msalInstance = createMsalInstance();

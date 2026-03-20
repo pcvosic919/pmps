@@ -100,6 +100,10 @@ pnpm seed:demo     # 寫入 MongoDB demo 資料
 | `MONGODB_URI` | **是** | Cosmos DB / MongoDB 完整連線字串 (需啟動 SSL) |
 | `JWT_SECRET` | **是** | JWT 與通知 SSE 短效 Token 簽章密鑰，未設定時服務不會啟動 |
 | `DEMO_LOGIN_ENABLED` | 否 | 設為 `true` 時允許登入頁顯示並使用 Demo 快速登入（建議僅測試環境） |
+| `ENTRA_ENABLED` | 否 | 設為 `true` 可作為 Entra ID 開關的後備值；正式建議仍由系統設定頁維護 |
+| `ENTRA_CLIENT_ID` | 否 | Entra ID SSO Client ID 後備值 |
+| `ENTRA_CLIENT_SECRET` | 否 | Entra ID 帳號同步 Client Secret 後備值 |
+| `ENTRA_TENANT_ID` | 否 | Entra ID Tenant ID 後備值 |
 | `GEMINI_API_KEY` | 否 | Google AI Studio 密鑰 (用於 AI 報表故事分析) |
 | `PORT` | 否 | 容器 Port，預設為 `5000` |
 

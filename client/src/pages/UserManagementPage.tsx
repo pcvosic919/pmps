@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from "react";
 import { trpc } from "../lib/trpc";
-import { Users as UsersIcon, Edit, UserX, UserPlus, Search, Loader2 } from "lucide-react";
+import { Users as UsersIcon, Edit, UserX, UserPlus, Search, Loader2, RefreshCw } from "lucide-react";
 import { z } from "zod";
 import { roles, type Role } from "../../../shared/types";
 import { useForm } from "react-hook-form";
@@ -66,6 +66,11 @@ export function UserManagementPage() {
     const updateUser = trpc.users.updateUser.useMutation({ onSuccess: () => { setEditingUser(null); refetch() } });
     const deleteUser = trpc.users.deleteManual.useMutation({ onSuccess: () => refetch() });
     const createUser = trpc.users.createManual.useMutation({ onSuccess: () => { setIsCreatingUser(false); refetch(); createForm.reset(); } });
+    const syncEntraUsers = trpc.users.syncEntraUsers.useMutation({
+        onSuccess: () => {
+            refetch();
+        }
+    });
 
     const [editingUser, setEditingUser] = useState<any | null>(null);
     const [isCreatingUser, setIsCreatingUser] = useState(false);
@@ -125,6 +130,10 @@ export function UserManagementPage() {
         }
     };
 
+    const handleSyncEntraUsers = () => {
+        syncEntraUsers.mutate();
+    };
+
     const handleRoleToggle = (roleName: Role, currentRoles: Role[], onChange: (roles: Role[]) => void) => {
         const hasRole = currentRoles.includes(roleName);
         if (hasRole) {
@@ -143,15 +152,32 @@ export function UserManagementPage() {
             <div className="flex justify-between items-center bg-card p-6 rounded-xl shadow-sm border border-border/50">
                 <div>
                     <h2 className="text-3xl font-bold tracking-tight bg-clip-text text-transparent bg-gradient-to-r from-primary to-primary/60">用戶管理 (User Management)</h2>
-                    <p className="text-muted-foreground mt-1">管理系統帳號、權限角色與部門資訊</p>
+                    <p className="text-muted-foreground mt-1">管理系統帳號、權限角色、部門資訊與 Entra ID 同步</p>
                 </div>
-                <button
-                    onClick={() => setIsCreatingUser(true)}
-                    className="bg-primary text-primary-foreground hover:bg-primary/90 px-5 py-2.5 rounded-lg inline-flex items-center text-sm font-medium transition-all shadow-md hover:shadow-lg">
-                    <UserPlus className="w-4 h-4 mr-2" />
-                    新增手動帳號
-                </button>
+                <div className="flex items-center gap-3">
+                    <button
+                        type="button"
+                        onClick={handleSyncEntraUsers}
+                        disabled={syncEntraUsers.isPending}
+                        className="border border-border bg-background hover:bg-muted/60 px-5 py-2.5 rounded-lg inline-flex items-center text-sm font-medium transition-all shadow-sm disabled:opacity-50"
+                    >
+                        <RefreshCw className={`w-4 h-4 mr-2 ${syncEntraUsers.isPending ? "animate-spin" : ""}`} />
+                        {syncEntraUsers.isPending ? "同步中..." : "同步 Entra ID"}
+                    </button>
+                    <button
+                        onClick={() => setIsCreatingUser(true)}
+                        className="bg-primary text-primary-foreground hover:bg-primary/90 px-5 py-2.5 rounded-lg inline-flex items-center text-sm font-medium transition-all shadow-md hover:shadow-lg">
+                        <UserPlus className="w-4 h-4 mr-2" />
+                        新增手動帳號
+                    </button>
+                </div>
             </div>
+
+            {syncEntraUsers.data && (
+                <div className="rounded-xl border border-primary/20 bg-primary/5 px-4 py-3 text-sm text-foreground">
+                    Entra ID 同步完成：共抓取 {syncEntraUsers.data.totalFetched} 筆目錄資料，成功同步 {syncEntraUsers.data.totalSynced} 筆，其中新增 {syncEntraUsers.data.created} 筆、更新 {syncEntraUsers.data.updated} 筆、停用 {syncEntraUsers.data.disabled} 筆。
+                </div>
+            )}
 
             <div className="bg-card border rounded-xl shadow-sm p-4 flex justify-between items-center flex-wrap gap-4">
                 <div className="relative w-72">
@@ -192,6 +218,7 @@ export function UserManagementPage() {
                                 <th className="px-6 py-3 font-medium">用戶姓名</th>
                                 <th className="px-6 py-3 font-medium">電子郵件</th>
                                 <th className="px-6 py-3 font-medium">部門</th>
+                                <th className="px-6 py-3 font-medium">登入來源</th>
                                 <th className="px-6 py-3 font-medium">主角色 (Role)</th>
                                 <th className="px-6 py-3 font-medium">副角色 (Roles)</th>
                                 <th className="px-6 py-3 font-medium text-center">狀態</th>
@@ -201,7 +228,7 @@ export function UserManagementPage() {
                         <tbody className="divide-y divide-border">
                             {filteredUsers?.length === 0 ? (
                                 <tr>
-                                    <td colSpan={7} className="px-6 py-8 text-center text-muted-foreground">找不到符合的人員</td>
+                                    <td colSpan={8} className="px-6 py-8 text-center text-muted-foreground">找不到符合的人員</td>
                                 </tr>
                             ) : (
                                 filteredUsers?.map((user) => (
@@ -209,6 +236,11 @@ export function UserManagementPage() {
                                         <td className="px-6 py-4 font-medium">{user.name}</td>
                                         <td className="px-6 py-4 text-muted-foreground">{user.email}</td>
                                         <td className="px-6 py-4 text-muted-foreground">{user.department || "-"}</td>
+                                        <td className="px-6 py-4">
+                                            <span className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-semibold ${user.provider === "entra" ? "bg-blue-100 text-blue-700" : "bg-slate-100 text-slate-700"}`}>
+                                                {user.provider === "entra" ? "Entra ID" : "Manual"}
+                                            </span>
+                                        </td>
                                         <td className="px-6 py-4 font-semibold uppercase">{user.role}</td>
                                         <td className="px-6 py-4 uppercase text-xs text-muted-foreground">
                                             {user.roles && user.roles.length > 0 ? user.roles.join(', ') : "-"}
