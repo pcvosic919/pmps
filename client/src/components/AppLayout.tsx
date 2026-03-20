@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import { Link, useLocation } from "wouter";
 import {
     Activity,
@@ -129,12 +129,12 @@ export function AppLayout({ children }: AppLayoutProps) {
     const hasRole = (role: string) =>
         !!user && (user.role === role || user.roles.includes(role as never));
 
-    const visibleNavGroups = useMemo(() => navGroups
+    const visibleNavGroups = navGroups
         .map((group) => ({
             ...group,
             items: group.items.filter((item) => isNavItemVisible(item, hasRole))
         }))
-        .filter((group) => group.items.length > 0), [user]);
+        .filter((group) => group.items.length > 0);
 
     const [expandedGroups, setExpandedGroups] = useState<Record<string, boolean>>(() =>
         Object.fromEntries(navGroups.map((group) => [group.key, true]))

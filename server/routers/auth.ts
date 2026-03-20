@@ -39,6 +39,7 @@ const demoLoginInput = z.object({
 });
 
 const demoEmailPattern = /^demo_[a-z0-9]+@demo\.com$/i;
+const getDemoLoginEnabled = () => process.env.DEMO_LOGIN_ENABLED === "true" || process.env.NODE_ENV !== "production";
 
 export const authRouter = router({
     me: protectedProcedure.query(async ({ ctx }) => ({
@@ -73,10 +74,27 @@ export const authRouter = router({
             return issueSession(user);
         }),
 
+    demoStatus: publicProcedure.query(async () => {
+        const enabled = getDemoLoginEnabled();
+        const seededCount = await UserModel.countDocuments({ email: demoEmailPattern, isActive: true });
+
+        return {
+            enabled,
+            seeded: seededCount > 0,
+            availableAccounts: [
+                "demo_admin@demo.com",
+                "demo_manager@demo.com",
+                "demo_business@demo.com",
+                "demo_pm@demo.com",
+                "demo_tech@demo.com"
+            ]
+        };
+    }),
+
     demoLogin: publicProcedure
         .input(demoLoginInput)
         .mutation(async ({ input }) => {
-            const demoEnabled = process.env.DEMO_LOGIN_ENABLED === "true" || process.env.NODE_ENV !== "production";
+            const demoEnabled = getDemoLoginEnabled();
             if (!demoEnabled) {
                 throw new TRPCError({ code: "FORBIDDEN", message: "Demo 登入目前未開放" });
             }

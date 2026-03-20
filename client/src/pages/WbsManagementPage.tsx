@@ -7,7 +7,7 @@ import toast from "react-hot-toast";
 import { useCurrentUser } from "../lib/useCurrentUser";
 
 export function WbsManagementPage() {
-    const [_match, params] = useRoute("/service-requests/:id");
+    const [, params] = useRoute("/service-requests/:id");
     const srId = params?.id || "";
     const utils = trpc.useContext();
     const { hasRole } = useCurrentUser();

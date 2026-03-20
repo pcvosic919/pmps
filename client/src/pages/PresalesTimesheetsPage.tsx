@@ -22,7 +22,10 @@ export function PresalesTimesheetsPage() {
     const { data: assignments } = trpc.opportunities.getMyPresalesAssignments.useQuery();
     const myTimesheetsQuery = trpc.opportunities.getMyPresalesTimesheets.useQuery(undefined, { enabled: !canViewAllTimesheets });
     const allTimesheetsQuery = trpc.opportunities.getPresalesTimesheetOverview.useQuery(undefined, { enabled: canViewAllTimesheets });
-    const timesheets = (canViewAllTimesheets ? allTimesheetsQuery.data : myTimesheetsQuery.data) || [];
+    const timesheets = useMemo(
+        () => (canViewAllTimesheets ? allTimesheetsQuery.data : myTimesheetsQuery.data) || [],
+        [allTimesheetsQuery.data, canViewAllTimesheets, myTimesheetsQuery.data]
+    );
     const loadingTimesheets = canViewAllTimesheets ? allTimesheetsQuery.isLoading : myTimesheetsQuery.isLoading;
 
     // Grouped timesheets for week/month view
