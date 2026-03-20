@@ -56,6 +56,10 @@ export function LoginPage() {
         staleTime: 60_000,
         retry: false,
     });
+    const { data: entraConfig } = trpc.auth.entraConfig.useQuery(undefined, {
+        staleTime: 5 * 60_000,
+        retry: false,
+    });
     const loginMutation = trpc.auth.login.useMutation();
     const entraLoginMutation = trpc.auth.entraLogin.useMutation();
     const demoLoginMutation = trpc.auth.demoLogin.useMutation();
@@ -95,6 +99,11 @@ export function LoginPage() {
     };
 
     const handleMicrosoftLogin = async () => {
+        if (!entraConfig?.enabled) {
+            setError("此環境尚未啟用 Microsoft Entra ID SSO");
+            return;
+        }
+
         setError("");
         setIsLoading(true);
         try {
@@ -166,7 +175,7 @@ export function LoginPage() {
                             </div>
                         </div>
 
-                        <button 
+                        <button
                             type="submit" 
                             disabled={isLoading}
                             className="w-full bg-primary text-primary-foreground hover:bg-primary/90 py-2 rounded-lg font-medium transition-all shadow-md mt-2 disabled:opacity-50"
@@ -230,14 +239,21 @@ export function LoginPage() {
                         <div className="relative flex justify-center text-xs uppercase"><span className="bg-card px-2 text-muted-foreground">或使用企業登入</span></div>
                     </div>
 
-                    <button 
-                        onClick={handleMicrosoftLogin}
-                        disabled={isLoading}
-                        className="w-full border border-border hover:bg-muted/50 py-2 rounded-lg font-medium transition-all flex items-center justify-center gap-2 shadow-sm disabled:opacity-50"
-                    >
-                        <svg className="w-4 h-4" viewBox="0 0 21 21"><rect x="1" y="1" width="9" height="9" fill="#f25022"/><rect x="11" y="1" width="9" height="9" fill="#7fba00"/><rect x="1" y="11" width="9" height="9" fill="#00a4ef"/><rect x="11" y="11" width="9" height="9" fill="#ffb900"/></svg>
-                        Sign in with Microsoft
-                    </button>
+                    <div className="space-y-3">
+                        <button
+                            onClick={handleMicrosoftLogin}
+                            disabled={isLoading || !entraConfig?.enabled}
+                            className="w-full border border-border hover:bg-muted/50 py-2 rounded-lg font-medium transition-all flex items-center justify-center gap-2 shadow-sm disabled:opacity-50"
+                        >
+                            <svg className="w-4 h-4" viewBox="0 0 21 21"><rect x="1" y="1" width="9" height="9" fill="#f25022"/><rect x="11" y="1" width="9" height="9" fill="#7fba00"/><rect x="1" y="11" width="9" height="9" fill="#00a4ef"/><rect x="11" y="11" width="9" height="9" fill="#ffb900"/></svg>
+                            Sign in with Microsoft
+                        </button>
+                        <div className="rounded-lg border border-border bg-muted/30 px-3 py-2 text-xs text-muted-foreground">
+                            {entraConfig?.enabled
+                                ? "已啟用 Entra ID SSO，首次登入會自動建立或更新對應帳號資料。"
+                                : "尚未啟用 Entra ID SSO，請由管理員至系統設定完成 Tenant ID / Client ID / Client Secret 設定。"}
+                        </div>
+                    </div>
                 </div>
             </div>
         </div>

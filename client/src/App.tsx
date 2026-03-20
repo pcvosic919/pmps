@@ -1,11 +1,11 @@
-import { Suspense, lazy, useEffect, useState, type ComponentType } from "react";
+import { Suspense, lazy, useEffect, useMemo, useState, type ComponentType, type ReactNode } from "react";
 import { MutationCache, QueryCache, QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { httpBatchLink } from "@trpc/client";
 import { trpc } from "./lib/trpc";
 import { Route, Switch, useLocation } from "wouter";
 import { AppLayout } from "./components/AppLayout";
 import { MsalProvider } from "@azure/msal-react";
-import { msalInstance } from "./lib/msal";
+import { createMsalInstance } from "./lib/msal";
 import { Toaster, toast } from "react-hot-toast";
 import { useCurrentUser } from "./lib/useCurrentUser";
 import { AuthProvider, useAuth } from "./lib/auth";
@@ -117,6 +117,20 @@ export const pageInventory: PageInventoryEntry[] = [
   { pageFile: "ReportStoryPage.tsx", status: "移除", route: "—", notes: "AI 報表故事已停用，不再提供路由或 README 導覽說明。" },
 ];
 
+function RuntimeMsalProvider({ children }: { children: ReactNode }) {
+  const { data } = trpc.auth.entraConfig.useQuery(undefined, {
+    staleTime: 5 * 60_000,
+    retry: false,
+  });
+
+  const instance = useMemo(
+    () => createMsalInstance({ clientId: data?.clientId, tenantId: data?.tenantId }),
+    [data?.clientId, data?.tenantId],
+  );
+
+  return <MsalProvider instance={instance}>{children}</MsalProvider>;
+}
+
 function createAppQueryClient(onUnauthorized: () => void) {
   return new QueryClient({
     defaultOptions: {
@@ -199,15 +213,15 @@ export default function App() {
   );
 
   return (
-    <MsalProvider instance={msalInstance}>
-      <trpc.Provider client={trpcClient} queryClient={queryClient}>
-        <QueryClientProvider client={queryClient}>
+    <trpc.Provider client={trpcClient} queryClient={queryClient}>
+      <QueryClientProvider client={queryClient}>
+        <RuntimeMsalProvider>
           <AuthProvider>
             <AppShell />
           </AuthProvider>
           <Toaster position="bottom-right" />
-        </QueryClientProvider>
-      </trpc.Provider>
-    </MsalProvider>
+        </RuntimeMsalProvider>
+      </QueryClientProvider>
+    </trpc.Provider>
   );
 }
