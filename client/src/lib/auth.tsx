@@ -8,6 +8,7 @@ import {
     type ReactNode,
 } from "react";
 import { trpc } from "./trpc";
+import type { Role } from "../../../shared/types";
 
 const AUTH_TOKEN_KEY = "pmp_auth_token";
 const AUTH_EVENT = "pmp-auth-changed";
@@ -16,8 +17,8 @@ type AuthUser = {
     id: string;
     email: string;
     name: string;
-    role: string;
-    roles: string[];
+    role: Role;
+    roles: Role[];
     isActive: boolean;
 };
 
@@ -27,6 +28,7 @@ type AuthContextValue = {
     isAuthenticated: boolean;
     isLoading: boolean;
     setAuthToken: (token: string) => void;
+    setAuthSession: (token: string, user?: AuthUser | null) => void;
     clearAuth: () => void;
 };
 
@@ -55,6 +57,19 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         emitAuthChanged();
     }, []);
 
+    const setAuthSession = useCallback((nextToken: string, nextUser?: AuthUser | null) => {
+        localStorage.setItem(AUTH_TOKEN_KEY, nextToken);
+        setToken(nextToken);
+
+        if (nextUser) {
+            utils.auth.me.setData(undefined, nextUser);
+        } else {
+            void utils.auth.me.invalidate();
+        }
+
+        emitAuthChanged();
+    }, [utils]);
+
     const clearAuth = useCallback(() => {
         localStorage.removeItem(AUTH_TOKEN_KEY);
         setToken(null);
@@ -79,8 +94,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         isAuthenticated,
         isLoading: isAuthenticated && meQuery.isLoading,
         setAuthToken,
+        setAuthSession,
         clearAuth,
-    }), [isAuthenticated, meQuery.data, meQuery.isLoading, setAuthToken, clearAuth, token]);
+    }), [isAuthenticated, meQuery.data, meQuery.isLoading, setAuthToken, setAuthSession, clearAuth, token]);
 
     return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }

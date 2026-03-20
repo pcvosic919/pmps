@@ -15,6 +15,7 @@ const issueSession = (user: {
     name: string;
     role: (typeof roles)[number];
     roles?: (typeof roles)[number][];
+    isActive?: boolean;
 }) => {
     try {
         const token = signSessionToken({
@@ -27,7 +28,14 @@ const issueSession = (user: {
 
         return {
             token,
-            user: { id: user._id.toString(), name: user.name, email: user.email, role: user.role }
+            user: {
+                id: user._id.toString(),
+                name: user.name,
+                email: user.email,
+                role: user.role,
+                roles: user.roles || [],
+                isActive: user.isActive ?? true
+            }
         };
     } catch (error) {
         console.error("Failed to issue session token", error);
