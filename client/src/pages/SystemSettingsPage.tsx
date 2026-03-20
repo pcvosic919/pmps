@@ -203,6 +203,11 @@ export function SystemSettingsPage() {
                                     </div>
                                 </div>
                                 <div className={`grid gap-4 max-w-2xl ${settings.entraEnabled ? '' : 'opacity-40 pointer-events-none'}`}>
+                                    <div className="rounded-lg border border-dashed border-border bg-muted/30 p-3 text-xs text-muted-foreground">
+                                        啟用後，登入頁會自動套用 Tenant / Client 設定提供 SSO，且管理員可於「用戶管理」手動同步 Entra ID 帳號。請確認 Microsoft Graph 已授權至少
+                                        <span className="font-semibold text-foreground"> User.Read、User.Read.All</span>
+                                        ，若要批次同步則需使用應用程式權限並完成 admin consent。
+                                    </div>
                                     <div>
                                         <label className="block text-sm font-medium mb-1">Tenant ID</label>
                                         <input
