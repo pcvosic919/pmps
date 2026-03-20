@@ -19,6 +19,14 @@ const oppSchema = z.object({
     status: z.enum(["new", "qualified", "presales_active", "won", "converted", "lost"])
 });
 
+const opportunitySortOptions = [
+    { value: "createdAt-desc", label: "建立時間 (新到舊)" },
+    { value: "createdAt-asc", label: "建立時間 (舊到新)" },
+    { value: "estimatedValue-desc", label: "預估金額 (高到低)" },
+    { value: "estimatedValue-asc", label: "預估金額 (低到高)" },
+    { value: "status-asc", label: "依狀態排序" }
+] as const;
+
 export function OpportunitiesPage() {
     const [searchTerm, setSearchTerm] = useState("");
     const [sortBy, setSortBy] = useState("createdAt");
@@ -147,21 +155,25 @@ export function OpportunitiesPage() {
 
                 <div className="flex items-center gap-2">
                     <span className="text-sm font-medium text-muted-foreground whitespace-nowrap">排序:</span>
-                    <select 
+                    <Select
                         value={`${sortBy}-${sortOrder}`}
-                        onChange={(e) => {
-                            const [field, order] = e.target.value.split("-");
+                        onValueChange={(value) => {
+                            const [field, order] = value.split("-");
                             setSortBy(field);
                             setSortOrder(order as "asc" | "desc");
                         }}
-                        className="text-sm border border-border rounded-md px-3 py-1.5 bg-background font-semibold hover:border-primary/50 transition-colors focus:outline-none cursor-pointer"
                     >
-                        <option value="createdAt-desc">建立時間 (新到舊)</option>
-                        <option value="createdAt-asc">建立時間 (舊到新)</option>
-                        <option value="estimatedValue-desc">預估金額 (高到低)</option>
-                        <option value="estimatedValue-asc">預估金額 (低到高)</option>
-                        <option value="status-asc">依狀態排序</option>
-                    </select>
+                        <SelectTrigger className="h-9 min-w-[220px] bg-background font-semibold shadow-none">
+                            <SelectValue placeholder="選擇排序方式" />
+                        </SelectTrigger>
+                        <SelectContent>
+                            {opportunitySortOptions.map((option) => (
+                                <SelectItem key={option.value} value={option.value}>
+                                    {option.label}
+                                </SelectItem>
+                            ))}
+                        </SelectContent>
+                    </Select>
                 </div>
             </div>
 
