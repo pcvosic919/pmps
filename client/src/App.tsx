@@ -209,8 +209,8 @@ export default function App() {
             };
           },
           fetch: async (url, options) => {
-            const key = import.meta.env.VITE_API_ENCRYPTION_KEY;
-            let modifiedOptions = { ...options };
+            const key = (import.meta as any).env.VITE_API_ENCRYPTION_KEY;
+            let modifiedOptions: any = { ...options };
             if (key && modifiedOptions.body && typeof modifiedOptions.body === "string") {
               modifiedOptions.body = JSON.stringify({
                 encrypted: encryptPayload(JSON.parse(modifiedOptions.body), key)

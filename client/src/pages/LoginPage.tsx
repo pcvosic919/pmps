@@ -4,7 +4,6 @@ import { useMsal } from "@azure/msal-react";
 import { loginRequest } from "../lib/msal";
 import { CircleHelp, LogIn, Mail, Lock, ShieldAlert, Rocket } from "lucide-react";
 import { useAuth } from "../lib/auth";
-import { useLocation } from "wouter";
 import type { Role } from "../../../shared/types";
 
 const DEMO_ACCOUNTS = [
@@ -46,7 +45,6 @@ const toFriendlyErrorMessage = (message: string) => {
 export function LoginPage() {
     const { instance } = useMsal();
     const { setAuthSession } = useAuth();
-    const [, setLocation] = useLocation();
     
     // Form state
     const [email, setEmail] = useState("");

@@ -23,8 +23,8 @@ const oppSchema = z.object({
 
 export function OpportunitiesPage() {
     const [searchTerm, setSearchTerm] = useState("");
-    const [sortBy, setSortBy] = useState("createdAt");
-    const [sortOrder, setSortOrder] = useState<"asc" | "desc">("desc");
+    const [sortBy] = useState("createdAt");
+    const [sortOrder] = useState<"asc" | "desc">("desc");
 
     const debouncedSearchTerm = useDebounce(searchTerm, 500);
 
