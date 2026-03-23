@@ -58,9 +58,8 @@ export const getAccessibleOpportunityQuery = async (ctxUser: OpportunityListUser
                     { ownerId: { $in: userIds } }
                 ]
             };
-        } else if (hasAnyRole(ctxUser as any, ["admin"])) {
-            return {};
         }
+        return {};
     }
 
     return { $or: baseAccess };

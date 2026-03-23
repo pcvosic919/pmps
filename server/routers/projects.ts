@@ -153,7 +153,7 @@ export const projectsRouter = router({
             ...item,
             id: item._id.toString(),
             opportunityId: item.opportunityId?.toString(),
-            pmId: item.pmId.toString()
+            pmId: item.pmId?.toString() || ""
         }));
     }),
 

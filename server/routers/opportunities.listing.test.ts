@@ -353,12 +353,14 @@ describe("opportunity list pagination regression", () => {
     it.each(["createdAt", "status", "estimatedValue"] as const)(
         "同一批資料在 %s 排序下，權限使用者不會拿到空白頁",
         async (sortBy) => {
+            const query = await buildOpportunityListQuery({
+                sortBy,
+                sortOrder: "desc",
+                user: memberUser,
+            });
+
             const expectedIds = sortOpportunities(
-                opportunities.filter(async (item) => matchesQuery(item, await buildOpportunityListQuery({
-                    sortBy,
-                    sortOrder: "desc",
-                    user: memberUser,
-                }))),
+                opportunities.filter((item) => matchesQuery(item, query)),
                 sortBy,
                 "desc"
             ).map((item) => item._id.toString());
