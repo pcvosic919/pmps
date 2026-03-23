@@ -66,38 +66,39 @@ const navGroups: NavGroup[] = [
         key: "sales",
         label: "商機 / 售前",
         items: [
-            { icon: Building2, label: "商機管理", href: "/opportunities" },
-            { icon: Clock, label: "協銷工時", href: "/presales-timesheets" },
+            // Business 只能看到商機管理? Business 可以看協銷工時嗎?
+            { icon: Building2, label: "商機管理", href: "/opportunities", roles: ["admin", "manager", "business", "presales", "tech", "pm"] },
+            { icon: Clock, label: "協銷工時", href: "/presales-timesheets", roles: ["admin", "manager", "presales", "tech", "pm"] },
         ],
     },
     {
         key: "delivery",
         label: "專案 / 工時",
         items: [
-            { icon: FolderKanban, label: "專案管理", href: "/projects", roles: ["manager", "pm"] },
-            { icon: CalendarDays, label: "專案工時", href: "/project-timesheets" },
-            { icon: FileText, label: "服務請求 (SR)", href: "/service-requests" },
-            { icon: FileCheck, label: "變更單 (CR)", href: "/change-requests" },
+            { icon: FolderKanban, label: "專案管理", href: "/projects", roles: ["admin", "manager", "pm", "tech"] },
+            { icon: CalendarDays, label: "專案工時", href: "/project-timesheets", roles: ["admin", "manager", "pm", "tech"] },
+            { icon: FileText, label: "服務請求 (SR)", href: "/service-requests", roles: ["admin", "manager", "pm", "tech", "business"] },
+            { icon: FileCheck, label: "變更單 (CR)", href: "/change-requests", roles: ["admin", "manager", "pm", "tech"] },
         ],
     },
     {
         key: "analytics",
         label: "分析 / 結算",
         items: [
-            { icon: Users, label: "資源池", href: "/resources" },
-            { icon: Activity, label: "稼動率", href: "/utilization" },
-            { icon: PieChart, label: "KPI 儀表板", href: "/kpi" },
-            { icon: FileSpreadsheet, label: "月度結算", href: "/settlements" },
+            { icon: Users, label: "資源池", href: "/resources", roles: ["admin", "manager"] },
+            { icon: Activity, label: "稼動率", href: "/utilization", roles: ["admin", "manager"] },
+            { icon: PieChart, label: "KPI 儀表板", href: "/kpi", roles: ["admin", "manager"] },
+            { icon: FileSpreadsheet, label: "月度結算", href: "/settlements", roles: ["admin", "manager"] },
         ],
     },
     {
         key: "system",
         label: "系統管理",
         items: [
-            { icon: Settings, label: "帳號管理", href: "/users" },
-            { icon: CreditCard, label: "費率設定", href: "/cost-rates" },
-            { icon: Settings2, label: "自訂欄位", href: "/custom-fields" },
-            { icon: Settings, label: "系統設定", href: "/system-settings" },
+            { icon: Settings, label: "帳號管理", href: "/users", roles: ["admin"] },
+            { icon: CreditCard, label: "費率設定", href: "/cost-rates", roles: ["admin"] },
+            { icon: Settings2, label: "自訂欄位", href: "/custom-fields", roles: ["admin"] },
+            { icon: Settings, label: "系統設定", href: "/system-settings", roles: ["admin"] },
         ],
     },
 ];

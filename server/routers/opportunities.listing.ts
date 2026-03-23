@@ -1,5 +1,6 @@
 import { hasAnyRole } from "../_core/authorization";
 import { toObjectId, type CursorValue } from "../_core/cursor";
+import { UserModel } from "../models/User";
 
 export const opportunitySortFields = ["createdAt", "estimatedValue", "status"] as const;
 
@@ -10,6 +11,7 @@ type OpportunityListUser = {
     id: string;
     role: string;
     roles: string[];
+    department?: string;
 };
 
 type OpportunityListCursor = {
@@ -38,23 +40,33 @@ export const buildOpportunitySearchQuery = (search?: string) => {
     };
 };
 
-export const getAccessibleOpportunityQuery = (ctxUser: OpportunityListUser) => {
+export const getAccessibleOpportunityQuery = async (ctxUser: OpportunityListUser) => {
+    const userObjectId = toObjectId(ctxUser.id);
+    const baseAccess = [
+        { ownerId: userObjectId },
+        { "members.userId": userObjectId },
+        { "presalesAssignments.techId": userObjectId }
+    ];
+
     if (hasAnyRole(ctxUser as any, ["admin", "manager"])) {
-        return {};
+        if (ctxUser.department) {
+            const usersInDept = await UserModel.find({ department: ctxUser.department }, { _id: 1 }).lean();
+            const userIds = usersInDept.map(u => u._id);
+            return {
+                $or: [
+                    ...baseAccess,
+                    { ownerId: { $in: userIds } }
+                ]
+            };
+        } else if (hasAnyRole(ctxUser as any, ["admin"])) {
+            return {};
+        }
     }
 
-    const userObjectId = toObjectId(ctxUser.id);
-
-    return {
-        $or: [
-            { ownerId: userObjectId },
-            { "members.userId": userObjectId },
-            { "presalesAssignments.techId": userObjectId }
-        ]
-    };
+    return { $or: baseAccess };
 };
 
-export const buildOpportunityListQuery = ({
+export const buildOpportunityListQuery = async ({
     search,
     cursor,
     sortBy,
@@ -69,7 +81,7 @@ export const buildOpportunityListQuery = ({
 }) => {
     const clauses: Record<string, unknown>[] = [];
     const searchQuery = buildOpportunitySearchQuery(search);
-    const accessQuery = getAccessibleOpportunityQuery(user);
+    const accessQuery = await getAccessibleOpportunityQuery(user);
 
     if (Object.keys(searchQuery).length > 0) {
         clauses.push(searchQuery);

@@ -96,7 +96,7 @@ export function UserManagementPage() {
     });
 
     const batchEditForm = useForm<any>({
-        defaultValues: { role: "user", roles: [] }
+        defaultValues: { department: "", role: "user", roles: [] }
     });
 
     useEffect(() => {
@@ -176,6 +176,7 @@ export function UserManagementPage() {
     const handleBatchSave = (values: any) => {
         updateBatchRoles.mutate({
             userIds: selectedUserIds,
+            department: values.department || undefined,
             role: values.role,
             roles: (values.roles || []) as Role[]
         });
@@ -359,6 +360,19 @@ export function UserManagementPage() {
                     </DialogHeader>
                     <Form {...batchEditForm}>
                         <form onSubmit={batchEditForm.handleSubmit(handleBatchSave as any)} className="space-y-4">
+                            <FormField
+                                control={batchEditForm.control}
+                                name="department"
+                                render={({ field }: any) => (
+                                    <FormItem>
+                                        <FormLabel>批次設定部門 (選填)</FormLabel>
+                                        <FormControl>
+                                            <Input placeholder="留空代表不更動" {...field} />
+                                        </FormControl>
+                                        <FormMessage />
+                                    </FormItem>
+                                )}
+                            />
                             <FormField
                                 control={batchEditForm.control}
                                 name="role"

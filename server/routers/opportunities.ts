@@ -73,7 +73,7 @@ export const opportunitiesRouter = router({
             const sortOrder = input?.sortOrder || "desc";
             const direction = sortOrder === "desc" ? -1 : 1;
             const cursor = input?.cursor ? decodeCursor(input.cursor) : null;
-            const query = buildOpportunityListQuery({
+            const query = await buildOpportunityListQuery({
                 search,
                 cursor,
                 sortBy,
@@ -111,7 +111,7 @@ export const opportunitiesRouter = router({
         }),
 
     getActiveOpportunityCount: protectedProcedure.query(async ({ ctx }) => {
-        const query = buildOpportunityListQuery({ 
+        const query = await buildOpportunityListQuery({ 
             user: ctx.user as any,
             sortBy: "createdAt",
             sortOrder: "desc"
@@ -355,7 +355,8 @@ export const opportunitiesRouter = router({
                     .lean(),
                 "找不到該商機"
             );
-            assertAuthorized(canManageOpportunity(ctx.user, opportunity), "您沒有權限指派售前");
+            const isTechOrPresales = hasAnyRole(ctx.user, ["tech", "presales"]);
+            assertAuthorized(canManageOpportunity(ctx.user, opportunity) || isTechOrPresales, "您沒有權限指派售前");
             assertOpportunityNotConverted(opportunity);
             assertOpportunityAssignable(opportunity);
 

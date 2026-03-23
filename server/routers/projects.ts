@@ -34,11 +34,11 @@ const assertSettlementUnlocked = async (month: string, type: "presales" | "proje
     }
 };
 
-const buildSrMembers = (creatorId: string, pmId: string) => {
+const buildSrMembers = (creatorId: string, pmId: string, joinPmAsMember: boolean = true) => {
     const members: Array<{ userId: any; memberRole: "owner" | "assignee" }> = [
         { userId: toObjectId(creatorId), memberRole: "owner" }
     ];
-    if (pmId !== creatorId) {
+    if (joinPmAsMember && pmId !== creatorId) {
         members.push({ userId: toObjectId(pmId), memberRole: "assignee" as const });
     }
     return members;
@@ -73,7 +73,7 @@ const buildServiceRequestQuery = async ({
     search,
     status
 }: {
-    user: { id: string; role: string; roles: string[] };
+    user: { id: string; role: string; roles: string[]; department?: string };
     search?: string;
     status?: string;
 }) => {
@@ -87,10 +87,12 @@ const buildServiceRequestQuery = async ({
         clauses.push({ status });
     }
 
-    if (!hasAnyRole(user as any, ["admin", "manager", "pm"])) {
+    const isGlobalAdminOrManager = hasAnyRole(user as any, ["admin", "manager"]) && !user.department;
+
+    if (!isGlobalAdminOrManager) {
         const userObjectId = toObjectId(user.id);
         const accessibleOpportunities = await OpportunityModel.find(
-            getAccessibleOpportunityQuery(user as any),
+            await getAccessibleOpportunityQuery(user as any),
             { _id: 1 }
         ).lean();
         const accessibleOpportunityIds = accessibleOpportunities.map((item) => item._id);
@@ -101,6 +103,12 @@ const buildServiceRequestQuery = async ({
             { "changeRequests.requesterId": userObjectId },
             { "wbsVersions.items.assigneeId": userObjectId }
         ];
+
+        if (hasAnyRole(user as any, ["admin", "manager"]) && user.department) {
+            const sameDeptUsers = await UserModel.find({ department: user.department }, { _id: 1 }).lean();
+            const deptUserIds = sameDeptUsers.map(u => u._id);
+            accessClauses.push({ pmId: { $in: deptUserIds } });
+        }
 
         if (accessibleOpportunityIds.length > 0) {
             accessClauses.push({ opportunityId: { $in: accessibleOpportunityIds } });
@@ -167,6 +175,7 @@ export const projectsRouter = router({
             title: z.string(),
             contractAmount: z.number(),
             pmId: z.string(),
+            joinPmAsMember: z.boolean().default(true),
             opportunityId: z.string().optional()
         }))
         .mutation(async ({ input, ctx }) => {
@@ -177,7 +186,7 @@ export const projectsRouter = router({
                         .lean(),
                     "找不到該商機"
                 );
-                assertAuthorized(canAccessServiceRequest(ctx.user, { members: buildSrMembers(ctx.user.id, input.pmId) }, opportunity), "您沒有權限從此商機建立 SR");
+                assertAuthorized(canAccessServiceRequest(ctx.user, { members: buildSrMembers(ctx.user.id, input.pmId, input.joinPmAsMember) }, opportunity), "您沒有權限從此商機建立 SR");
                 if (opportunity.status === "converted") {
                     throw new TRPCError({ code: "BAD_REQUEST", message: "此商機已轉案，請勿重複建立 SR" });
                 }
@@ -189,7 +198,7 @@ export const projectsRouter = router({
                 pmId: toObjectId(input.pmId),
                 opportunityId: input.opportunityId ? new mongoose.Types.ObjectId(input.opportunityId) : undefined,
                 status: "new",
-                members: buildSrMembers(ctx.user.id, input.pmId)
+                members: buildSrMembers(ctx.user.id, input.pmId, input.joinPmAsMember)
             });
 
             if (input.opportunityId) {
@@ -426,7 +435,9 @@ export const projectsRouter = router({
                     .select("ownerId members presalesAssignments")
                 .lean()
                 : null;
-            assertAuthorized(canAccessServiceRequest(ctx.user, sr, opportunity), "您沒有權限提交 WBS 版本");
+                
+            const isTechOrPresales = hasAnyRole(ctx.user, ["tech", "presales"]);
+            assertAuthorized(canAccessServiceRequest(ctx.user, sr, opportunity) || isTechOrPresales, "您沒有權限提交 WBS 版本");
 
             const newVersion = {
                 versionNumber: input.versionNumber,

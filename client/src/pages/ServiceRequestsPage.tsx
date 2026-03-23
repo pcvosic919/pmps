@@ -15,6 +15,7 @@ const srSchema = z.object({
     title: z.string().min(1, "SR 名稱不可為空"),
     contractAmount: z.number().min(0, "合約金額不能為負"),
     pmId: z.string().min(1, "請指派 PM"),
+    joinPmAsMember: z.boolean().default(true),
     opportunityId: z.string().optional()
 });
 
@@ -36,7 +37,7 @@ export function ServiceRequestsPage() {
 
     const form = useForm<any>({
         resolver: zodResolver(srSchema) as any,
-        defaultValues: { title: "", contractAmount: 0, pmId: "", opportunityId: "" }
+        defaultValues: { title: "", contractAmount: 0, pmId: "", opportunityId: "", joinPmAsMember: true }
     });
 
     const handleCreate = (values: z.infer<typeof srSchema>) => {
@@ -237,6 +238,29 @@ export function ServiceRequestsPage() {
                                             </SelectContent>
                                         </Select>
                                         <FormMessage />
+                                    </FormItem>
+                                )}
+                            />
+
+                            <FormField
+                                control={form.control}
+                                name="joinPmAsMember"
+                                render={({ field }: any) => (
+                                    <FormItem className="flex flex-row items-start space-x-3 space-y-0 rounded-md border p-4 shadow-sm">
+                                        <FormControl>
+                                            <input
+                                                type="checkbox"
+                                                checked={field.value}
+                                                onChange={(e) => field.onChange(e.target.checked)}
+                                                className="w-4 h-4 mt-1 rounded border-gray-300 text-primary cursor-pointer"
+                                            />
+                                        </FormControl>
+                                        <div className="space-y-1 leading-none">
+                                            <FormLabel>將 PM 加入專案團隊成員</FormLabel>
+                                            <p className="text-sm text-muted-foreground">
+                                                若取消勾選，PM 將不會出現在成員列表中
+                                            </p>
+                                        </div>
                                     </FormItem>
                                 )}
                             />

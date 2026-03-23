@@ -199,14 +199,19 @@ export const usersRouter = router({
     updateBatchRoles: roleProcedure(["admin"])
         .input(z.object({
             userIds: z.array(z.string()),
+            department: z.string().optional(),
             role: z.enum(roles),
             roles: z.array(z.enum(roles))
         }))
         .mutation(async ({ input }) => {
-            const { userIds, role, roles } = input;
+            const { userIds, role, roles, department } = input;
+            const updatePayload: any = { role, roles };
+            if (department !== undefined) {
+                updatePayload.department = department;
+            }
             await UserModel.updateMany(
                 { _id: { $in: userIds } },
-                { $set: { role, roles } }
+                { $set: updatePayload }
             );
             return { success: true, count: userIds.length };
         }),
@@ -248,6 +253,37 @@ export const usersRouter = router({
         .mutation(async ({ input }) => {
             await UserModel.updateOne(
                 { _id: input.userId },
+                {
+                    $set: {
+                        costRate: {
+                            dailyRate: input.dailyRate,
+                            hourlyRate: input.hourlyRate,
+                            currency: input.currency
+                        }
+                    },
+                    $push: {
+                        costRateHistory: {
+                            dailyRate: input.dailyRate,
+                            hourlyRate: input.hourlyRate,
+                            currency: input.currency,
+                            updatedAt: new Date()
+                        }
+                    }
+                }
+            );
+            return { success: true };
+        }),
+
+    updateBatchCostRates: roleProcedure(["admin", "manager"])
+        .input(z.object({
+            userIds: z.array(z.string()),
+            dailyRate: z.number(),
+            hourlyRate: z.number(),
+            currency: z.string().default("TWD")
+        }))
+        .mutation(async ({ input }) => {
+            await UserModel.updateMany(
+                { _id: { $in: input.userIds } },
                 {
                     $set: {
                         costRate: {

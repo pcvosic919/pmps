@@ -12,10 +12,21 @@ export function CostRatesPage() {
         }
     });
 
+    const updateBatchCostRates = trpc.users.updateBatchCostRates.useMutation({
+        onSuccess: () => {
+            setIsBatchEditing(false);
+            setSelectedUserIds([]);
+            refetch();
+        }
+    });
+
     const [searchTerm, setSearchTerm] = useState("");
     const [editingUser, setEditingUser] = useState<any | null>(null);
     const [historyUser, setHistoryUser] = useState<any | null>(null);
     const [editForm, setEditForm] = useState({ dailyRate: 0, hourlyRate: 0, currency: "TWD" });
+    const [batchForm, setBatchForm] = useState({ dailyRate: 0, hourlyRate: 0, currency: "TWD" });
+    const [selectedUserIds, setSelectedUserIds] = useState<string[]>([]);
+    const [isBatchEditing, setIsBatchEditing] = useState(false);
 
     const filteredUsers = usersWithRates?.filter(u =>
         u.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
@@ -42,6 +53,31 @@ export function CostRatesPage() {
         });
     };
 
+    const handleBatchSave = () => {
+        updateBatchCostRates.mutate({
+            userIds: selectedUserIds,
+            dailyRate: Number(batchForm.dailyRate),
+            hourlyRate: Number(batchForm.hourlyRate),
+            currency: batchForm.currency
+        });
+    };
+
+    const handleSelectAll = (checked: boolean) => {
+        if (checked) {
+            setSelectedUserIds(filteredUsers?.map(u => u.id) || []);
+        } else {
+            setSelectedUserIds([]);
+        }
+    };
+
+    const handleSelectUser = (id: string, checked: boolean) => {
+        if (checked) {
+            setSelectedUserIds(prev => [...prev, id]);
+        } else {
+            setSelectedUserIds(prev => prev.filter(uid => uid !== id));
+        }
+    };
+
     if (isLoading) return <div className="p-8 text-center text-muted-foreground">載入中...</div>;
 
     return (
@@ -50,6 +86,18 @@ export function CostRatesPage() {
                 <div>
                     <h2 className="text-3xl font-bold tracking-tight bg-clip-text text-transparent bg-gradient-to-r from-primary to-primary/60">費率設定 (Cost Rates)</h2>
                     <p className="text-muted-foreground mt-1">管理人員的日薪與時薪成本，用於精準計算專案成本</p>
+                </div>
+                <div className="flex items-center gap-3">
+                    {selectedUserIds.length > 0 && (
+                        <button
+                            type="button"
+                            onClick={() => setIsBatchEditing(true)}
+                            className="bg-indigo-600 text-white hover:bg-indigo-700 px-4 py-2.5 rounded-lg inline-flex items-center text-sm font-medium transition-all shadow-md"
+                        >
+                            <CreditCard className="w-4 h-4 mr-2" />
+                            批次修改費率 ({selectedUserIds.length})
+                        </button>
+                    )}
                 </div>
             </div>
 
@@ -71,6 +119,14 @@ export function CostRatesPage() {
                     <table className="w-full text-sm text-left">
                         <thead className="bg-muted/50 text-muted-foreground">
                             <tr>
+                                <th className="px-6 py-3 font-medium w-12 text-center">
+                                    <input 
+                                        type="checkbox" 
+                                        checked={(filteredUsers?.length ?? 0) > 0 && selectedUserIds.length === filteredUsers?.length}
+                                        onChange={(e) => handleSelectAll(e.target.checked)}
+                                        className="rounded border-gray-300 text-primary w-4 h-4 cursor-pointer"
+                                    />
+                                </th>
                                 <th className="px-6 py-3 font-medium">人員</th>
                                 <th className="px-6 py-3 font-medium">部門 / 職責</th>
                                 <th className="px-6 py-3 font-medium text-right">日費率 (Daily)</th>
@@ -83,11 +139,19 @@ export function CostRatesPage() {
                         <tbody className="divide-y divide-border">
                             {filteredUsers?.length === 0 ? (
                                 <tr>
-                                    <td colSpan={7} className="px-6 py-8 text-center text-muted-foreground">找不到符合的人員</td>
+                                    <td colSpan={8} className="px-6 py-8 text-center text-muted-foreground">找不到符合的人員</td>
                                 </tr>
                             ) : (
                                 filteredUsers?.map((user) => (
                                     <tr key={user.id} className="hover:bg-muted/30 transition-colors">
+                                        <td className="px-6 py-4 text-center">
+                                            <input 
+                                                type="checkbox" 
+                                                checked={selectedUserIds.includes(user.id)}
+                                                onChange={(e) => handleSelectUser(user.id, e.target.checked)}
+                                                className="rounded border-gray-300 text-primary w-4 h-4 cursor-pointer"
+                                            />
+                                        </td>
                                         <td className="px-6 py-4">
                                             <div className="font-medium">{user.name}</div>
                                             <div className="text-xs text-muted-foreground">{user.email}</div>
@@ -186,6 +250,64 @@ export function CostRatesPage() {
                                 className="px-4 py-2 text-sm font-medium bg-primary text-primary-foreground rounded-md hover:bg-primary/90 transition-colors disabled:opacity-50"
                             >
                                 {updateRate.isPending ? "儲存中..." : "儲存設定"}
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {/* Batch Edit Modal */}
+            {isBatchEditing && (
+                <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+                    <div className="bg-card w-full max-w-md rounded-xl shadow-lg border p-6">
+                        <div className="flex items-center space-x-2 mb-4">
+                            <CreditCard className="w-5 h-5 text-indigo-600" />
+                            <h3 className="text-xl font-bold">批次修改費率 ({selectedUserIds.length} 人)</h3>
+                        </div>
+                        <div className="space-y-4">
+                            <div>
+                                <label className="block text-sm font-medium mb-1">幣別 (Currency)</label>
+                                <select
+                                    value={batchForm.currency}
+                                    onChange={e => setBatchForm(prev => ({ ...prev, currency: e.target.value }))}
+                                    className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+                                >
+                                    <option value="TWD">TWD (新台幣)</option>
+                                    <option value="USD">USD (美元)</option>
+                                </select>
+                            </div>
+                            <div>
+                                <label className="block text-sm font-medium mb-1">日費率 (Daily Rate)</label>
+                                <input
+                                    type="number"
+                                    value={batchForm.dailyRate}
+                                    onChange={e => setBatchForm(prev => ({ ...prev, dailyRate: Number(e.target.value) }))}
+                                    className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+                                />
+                            </div>
+                            <div>
+                                <label className="block text-sm font-medium mb-1">時薪 (Hourly Rate)</label>
+                                <input
+                                    type="number"
+                                    value={batchForm.hourlyRate}
+                                    onChange={e => setBatchForm(prev => ({ ...prev, hourlyRate: Number(e.target.value) }))}
+                                    className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+                                />
+                            </div>
+                        </div>
+                        <div className="mt-6 flex justify-end space-x-3">
+                            <button
+                                onClick={() => setIsBatchEditing(false)}
+                                className="px-4 py-2 text-sm font-medium border rounded-md hover:bg-accent transition-colors"
+                            >
+                                取消
+                            </button>
+                            <button
+                                onClick={handleBatchSave}
+                                disabled={updateBatchCostRates.isPending}
+                                className="px-4 py-2 text-sm font-medium bg-indigo-600 text-white rounded-md hover:bg-indigo-700 transition-colors disabled:opacity-50"
+                            >
+                                {updateBatchCostRates.isPending ? "儲存中..." : "批次儲存設定"}
                             </button>
                         </div>
                     </div>

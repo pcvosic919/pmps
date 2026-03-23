@@ -75,7 +75,7 @@ export const canAccessOpportunity = (user: UserSession, opportunity: Opportunity
     (opportunity.presalesAssignments || []).some(assignment => idsMatch(assignment.techId, user.id));
 
 export const canManageOpportunity = (user: UserSession, opportunity: OpportunityLike) =>
-    isAdminOrManager(user) ||
+    hasAnyRole(user, ["admin"]) ||
     isOpportunityOwner(user, opportunity) ||
     isOpportunityBusinessOwner(user, opportunity);
 
@@ -106,7 +106,7 @@ export const canManageServiceRequestStatus = (
     serviceRequest: ServiceRequestLike,
     opportunity?: OpportunityLike | null
 ) =>
-    isAdminOrManager(user) ||
+    hasAnyRole(user, ["admin"]) ||
     isResponsiblePm(user, serviceRequest) ||
     (!!opportunity && isOpportunityBusinessOwner(user, opportunity));
 

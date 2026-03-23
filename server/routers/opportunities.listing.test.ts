@@ -238,7 +238,7 @@ const sortOpportunities = (
     });
 };
 
-const paginate = ({
+const paginate = async ({
     user,
     sortBy,
     sortOrder = "desc",
@@ -254,7 +254,7 @@ const paginate = ({
     cursor?: string;
 }) => {
     const decodedCursor = cursor ? decodeCursor(cursor) : null;
-    const query = buildOpportunityListQuery({
+    const query = await buildOpportunityListQuery({
         search,
         cursor: decodedCursor,
         sortBy,
@@ -277,9 +277,9 @@ const paginate = ({
 };
 
 describe("buildOpportunityListQuery", () => {
-    it("將搜尋、權限、游標條件合併成單一 query", () => {
+    it("將搜尋、權限、游標條件合併成單一 query", async () => {
         const cursor = encodeCursor("000000000000000000000006", 400);
-        const query = buildOpportunityListQuery({
+        const query = await buildOpportunityListQuery({
             search: "target",
             cursor: decodeCursor(cursor),
             sortBy: "estimatedValue",
@@ -311,17 +311,17 @@ describe("buildOpportunityListQuery", () => {
         });
     });
 
-    it("admin / manager 不額外帶入權限過濾", () => {
-        expect(buildOpportunityListQuery({
+    it("admin / manager 不額外帶入權限過濾", async () => {
+        expect(await buildOpportunityListQuery({
             sortBy: "createdAt",
             sortOrder: "desc",
             user: managerUser,
         })).toEqual({});
     });
 
-    it("建立時間排序的游標會轉回 Date，避免 Mongo 查詢抓不到商機", () => {
+    it("建立時間排序的游標會轉回 Date，避免 Mongo 查詢抓不到商機", async () => {
         const cursor = encodeCursor("000000000000000000000006", "2025-01-02T00:00:00.000Z");
-        const query = buildOpportunityListQuery({
+        const query = await buildOpportunityListQuery({
             cursor: decodeCursor(cursor),
             sortBy: "createdAt",
             sortOrder: "desc",
@@ -352,9 +352,9 @@ describe("buildOpportunityListQuery", () => {
 describe("opportunity list pagination regression", () => {
     it.each(["createdAt", "status", "estimatedValue"] as const)(
         "同一批資料在 %s 排序下，權限使用者不會拿到空白頁",
-        (sortBy) => {
+        async (sortBy) => {
             const expectedIds = sortOpportunities(
-                opportunities.filter((item) => matchesQuery(item, buildOpportunityListQuery({
+                opportunities.filter(async (item) => matchesQuery(item, await buildOpportunityListQuery({
                     sortBy,
                     sortOrder: "desc",
                     user: memberUser,
@@ -368,7 +368,7 @@ describe("opportunity list pagination regression", () => {
             let pageCount = 0;
 
             do {
-                const page = paginate({
+                const page = await paginate({
                     user: memberUser,
                     sortBy,
                     sortOrder: "desc",

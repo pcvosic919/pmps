@@ -9,6 +9,7 @@ export type UserSession = {
     id: string; // Changed to string for MongoDB compatibility
     email: string;
     name: string;
+    department?: string;
     role: Role;
     roles: Role[];
     isActive: boolean;
@@ -33,6 +34,7 @@ export const createContext = async ({ req, res }: CreateExpressContextOptions) =
                     id: dbUser._id.toString(),
                     email: dbUser.email,
                     name: dbUser.name,
+                    department: dbUser.department,
                     role: dbUser.role as Role,
                     roles: (dbUser.roles || []) as Role[],
                     isActive: dbUser.isActive
