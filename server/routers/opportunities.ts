@@ -53,15 +53,6 @@ const assertSettlementUnlocked = async (month: string, type: "presales" | "proje
     }
 };
 
-const buildSrMembers = (creatorId: string, pmId: string) => {
-    const members: Array<{ userId: string; memberRole: "owner" | "assignee" }> = [
-        { userId: creatorId, memberRole: "owner" }
-    ];
-    if (pmId !== creatorId) {
-        members.push({ userId: pmId, memberRole: "assignee" as const });
-    }
-    return members;
-};
 
 export const opportunitiesRouter = router({
     list: protectedProcedure
