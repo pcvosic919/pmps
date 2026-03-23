@@ -87,35 +87,31 @@ const buildServiceRequestQuery = async ({
         clauses.push({ status });
     }
 
-    const isGlobalAdminOrManager = hasAnyRole(user as any, ["admin", "manager"]) && !user.department;
-
-    if (!isGlobalAdminOrManager) {
-        const userObjectId = toObjectId(user.id);
-        const accessibleOpportunities = await OpportunityModel.find(
-            await getAccessibleOpportunityQuery(user as any),
-            { _id: 1 }
-        ).lean();
-        const accessibleOpportunityIds = accessibleOpportunities.map((item) => item._id);
-
-        const accessClauses: Record<string, unknown>[] = [
-            { pmId: userObjectId },
-            { "members.userId": userObjectId },
-            { "changeRequests.requesterId": userObjectId },
-            { "wbsVersions.items.assigneeId": userObjectId }
-        ];
-
-        if (hasAnyRole(user as any, ["admin", "manager"]) && user.department) {
-            const sameDeptUsers = await UserModel.find({ department: user.department }, { _id: 1 }).lean();
-            const deptUserIds = sameDeptUsers.map(u => u._id);
-            accessClauses.push({ pmId: { $in: deptUserIds } });
-        }
-
-        if (accessibleOpportunityIds.length > 0) {
-            accessClauses.push({ opportunityId: { $in: accessibleOpportunityIds } });
-        }
-
-        clauses.push({ $or: accessClauses });
+    // Admin and manager can see ALL service requests
+    if (hasAnyRole(user as any, ["admin", "manager"])) {
+        return clauses.length > 0 ? { $and: clauses } : {};
     }
+
+    // Other roles: only their own SRs
+    const userObjectId = toObjectId(user.id);
+    const accessibleOpportunities = await OpportunityModel.find(
+        await getAccessibleOpportunityQuery(user as any),
+        { _id: 1 }
+    ).lean();
+    const accessibleOpportunityIds = accessibleOpportunities.map((item) => item._id);
+
+    const accessClauses: Record<string, unknown>[] = [
+        { pmId: userObjectId },
+        { "members.userId": userObjectId },
+        { "changeRequests.requesterId": userObjectId },
+        { "wbsVersions.items.assigneeId": userObjectId }
+    ];
+
+    if (accessibleOpportunityIds.length > 0) {
+        accessClauses.push({ opportunityId: { $in: accessibleOpportunityIds } });
+    }
+
+    clauses.push({ $or: accessClauses });
 
     return clauses.length > 0 ? { $and: clauses } : {};
 };
@@ -721,7 +717,7 @@ export const projectsRouter = router({
             return { success: true };
         }),
 
-    deleteProjectTimesheet: roleProcedure(["tech", "presales"])
+    deleteProjectTimesheet: roleProcedure(["admin", "tech", "presales"])
         .input(z.object({ id: z.string() }))
         .mutation(async ({ ctx, input }) => {
             const ts = assertFound(await TimesheetModel.findById(input.id).lean(), "找不到該專案工時");

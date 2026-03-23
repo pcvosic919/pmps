@@ -487,7 +487,7 @@ export const opportunitiesRouter = router({
             return { success: true };
         }),
 
-    deletePresalesTimesheet: roleProcedure(["tech", "presales", "pm"])
+    deletePresalesTimesheet: roleProcedure(["admin", "tech", "presales", "pm"])
         .input(z.object({ id: z.string() }))
         .mutation(async ({ ctx, input }) => {
             const ts = assertFound(await TimesheetModel.findById(input.id).lean(), "找不到該協銷工時");

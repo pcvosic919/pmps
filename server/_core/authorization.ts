@@ -43,6 +43,14 @@ export const hasAnyRole = (user: UserSession, roles: Role[]) =>
 export const isAdminOrManager = (user: UserSession) =>
     hasAnyRole(user, ["admin", "manager"]);
 
+// Only admin can delete records
+export const canDeleteRecord = (user: UserSession) =>
+    hasAnyRole(user, ["admin"]);
+
+// Admin and manager can create / edit (but not delete)
+export const canCreateOrEdit = (user: UserSession) =>
+    hasAnyRole(user, ["admin", "manager"]);
+
 export const idsMatch = (left: IdLike, right: IdLike) =>
     left != null && right != null && left.toString() === right.toString();
 
@@ -74,8 +82,9 @@ export const canAccessOpportunity = (user: UserSession, opportunity: Opportunity
     (opportunity.members || []).some(member => idsMatch(member.userId, user.id)) ||
     (opportunity.presalesAssignments || []).some(assignment => idsMatch(assignment.techId, user.id));
 
+// canManageOpportunity = owner/admin can fully manage, manager can also create+edit
 export const canManageOpportunity = (user: UserSession, opportunity: OpportunityLike) =>
-    hasAnyRole(user, ["admin"]) ||
+    hasAnyRole(user, ["admin", "manager"]) ||
     isOpportunityOwner(user, opportunity) ||
     isOpportunityBusinessOwner(user, opportunity);
 
@@ -106,7 +115,7 @@ export const canManageServiceRequestStatus = (
     serviceRequest: ServiceRequestLike,
     opportunity?: OpportunityLike | null
 ) =>
-    hasAnyRole(user, ["admin"]) ||
+    hasAnyRole(user, ["admin", "manager"]) ||
     isResponsiblePm(user, serviceRequest) ||
     (!!opportunity && isOpportunityBusinessOwner(user, opportunity));
 

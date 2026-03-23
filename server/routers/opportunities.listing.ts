@@ -48,17 +48,8 @@ export const getAccessibleOpportunityQuery = async (ctxUser: OpportunityListUser
         { "presalesAssignments.techId": userObjectId }
     ];
 
+    // Admin and manager can see ALL records (no filter)
     if (hasAnyRole(ctxUser as any, ["admin", "manager"])) {
-        if (ctxUser.department) {
-            const usersInDept = await UserModel.find({ department: ctxUser.department }, { _id: 1 }).lean();
-            const userIds = usersInDept.map(u => u._id);
-            return {
-                $or: [
-                    ...baseAccess,
-                    { ownerId: { $in: userIds } }
-                ]
-            };
-        }
         return {};
     }
 
