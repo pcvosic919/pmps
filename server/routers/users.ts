@@ -30,7 +30,7 @@ const buildSearchQuery = (search?: string) => {
 };
 
 export const usersRouter = router({
-    list: roleProcedure(["admin", "manager"])
+    list: protectedProcedure
         .input(userListInput)
         .query(async ({ input }) => {
             const limit = input?.limit ?? 50;
