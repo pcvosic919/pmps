@@ -36,6 +36,8 @@ export function OpportunityDetailPage() {
     const [memberUserId, setMemberUserId] = useState("");
     const [memberRole, setMemberRole] = useState<"owner" | "assignee" | "watcher">("watcher");
     const [memberError, setMemberError] = useState("");
+    const [memberSearchTerm, setMemberSearchTerm] = useState("");
+    const [showSearchDropdown, setShowSearchDropdown] = useState(false);
 
     const [showSRModal, setShowSRModal] = useState(false);
     const [srTitle, setSrTitle] = useState("");
@@ -72,7 +74,7 @@ export function OpportunityDetailPage() {
     });
 
     const addMemberMutation = trpc.opportunities.addMember.useMutation({
-        onSuccess: () => { refetchMembers(); setShowMemberModal(false); setMemberUserId(""); setMemberRole("watcher"); setMemberError(""); },
+        onSuccess: () => { refetchMembers(); setShowMemberModal(false); setMemberUserId(""); setMemberSearchTerm(""); setShowSearchDropdown(false); setMemberRole("watcher"); setMemberError(""); },
         onError: (err) => setMemberError(err.message || "新增失敗")
     });
 
@@ -466,13 +468,46 @@ export function OpportunityDetailPage() {
                         <div className="space-y-4">
                             <div>
                                 <label className="block text-sm font-medium mb-1">選擇使用者</label>
-                                <select value={memberUserId} onChange={e => setMemberUserId(e.target.value)}
-                                    className="w-full border border-border rounded-lg px-3 py-2 bg-background text-sm focus:outline-none focus:ring-2 focus:ring-primary/50">
-                                    <option value="">-- 請選擇 --</option>
-                                    {allUsers?.items?.filter((u: any) => !members?.find((m: any) => m.userId === u.id)).map((u: any) => (
-                                        <option key={u.id} value={u.id}>{u.name}（{u.role}）</option>
-                                    ))}
-                                </select>
+                                <div className="relative">
+                                    <input 
+                                        type="text" 
+                                        placeholder="輸入姓名或 Email 搜尋..." 
+                                        value={memberSearchTerm} 
+                                        onChange={e => {
+                                            setMemberSearchTerm(e.target.value);
+                                            setShowSearchDropdown(true);
+                                        }}
+                                        onFocus={() => setShowSearchDropdown(true)}
+                                        className="w-full border border-border rounded-lg px-3 py-2 bg-background text-sm focus:outline-none focus:ring-2 focus:ring-primary/50" 
+                                    />
+                                    {showSearchDropdown && (
+                                        <div className="absolute z-50 mt-1 w-full bg-card border border-border rounded-lg shadow-lg max-h-48 overflow-y-auto">
+                                            {allUsers?.items?.filter((u: any) => 
+                                                !members?.find((m: any) => m.userId === u.id) && 
+                                                (u.name.toLowerCase().includes(memberSearchTerm.toLowerCase()) || u.email.toLowerCase().includes(memberSearchTerm.toLowerCase()))
+                                            ).length === 0 ? (
+                                                <div className="p-2 text-sm text-muted-foreground text-center">找不到對應人員</div>
+                                            ) : (
+                                                allUsers?.items?.filter((u: any) => 
+                                                    !members?.find((m: any) => m.userId === u.id) && 
+                                                    (u.name.toLowerCase().includes(memberSearchTerm.toLowerCase()) || u.email.toLowerCase().includes(memberSearchTerm.toLowerCase()))
+                                                ).map((u: any) => (
+                                                    <div 
+                                                        key={u.id} 
+                                                        onClick={() => {
+                                                            setMemberUserId(u.id);
+                                                            setMemberSearchTerm(u.name);
+                                                            setShowSearchDropdown(false);
+                                                        }}
+                                                        className={`p-2 hover:bg-muted cursor-pointer text-sm ${memberUserId === u.id ? 'bg-primary/10 font-medium' : ''}`}
+                                                    >
+                                                        {u.name} <span className="text-xs text-muted-foreground">({u.email} - {u.role})</span>
+                                                    </div>
+                                                ))
+                                            )}
+                                        </div>
+                                    )}
+                                </div>
                             </div>
                             <div>
                                 <label className="block text-sm font-medium mb-1">角色</label>
@@ -561,9 +596,6 @@ export function OpportunityDetailPage() {
                                     {allUsers?.items?.filter((u: any) => u.role === "pm" || u.roles?.includes("pm")).map((u: any) => (
                                         <option key={u.id} value={u.id}>{u.name}</option>
                                     ))}
-                                    {allUsers?.items?.filter((u: any) => u.role !== "pm" && !u.roles?.includes("pm")).map((u: any) => (
-                                        <option key={u.id} value={u.id}>{u.name}（{u.role}）</option>
-                                    ))}
                                 </select>
                             </div>
                             <div>
@@ -573,9 +605,6 @@ export function OpportunityDetailPage() {
                                     <option value="">-- 請選擇技術人員 --</option>
                                     {allUsers?.items?.filter((u: any) => u.role === "tech" || u.roles?.includes("tech")).map((u: any) => (
                                         <option key={u.id} value={u.id}>{u.name}</option>
-                                    ))}
-                                    {allUsers?.items?.filter((u: any) => u.role !== "tech" && !u.roles?.includes("tech")).map((u: any) => (
-                                        <option key={u.id} value={u.id}>{u.name}（{u.role}）</option>
                                     ))}
                                 </select>
                             </div>
