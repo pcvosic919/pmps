@@ -83,7 +83,7 @@ export const opportunitiesRouter = router({
 
             const items = await OpportunityModel.find(query)
                 .select("title customerName estimatedValue status expectedCloseDate ownerId createdAt members presalesAssignments")
-                .sort({ [sortBy]: direction, _id: direction })
+                .sort({ [sortBy]: direction })
                 .limit(limit + 1)
                 .lean();
 
@@ -265,7 +265,7 @@ export const opportunitiesRouter = router({
             );
             assertAuthorized(canAccessOpportunity(ctx.user, opp), "您沒有權限檢視售前工時");
             const items = await TimesheetModel.find({ opportunityId: input.opportunityId, type: "presales" })
-                .sort({ workDate: -1, _id: -1 })
+                .sort({ workDate: -1 })
                 .lean();
             return items.map(t => ({
                 ...t,
@@ -279,7 +279,7 @@ export const opportunitiesRouter = router({
         .query(async ({ ctx }) => {
             const items = await TimesheetModel.find({ techId: ctx.user.id, type: "presales" })
                 .populate("opportunityId", "title customerName")
-                .sort({ workDate: -1, _id: -1 })
+                .sort({ workDate: -1 })
                 .lean();
 
             return items.map((t: any) => ({
@@ -300,7 +300,7 @@ export const opportunitiesRouter = router({
             const items = await TimesheetModel.find({ type: "presales" })
                 .populate("opportunityId", "title customerName")
                 .populate("techId", "name email")
-                .sort({ workDate: -1, _id: -1 })
+                .sort({ workDate: -1 })
                 .lean();
 
             return items.map((t: any) => ({

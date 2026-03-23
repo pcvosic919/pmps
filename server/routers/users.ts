@@ -67,7 +67,7 @@ export const usersRouter = router({
 
             const items = await UserModel.find(query)
                 .select("name email department title role roles isActive provider createdAt")
-                .sort({ [sortBy]: direction, _id: direction })
+                .sort({ [sortBy]: direction })
                 .limit(limit + 1)
                 .lean();
 

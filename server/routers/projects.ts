@@ -137,7 +137,7 @@ export const projectsRouter = router({
             query,
             { _id: 1, title: 1, contractAmount: 1, pmId: 1, status: 1, marginEstimate: 1, marginWarning: 1, createdAt: 1, opportunityId: 1, members: 1, wbsVersions: 1, changeRequests: 1 }
         )
-            .sort({ createdAt: -1, _id: -1 })
+            .sort({ createdAt: -1 })
             .limit(input?.limit ?? 200)
             .lean();
 
