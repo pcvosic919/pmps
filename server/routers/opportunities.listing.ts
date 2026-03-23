@@ -1,6 +1,6 @@
 import { hasAnyRole } from "../_core/authorization";
 import { toObjectId, type CursorValue } from "../_core/cursor";
-import { UserModel } from "../models/User";
+
 
 export const opportunitySortFields = ["createdAt", "estimatedValue", "status"] as const;
 
