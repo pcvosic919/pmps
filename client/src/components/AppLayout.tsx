@@ -10,7 +10,6 @@ import {
     CreditCard,
     FileCheck,
     FileSpreadsheet,
-    FileText,
     FolderKanban,
     Info,
     LayoutDashboard,

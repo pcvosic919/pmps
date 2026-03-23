@@ -2,17 +2,9 @@ import { useState, useEffect } from "react";
 import { trpc } from "../lib/trpc";
 import { useMsal } from "@azure/msal-react";
 import { loginRequest } from "../lib/msal";
-import { CircleHelp, LogIn, Mail, Lock, ShieldAlert, Rocket } from "lucide-react";
+import { LogIn, Mail, Lock, ShieldAlert } from "lucide-react";
 import { useAuth } from "../lib/auth";
 import type { Role } from "../../../shared/types";
-
-const DEMO_ACCOUNTS = [
-    { label: "管理員", email: "demo_admin@demo.com", helper: "可查看全部模組與系統設定" },
-    { label: "主管", email: "demo_manager@demo.com", helper: "可檢視儀表板、審核與分析" },
-    { label: "業務", email: "demo_business@demo.com", helper: "聚焦商機與售前流程" },
-    { label: "PM", email: "demo_pm@demo.com", helper: "聚焦專案、SR 與變更流程" },
-    { label: "技術", email: "demo_tech@demo.com", helper: "聚焦工時、待辦與執行作業" },
-] as const;
 
 const toFriendlyErrorMessage = (message: string) => {
     if (!message) {
@@ -53,18 +45,12 @@ export function LoginPage() {
     const [isLoading, setIsLoading] = useState(false);
     const [isProcessingMsal, setIsProcessingMsal] = useState(false);
 
-    // Mutations
-    const { data: demoStatus } = trpc.auth.demoStatus.useQuery(undefined, {
-        staleTime: 60_000,
-        retry: false,
-    });
     const { data: entraConfig } = trpc.auth.entraConfig.useQuery(undefined, {
         staleTime: 5 * 60_000,
         retry: false,
     });
     const loginMutation = trpc.auth.login.useMutation();
     const entraLoginMutation = trpc.auth.entraLogin.useMutation();
-    const demoLoginMutation = trpc.auth.demoLogin.useMutation();
 
     const handleLoginSuccess = (payload: { token: string; user?: { id: string; email: string; name: string; role: Role; roles: Role[]; isActive: boolean } | null }) => {
         setAuthSession(payload.token, payload.user ?? null);
@@ -99,19 +85,6 @@ export function LoginPage() {
         setIsLoading(true);
         try {
             const res = await loginMutation.mutateAsync({ email, password });
-            handleLoginSuccess(res);
-        } catch (err: any) {
-            setError(toFriendlyErrorMessage(err.message || ""));
-        } finally {
-            setIsLoading(false);
-        }
-    };
-
-    const handleDemoLogin = async (demoEmail: string) => {
-        setError("");
-        setIsLoading(true);
-        try {
-            const res = await demoLoginMutation.mutateAsync({ email: demoEmail });
             handleLoginSuccess(res);
         } catch (err: any) {
             setError(toFriendlyErrorMessage(err.message || ""));
