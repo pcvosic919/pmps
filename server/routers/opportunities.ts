@@ -389,12 +389,13 @@ export const opportunitiesRouter = router({
             return { success: true };
         }),
 
-    createSR: roleProcedure(["admin", "business", "pm"])
+    createSR: roleProcedure(["admin", "manager", "business", "pm"])
         .input(z.object({
             opportunityId: z.string(),
             title: z.string(),
             contractAmount: z.number(),
-            pmId: z.string()
+            pmId: z.string().optional(),
+            techId: z.string().optional(),
         }))
         .mutation(async ({ input, ctx }) => {
             const opportunity = assertFound(
@@ -406,10 +407,22 @@ export const opportunitiesRouter = router({
             assertAuthorized(canManageOpportunity(ctx.user, opportunity), "您沒有權限從此商機建立 SR");
             assertOpportunityNotConverted(opportunity);
 
+            const members: Array<{ userId: string; memberRole: "owner" | "assignee" | "watcher" }> = [
+                { userId: ctx.user.id, memberRole: "owner" }
+            ];
+            if (input.pmId && input.pmId !== ctx.user.id) {
+                members.push({ userId: input.pmId, memberRole: "assignee" });
+            }
+            if (input.techId && input.techId !== ctx.user.id && input.techId !== input.pmId) {
+                members.push({ userId: input.techId, memberRole: "assignee" });
+            }
+
             const result = await ServiceRequestModel.create({
-                ...input,
+                title: input.title,
+                contractAmount: input.contractAmount,
                 opportunityId: input.opportunityId,
-                members: buildSrMembers(ctx.user.id, input.pmId),
+                pmId: input.pmId || ctx.user.id,
+                members,
                 status: "new"
             });
 
@@ -418,12 +431,14 @@ export const opportunitiesRouter = router({
                 { $set: { status: "converted" } }
             );
 
-            await createNotification({
-                userId: input.pmId,
-                type: "approval",
-                message: `商機「${opportunity.title}」已轉為專案「${input.title}」，請前往專案管理確認後續規劃。`,
-                actionUrl: "/projects"
-            });
+            if (input.pmId) {
+                await createNotification({
+                    userId: input.pmId,
+                    type: "approval",
+                    message: `商機「${opportunity.title}」已轉為專案「${input.title}」，請前往專案管理確認後續規劃。`,
+                    actionUrl: "/projects"
+                });
+            }
 
             return { id: result._id.toString() };
         }),
