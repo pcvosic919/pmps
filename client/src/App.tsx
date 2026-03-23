@@ -1,4 +1,4 @@
-import { Suspense, lazy, useEffect, useMemo, useState, type ComponentType, type ReactNode } from "react";
+import { Suspense, lazy, useEffect, useRef, useState, type ComponentType, type ReactNode } from "react";
 import { MutationCache, QueryCache, QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { httpBatchLink } from "@trpc/client";
 import { trpc } from "./lib/trpc";
@@ -120,17 +120,29 @@ export const pageInventory: PageInventoryEntry[] = [
 ];
 
 function RuntimeMsalProvider({ children }: { children: ReactNode }) {
-  const { data } = trpc.auth.entraConfig.useQuery(undefined, {
+  const { data, isLoading } = trpc.auth.entraConfig.useQuery(undefined, {
     staleTime: 5 * 60_000,
     retry: false,
   });
 
-  const instance = useMemo(
-    () => createMsalInstance({ clientId: data?.clientId, tenantId: data?.tenantId }),
-    [data?.clientId, data?.tenantId],
-  );
+  // Create the MSAL instance only once, after entraConfig has loaded.
+  // Using useRef ensures we never recreate the instance (which would discard
+  // any in-flight redirect auth code from Microsoft).
+  const instanceRef = useRef<ReturnType<typeof createMsalInstance> | null>(null);
 
-  return <MsalProvider instance={instance}>{children}</MsalProvider>;
+  if (!instanceRef.current && !isLoading) {
+    instanceRef.current = createMsalInstance({
+      clientId: data?.clientId,
+      tenantId: data?.tenantId,
+    });
+  }
+
+  if (!instanceRef.current) {
+    // Still waiting for entraConfig before we can build the MSAL instance
+    return <div className="flex min-h-screen items-center justify-center text-muted-foreground">系統初始化中...</div>;
+  }
+
+  return <MsalProvider instance={instanceRef.current}>{children}</MsalProvider>;
 }
 
 function createAppQueryClient(onUnauthorized: () => void) {
