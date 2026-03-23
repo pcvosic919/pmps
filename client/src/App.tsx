@@ -4,7 +4,7 @@ import { httpBatchLink } from "@trpc/client";
 import { trpc } from "./lib/trpc";
 import { Route, Switch, useLocation } from "wouter";
 import { AppLayout } from "./components/AppLayout";
-import { MsalProvider } from "@azure/msal-react";
+import { MsalProvider, useMsal } from "@azure/msal-react";
 import { createMsalInstance } from "./lib/msal";
 import { Toaster, toast } from "react-hot-toast";
 import { useCurrentUser } from "./lib/useCurrentUser";
@@ -161,8 +161,13 @@ function createAppQueryClient(onUnauthorized: () => void) {
 function AppShell() {
   const [location, setLocation] = useLocation();
   const { isAuthenticated } = useAuth();
+  const { inProgress } = useMsal();
 
   useEffect(() => {
+    if (inProgress !== "none") {
+      return;
+    }
+
     if (!isAuthenticated && location !== "/login") {
       setLocation("/login");
       return;
@@ -171,7 +176,7 @@ function AppShell() {
     if (isAuthenticated && location === "/login") {
       setLocation("/");
     }
-  }, [isAuthenticated, location, setLocation]);
+  }, [isAuthenticated, location, setLocation, inProgress]);
 
   return (
     <Suspense fallback={<AppLoadingFallback />}>
