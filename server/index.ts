@@ -10,12 +10,32 @@ import { createContext } from "./_core/trpc";
 import { connectDB } from "./db";
 import { notificationEvents } from "./_core/events";
 import { verifyNotificationStreamToken } from "./_core/tokens";
+import { encryptPayload, decryptPayload } from "../shared/crypto";
 
 dotenv.config();
 
 const app = express();
 app.use(cors());
 app.use(express.json());
+
+app.use("/api/trpc", (req, res, next) => {
+    const API_ENCRYPTION_KEY = process.env.API_ENCRYPTION_KEY;
+    if (API_ENCRYPTION_KEY) {
+        if (req.body?.encrypted) {
+            req.body = decryptPayload(req.body.encrypted, API_ENCRYPTION_KEY);
+        }
+        
+        const originalJson = res.json.bind(res);
+        res.json = (body: any) => {
+            if (body) {
+                const encryptedStr = encryptPayload(body, API_ENCRYPTION_KEY);
+                return originalJson({ encrypted: encryptedStr });
+            }
+            return originalJson(body);
+        };
+    }
+    next();
+});
 
 app.use(
     "/api/trpc",

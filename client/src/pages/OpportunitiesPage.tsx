@@ -19,13 +19,7 @@ const oppSchema = z.object({
     status: z.enum(["new", "qualified", "presales_active", "won", "converted", "lost"])
 });
 
-const opportunitySortOptions = [
-    { value: "createdAt-desc", label: "建立時間 (新到舊)" },
-    { value: "createdAt-asc", label: "建立時間 (舊到新)" },
-    { value: "estimatedValue-desc", label: "預估金額 (高到低)" },
-    { value: "estimatedValue-asc", label: "預估金額 (低到高)" },
-    { value: "status-asc", label: "依狀態排序" }
-] as const;
+
 
 export function OpportunitiesPage() {
     const [searchTerm, setSearchTerm] = useState("");
@@ -153,28 +147,7 @@ export function OpportunitiesPage() {
                     />
                 </div>
 
-                <div className="flex items-center gap-2">
-                    <span className="text-sm font-medium text-muted-foreground whitespace-nowrap">排序:</span>
-                    <Select
-                        value={`${sortBy}-${sortOrder}`}
-                        onValueChange={(value) => {
-                            const [field, order] = value.split("-");
-                            setSortBy(field);
-                            setSortOrder(order as "asc" | "desc");
-                        }}
-                    >
-                        <SelectTrigger className="h-9 min-w-[220px] bg-background font-semibold shadow-none">
-                            <SelectValue placeholder="選擇排序方式" />
-                        </SelectTrigger>
-                        <SelectContent>
-                            {opportunitySortOptions.map((option) => (
-                                <SelectItem key={option.value} value={option.value}>
-                                    {option.label}
-                                </SelectItem>
-                            ))}
-                        </SelectContent>
-                    </Select>
-                </div>
+
             </div>
 
             <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">

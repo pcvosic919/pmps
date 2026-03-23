@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from "react";
 import { trpc } from "../lib/trpc";
-import { Users as UsersIcon, Edit, UserX, UserPlus, Search, Loader2, RefreshCw } from "lucide-react";
+import { Users as UsersIcon, Edit, UserX, UserPlus, Search, Loader2, RefreshCw, Settings2 } from "lucide-react";
 import { z } from "zod";
 import { roles, type Role } from "../../../shared/types";
 import { useForm } from "react-hook-form";
@@ -72,8 +72,18 @@ export function UserManagementPage() {
         }
     });
 
+    const updateBatchRoles = trpc.users.updateBatchRoles.useMutation({
+        onSuccess: () => {
+            setIsBatchEditing(false);
+            setSelectedUserIds([]);
+            refetch();
+        }
+    });
+
     const [editingUser, setEditingUser] = useState<any | null>(null);
     const [isCreatingUser, setIsCreatingUser] = useState(false);
+    const [selectedUserIds, setSelectedUserIds] = useState<string[]>([]);
+    const [isBatchEditing, setIsBatchEditing] = useState(false);
 
     const createForm = useForm<any>({
         resolver: zodResolver(userSchema) as any,
@@ -83,6 +93,10 @@ export function UserManagementPage() {
     const editForm = useForm<any>({
         resolver: zodResolver(editUserSchema) as any,
         defaultValues: { department: "", role: "user", isActive: true, roles: [] }
+    });
+
+    const batchEditForm = useForm<any>({
+        defaultValues: { role: "user", roles: [] }
     });
 
     useEffect(() => {
@@ -143,6 +157,30 @@ export function UserManagementPage() {
         }
     };
 
+    const handleSelectAll = (checked: boolean) => {
+        if (checked) {
+            setSelectedUserIds(filteredUsers.map(u => u.id));
+        } else {
+            setSelectedUserIds([]);
+        }
+    };
+
+    const handleSelectUser = (id: string, checked: boolean) => {
+        if (checked) {
+            setSelectedUserIds(prev => [...prev, id]);
+        } else {
+            setSelectedUserIds(prev => prev.filter(uid => uid !== id));
+        }
+    };
+
+    const handleBatchSave = (values: any) => {
+        updateBatchRoles.mutate({
+            userIds: selectedUserIds,
+            role: values.role,
+            roles: (values.roles || []) as Role[]
+        });
+    };
+
     if (isLoading) return <div className="p-8 text-center text-muted-foreground">載入中...</div>;
 
     const availableSecondaryRoles: Role[] = ["pm", "presales", "tech", "business"];
@@ -155,6 +193,16 @@ export function UserManagementPage() {
                     <p className="text-muted-foreground mt-1">管理系統帳號、權限角色、部門資訊與 Entra ID 同步</p>
                 </div>
                 <div className="flex items-center gap-3">
+                    {selectedUserIds.length > 0 && (
+                        <button
+                            type="button"
+                            onClick={() => setIsBatchEditing(true)}
+                            className="bg-indigo-600 text-white hover:bg-indigo-700 px-4 py-2.5 rounded-lg inline-flex items-center text-sm font-medium transition-all shadow-md"
+                        >
+                            <Settings2 className="w-4 h-4 mr-2" />
+                            批次修改權限 ({selectedUserIds.length})
+                        </button>
+                    )}
                     <button
                         type="button"
                         onClick={handleSyncEntraUsers}
@@ -215,6 +263,14 @@ export function UserManagementPage() {
                     <table className="w-full text-sm text-left">
                         <thead className="bg-muted/50 text-muted-foreground">
                             <tr>
+                                <th className="px-6 py-3 font-medium w-12 text-center">
+                                    <input 
+                                        type="checkbox" 
+                                        checked={filteredUsers.length > 0 && selectedUserIds.length === filteredUsers.length}
+                                        onChange={(e) => handleSelectAll(e.target.checked)}
+                                        className="rounded border-gray-300 text-primary w-4 h-4 cursor-pointer"
+                                    />
+                                </th>
                                 <th className="px-6 py-3 font-medium">用戶姓名</th>
                                 <th className="px-6 py-3 font-medium">電子郵件</th>
                                 <th className="px-6 py-3 font-medium">部門</th>
@@ -233,6 +289,14 @@ export function UserManagementPage() {
                             ) : (
                                 filteredUsers?.map((user) => (
                                     <tr key={user.id} className="hover:bg-muted/30 transition-colors">
+                                        <td className="px-6 py-4 text-center">
+                                            <input 
+                                                type="checkbox" 
+                                                checked={selectedUserIds.includes(user.id)}
+                                                onChange={(e) => handleSelectUser(user.id, e.target.checked)}
+                                                className="rounded border-gray-300 text-primary w-4 h-4 cursor-pointer"
+                                            />
+                                        </td>
                                         <td className="px-6 py-4 font-medium">{user.name}</td>
                                         <td className="px-6 py-4 text-muted-foreground">{user.email}</td>
                                         <td className="px-6 py-4 text-muted-foreground">{user.department || "-"}</td>
@@ -283,6 +347,79 @@ export function UserManagementPage() {
                     </div>
                 )}
             </div>
+
+            {/* Batch Edit Modal */}
+            <Dialog open={isBatchEditing} onOpenChange={setIsBatchEditing}>
+                <DialogContent className="sm:max-w-md">
+                    <DialogHeader>
+                        <DialogTitle className="flex items-center space-x-2">
+                            <Settings2 className="w-5 h-5 text-indigo-600" />
+                            <span>批次修改權限 ({selectedUserIds.length} 人)</span>
+                        </DialogTitle>
+                    </DialogHeader>
+                    <Form {...batchEditForm}>
+                        <form onSubmit={batchEditForm.handleSubmit(handleBatchSave as any)} className="space-y-4">
+                            <FormField
+                                control={batchEditForm.control}
+                                name="role"
+                                render={({ field }: any) => (
+                                    <FormItem>
+                                        <FormLabel>主角色 (Role)</FormLabel>
+                                        <Select onValueChange={field.onChange} defaultValue={field.value}>
+                                            <FormControl>
+                                                <SelectTrigger>
+                                                    <SelectValue />
+                                                </SelectTrigger>
+                                            </FormControl>
+                                            <SelectContent>
+                                                <SelectItem value="user">USER</SelectItem>
+                                                <SelectItem value="admin">ADMIN</SelectItem>
+                                                <SelectItem value="manager">MANAGER</SelectItem>
+                                                <SelectItem value="pm">PM</SelectItem>
+                                                <SelectItem value="presales">PRESALES</SelectItem>
+                                                <SelectItem value="tech">TECH</SelectItem>
+                                                <SelectItem value="business">BUSINESS</SelectItem>
+                                            </SelectContent>
+                                        </Select>
+                                        <FormMessage />
+                                    </FormItem>
+                                )}
+                            />
+                            <FormField
+                                control={batchEditForm.control}
+                                name="roles"
+                                render={({ field }: any) => (
+                                    <FormItem>
+                                        <FormLabel>副角色 (Secondary Roles)</FormLabel>
+                                        <div className="flex flex-wrap gap-2">
+                                            {availableSecondaryRoles.map(r => (
+                                                <label key={r} className="flex items-center space-x-2 bg-muted/50 px-3 py-1.5 rounded-md border">
+                                                    <input
+                                                        type="checkbox"
+                                                        checked={(field.value ?? []).includes(r)}
+                                                        onChange={() => handleRoleToggle(r, field.value ?? [], field.onChange)}
+                                                        className="rounded border-input text-primary focus:ring-primary"
+                                                    />
+                                                    <span className="text-sm font-medium uppercase">{r}</span>
+                                                </label>
+                                            ))}
+                                        </div>
+                                        <FormMessage />
+                                    </FormItem>
+                                )}
+                            />
+                            <div className="mt-6 flex justify-end space-x-3">
+                                <Button type="button" variant="outline" onClick={() => setIsBatchEditing(false)}>
+                                    取消
+                                </Button>
+                                <Button type="submit" disabled={updateBatchRoles.isPending}>
+                                    {updateBatchRoles.isPending ? "套用中..." : "套用變更"}
+                                </Button>
+                            </div>
+                        </form>
+                    </Form>
+                </DialogContent>
+            </Dialog>
 
             {/* Edit Modal */}
             <Dialog open={!!editingUser} onOpenChange={(open) => !open && setEditingUser(null)}>

@@ -9,6 +9,7 @@ import { createMsalInstance } from "./lib/msal";
 import { Toaster, toast } from "react-hot-toast";
 import { useCurrentUser } from "./lib/useCurrentUser";
 import { AuthProvider, useAuth } from "./lib/auth";
+import { encryptPayload, decryptPayload } from "../../shared/crypto";
 
 const LoginPage = lazy(() => import("./pages/LoginPage").then((module) => ({ default: module.LoginPage })));
 const UserManagementPage = lazy(() => import("./pages/UserManagementPage").then((module) => ({ default: module.UserManagementPage })));
@@ -206,6 +207,28 @@ export default function App() {
             return {
               authorization: `Bearer ${localStorage.getItem("pmp_auth_token") || ""}`,
             };
+          },
+          fetch: async (url, options) => {
+            const key = import.meta.env.VITE_API_ENCRYPTION_KEY;
+            let modifiedOptions = { ...options };
+            if (key && modifiedOptions.body && typeof modifiedOptions.body === "string") {
+              modifiedOptions.body = JSON.stringify({
+                encrypted: encryptPayload(JSON.parse(modifiedOptions.body), key)
+              });
+            }
+
+            const response = await fetch(url, modifiedOptions);
+            if (key) {
+              const originalJson = response.json.bind(response);
+              response.json = async () => {
+                const data = await originalJson();
+                if (data && data.encrypted) {
+                  return decryptPayload(data.encrypted, key);
+                }
+                return data;
+              };
+            }
+            return response;
           },
         }),
       ],

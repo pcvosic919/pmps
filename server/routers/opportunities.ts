@@ -14,7 +14,7 @@ import {
     canManageTimesheet,
     hasAnyRole,
 } from "../_core/authorization";
-import { decodeCursor, encodeCursor } from "../_core/cursor";
+import { decodeCursor, encodeCursor, toObjectId } from "../_core/cursor";
 import { createNotification } from "../_core/notifications";
 import {
     buildOpportunityListQuery,
@@ -110,6 +110,21 @@ export const opportunitiesRouter = router({
             };
         }),
 
+    getActiveOpportunityCount: protectedProcedure.query(async ({ ctx }) => {
+        const query = buildOpportunityListQuery({ 
+            user: ctx.user as any,
+            sortBy: "createdAt",
+            sortOrder: "desc"
+        });
+        
+        const activeCount = await OpportunityModel.countDocuments({
+            ...query,
+            status: { $nin: ["won", "lost", "converted"] }
+        });
+        
+        return { count: activeCount };
+    }),
+
     create: roleProcedure(["admin", "business", "manager"])
         .input(z.object({
             title: z.string(),
@@ -196,7 +211,7 @@ export const opportunitiesRouter = router({
 
             await OpportunityModel.updateOne(
                 { _id: input.opportunityId },
-                { $push: { members: { userId: input.userId, memberRole: input.memberRole } } }
+                { $push: { members: { userId: toObjectId(input.userId), memberRole: input.memberRole } } }
             );
             return { success: true };
         }),
@@ -215,7 +230,7 @@ export const opportunitiesRouter = router({
 
             await OpportunityModel.updateOne(
                 { "members._id": input.memberId },
-                { $pull: { members: { _id: input.memberId } } }
+                { $pull: { members: { _id: toObjectId(input.memberId) } } }
             );
             return { success: true };
         }),
@@ -347,7 +362,7 @@ export const opportunitiesRouter = router({
             await OpportunityModel.updateOne(
                 { _id: input.opportunityId },
                 {
-                    $push: { presalesAssignments: { techId: input.techId, estimatedHours: input.estimatedHours } },
+                    $push: { presalesAssignments: { techId: toObjectId(input.techId), estimatedHours: input.estimatedHours } },
                     $set: { status: "presales_active" }
                 }
             );
@@ -360,7 +375,7 @@ export const opportunitiesRouter = router({
             if (!existing) {
                 await OpportunityModel.updateOne(
                     { _id: input.opportunityId },
-                    { $push: { members: { userId: input.techId, memberRole: "assignee" } } }
+                    { $push: { members: { userId: toObjectId(input.techId), memberRole: "assignee" } } }
                 );
             }
 
@@ -461,8 +476,8 @@ export const opportunitiesRouter = router({
 
             await TimesheetModel.create({
                 type: "presales",
-                techId: ctx.user.id,
-                opportunityId: input.opportunityId,
+                techId: toObjectId(ctx.user.id),
+                opportunityId: toObjectId(input.opportunityId),
                 workDate: input.workDate,
                 hours: input.hours,
                 description: input.description,

@@ -69,7 +69,7 @@ export function LoginPage() {
 
     const handleLoginSuccess = (payload: { token: string; user?: { id: string; email: string; name: string; role: Role; roles: Role[]; isActive: boolean } | null }) => {
         setAuthSession(payload.token, payload.user ?? null);
-        setLocation("/");
+        window.location.href = "/";
     };
 
     const handleSubmit = async (e: React.FormEvent) => {

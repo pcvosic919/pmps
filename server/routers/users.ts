@@ -196,6 +196,21 @@ export const usersRouter = router({
             };
         }),
 
+    updateBatchRoles: roleProcedure(["admin"])
+        .input(z.object({
+            userIds: z.array(z.string()),
+            role: z.enum(roles),
+            roles: z.array(z.enum(roles))
+        }))
+        .mutation(async ({ input }) => {
+            const { userIds, role, roles } = input;
+            await UserModel.updateMany(
+                { _id: { $in: userIds } },
+                { $set: { role, roles } }
+            );
+            return { success: true, count: userIds.length };
+        }),
+
     deleteManual: roleProcedure(["admin"])
         .input(z.object({ id: z.string() }))
         .mutation(async ({ input }) => {

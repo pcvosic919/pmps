@@ -35,11 +35,11 @@ const assertSettlementUnlocked = async (month: string, type: "presales" | "proje
 };
 
 const buildSrMembers = (creatorId: string, pmId: string) => {
-    const members: Array<{ userId: string; memberRole: "owner" | "assignee" }> = [
-        { userId: creatorId, memberRole: "owner" }
+    const members: Array<{ userId: any; memberRole: "owner" | "assignee" }> = [
+        { userId: toObjectId(creatorId), memberRole: "owner" }
     ];
     if (pmId !== creatorId) {
-        members.push({ userId: pmId, memberRole: "assignee" as const });
+        members.push({ userId: toObjectId(pmId), memberRole: "assignee" as const });
     }
     return members;
 };
@@ -149,6 +149,19 @@ export const projectsRouter = router({
         }));
     }),
 
+    getActiveProjectCount: protectedProcedure.query(async ({ ctx }) => {
+        const query = await buildServiceRequestQuery({
+            user: ctx.user
+        });
+        
+        const activeCount = await ServiceRequestModel.countDocuments({
+            ...query,
+            status: { $nin: ["completed", "cancelled"] }
+        });
+        
+        return { count: activeCount };
+    }),
+
     createSR: roleProcedure(["admin", "business", "pm"])
         .input(z.object({
             title: z.string(),
@@ -173,7 +186,7 @@ export const projectsRouter = router({
             const sr = await ServiceRequestModel.create({
                 title: input.title,
                 contractAmount: input.contractAmount,
-                pmId: input.pmId,
+                pmId: toObjectId(input.pmId),
                 opportunityId: input.opportunityId ? new mongoose.Types.ObjectId(input.opportunityId) : undefined,
                 status: "new",
                 members: buildSrMembers(ctx.user.id, input.pmId)
@@ -349,7 +362,7 @@ export const projectsRouter = router({
                             mimeType: input.mimeType,
                             fileUrl: input.fileUrl,
                             fileKey: fileKey,
-                            uploadedById: ctx.user.id
+                            uploadedById: toObjectId(ctx.user.id)
                         }
                     }
                 }
@@ -418,7 +431,7 @@ export const projectsRouter = router({
             const newVersion = {
                 versionNumber: input.versionNumber,
                 status: "submitted" as const,
-                submittedBy: ctx.user.id,
+                submittedBy: toObjectId(ctx.user.id),
                 items: input.items.map(item => ({
                     title: item.title,
                     estimatedHours: item.estimatedHours,
@@ -497,7 +510,7 @@ export const projectsRouter = router({
             sr.changeRequests.push({
                 _id: crId,
                 wbsItemId: input.wbsItemId ? new mongoose.Types.ObjectId(input.wbsItemId) : undefined,
-                requesterId: ctx.user.id,
+                requesterId: toObjectId(ctx.user.id),
                 reason: input.reason,
                 hoursAdjustment: input.hoursAdjustment,
                 amountAdjustment: input.amountAdjustment,
@@ -682,9 +695,9 @@ export const projectsRouter = router({
 
             await TimesheetModel.create({
                 type: "project",
-                srId: input.srId,
-                wbsItemId: input.wbsItemId,
-                techId: ctx.user.id,
+                srId: toObjectId(input.srId),
+                wbsItemId: toObjectId(input.wbsItemId),
+                techId: toObjectId(ctx.user.id),
                 workDate: input.workDate,
                 hours: input.hours,
                 description: input.description,

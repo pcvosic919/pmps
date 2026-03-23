@@ -13,6 +13,8 @@ export function DashboardPage() {
         { limit: 8, search: searchTerm, sortBy, sortOrder: "asc" },
         { enabled: isAdminLike }
     );
+    const { data: activeProjects } = trpc.projects.getActiveProjectCount.useQuery(undefined, { enabled: isAdminLike });
+    const { data: activeOpps } = trpc.opportunities.getActiveOpportunityCount.useQuery(undefined, { enabled: isAdminLike });
     const { data: notifications } = trpc.analytics.getNotifications.useQuery(
         { limit: 20 },
         { enabled: !!user }
@@ -127,7 +129,7 @@ export function DashboardPage() {
                         待關注商機
                         <TrendingUp className="h-4 w-4 text-blue-500" />
                     </h3>
-                    <div className="text-2xl font-bold mt-2">即時查看</div>
+                    <div className="text-2xl font-bold mt-2">{activeOpps?.count ?? 0} <span className="text-sm font-normal text-muted-foreground">筆</span></div>
                     <p className="text-xs text-muted-foreground mt-1 text-blue-500">請前往商機管理進行排序與篩選</p>
                 </div>
 
@@ -136,7 +138,7 @@ export function DashboardPage() {
                         執行中專案
                         <Users className="h-4 w-4 text-green-500" />
                     </h3>
-                    <div className="text-2xl font-bold mt-2">依權限顯示</div>
+                    <div className="text-2xl font-bold mt-2">{activeProjects?.count ?? 0} <span className="text-sm font-normal text-muted-foreground">個</span></div>
                     <p className="text-xs text-muted-foreground mt-1 text-green-500">專案列表已依帳號權限過濾</p>
                 </div>
             </div>
