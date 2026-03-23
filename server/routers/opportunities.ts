@@ -399,7 +399,7 @@ export const opportunitiesRouter = router({
             return { success: true };
         }),
 
-    createSR: roleProcedure(["admin", "business", "pm"])
+    createSR: roleProcedure(["admin", "business", "pm", "presales"])
         .input(z.object({
             opportunityId: z.string(),
             title: z.string(),

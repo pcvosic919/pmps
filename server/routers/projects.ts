@@ -166,7 +166,7 @@ export const projectsRouter = router({
         return { count: activeCount };
     }),
 
-    createSR: roleProcedure(["admin", "business", "pm"])
+    createSR: roleProcedure(["admin", "business", "pm", "presales"])
         .input(z.object({
             title: z.string(),
             contractAmount: z.number(),
