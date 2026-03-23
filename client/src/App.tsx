@@ -5,6 +5,7 @@ import { trpc } from "./lib/trpc";
 import { Route, Switch, useLocation } from "wouter";
 import { AppLayout } from "./components/AppLayout";
 import { MsalProvider, useMsal } from "@azure/msal-react";
+import { InteractionStatus } from "@azure/msal-browser";
 import { createMsalInstance } from "./lib/msal";
 import { Toaster, toast } from "react-hot-toast";
 import { useCurrentUser } from "./lib/useCurrentUser";
@@ -163,10 +164,11 @@ function AppShell() {
   const { isAuthenticated } = useAuth();
   const { inProgress } = useMsal();
 
+  // While MSAL is processing a redirect, don't touch the route
+  const msalBusy = inProgress !== InteractionStatus.None;
+
   useEffect(() => {
-    if (inProgress !== "none") {
-      return;
-    }
+    if (msalBusy) return;
 
     if (!isAuthenticated && location !== "/login") {
       setLocation("/login");
@@ -176,7 +178,12 @@ function AppShell() {
     if (isAuthenticated && location === "/login") {
       setLocation("/");
     }
-  }, [isAuthenticated, location, setLocation, inProgress]);
+  }, [isAuthenticated, location, setLocation, msalBusy]);
+
+  // Show loading while MSAL is processing redirect
+  if (msalBusy && !isAuthenticated) {
+    return <AppLoadingFallback />;
+  }
 
   return (
     <Suspense fallback={<AppLoadingFallback />}>
