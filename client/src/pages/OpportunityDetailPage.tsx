@@ -118,12 +118,13 @@ export function OpportunityDetailPage() {
         if (!srTitle.trim()) { setSrError("請輸入 SR 名稱"); return; }
         const amount = parseFloat(srAmount);
         if (isNaN(amount) || amount <= 0) { setSrError("請輸入有效合約金額"); return; }
-        createSRMutation.mutate({
-            opportunityId: id,
-            title: srTitle,
-            contractAmount: amount,
+        
+        createSRMutation.mutate({ 
+            opportunityId: id, 
+            title: srTitle, 
+            contractAmount: amount, 
             pmId: srPmId || undefined,
-            techId: srTechId || undefined,
+            techId: srTechId || undefined
         });
     };
 
@@ -554,22 +555,28 @@ export function OpportunityDetailPage() {
                                     className="w-full border border-border rounded-lg px-3 py-2 bg-background text-sm focus:outline-none focus:ring-2 focus:ring-primary/50" />
                             </div>
                             <div>
-                                <label className="block text-sm font-medium mb-1">指派 PM <span className="text-muted-foreground font-normal text-xs">（選用）</span></label>
+                                <label className="block text-sm font-medium mb-1">指派 PM (選用)</label>
                                 <select value={srPmId} onChange={e => setSrPmId(e.target.value)}
                                     className="w-full border border-border rounded-lg px-3 py-2 bg-background text-sm focus:outline-none focus:ring-2 focus:ring-primary/50">
-                                    <option value="">-- 不指派 PM --</option>
+                                    <option value="">-- 請選擇 PM --</option>
                                     {allUsers?.items?.filter((u: any) => u.role === "pm" || u.roles?.includes("pm")).map((u: any) => (
                                         <option key={u.id} value={u.id}>{u.name}</option>
+                                    ))}
+                                    {allUsers?.items?.filter((u: any) => u.role !== "pm" && !u.roles?.includes("pm")).map((u: any) => (
+                                        <option key={u.id} value={u.id}>{u.name}（{u.role}）</option>
                                     ))}
                                 </select>
                             </div>
                             <div>
-                                <label className="block text-sm font-medium mb-1">指派技術 <span className="text-muted-foreground font-normal text-xs">（選用）</span></label>
+                                <label className="block text-sm font-medium mb-1">指派技術人員 (選用)</label>
                                 <select value={srTechId} onChange={e => setSrTechId(e.target.value)}
                                     className="w-full border border-border rounded-lg px-3 py-2 bg-background text-sm focus:outline-none focus:ring-2 focus:ring-primary/50">
-                                    <option value="">-- 不指派技術 --</option>
+                                    <option value="">-- 請選擇技術人員 --</option>
                                     {allUsers?.items?.filter((u: any) => u.role === "tech" || u.roles?.includes("tech")).map((u: any) => (
                                         <option key={u.id} value={u.id}>{u.name}</option>
+                                    ))}
+                                    {allUsers?.items?.filter((u: any) => u.role !== "tech" && !u.roles?.includes("tech")).map((u: any) => (
+                                        <option key={u.id} value={u.id}>{u.name}（{u.role}）</option>
                                     ))}
                                 </select>
                             </div>

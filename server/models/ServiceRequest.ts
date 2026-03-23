@@ -34,7 +34,7 @@ export interface IServiceRequest extends Document {
     opportunityId?: mongoose.Types.ObjectId;
     title: string;
     contractAmount: number;
-    pmId: mongoose.Types.ObjectId;
+    pmId?: mongoose.Types.ObjectId;
     status: SrStatus;
     marginEstimate: number;
     marginWarning: boolean;
@@ -81,7 +81,7 @@ const ServiceRequestSchema = new Schema<IServiceRequest>({
     opportunityId: { type: Schema.Types.ObjectId, ref: "Opportunity" },
     title: { type: String, required: true },
     contractAmount: { type: Number, required: true, default: 0 },
-    pmId: { type: Schema.Types.ObjectId, ref: "User", required: true },
+    pmId: { type: Schema.Types.ObjectId, ref: "User" },
     status: { type: String, enum: srStatuses, default: "new", required: true },
     marginEstimate: { type: Number, default: 0 },
     marginWarning: { type: Boolean, default: false },

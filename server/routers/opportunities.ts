@@ -53,6 +53,18 @@ const assertSettlementUnlocked = async (month: string, type: "presales" | "proje
     }
 };
 
+const buildSrMembers = (creatorId: string, pmId?: string, techId?: string) => {
+    const members: Array<{ userId: string; memberRole: "owner" | "assignee" }> = [
+        { userId: creatorId, memberRole: "owner" }
+    ];
+    if (pmId && pmId !== creatorId) {
+        members.push({ userId: pmId, memberRole: "assignee" as const });
+    }
+    if (techId && techId !== creatorId && techId !== pmId) {
+        members.push({ userId: techId, memberRole: "assignee" as const });
+    }
+    return members;
+};
 
 export const opportunitiesRouter = router({
     list: protectedProcedure
@@ -380,13 +392,13 @@ export const opportunitiesRouter = router({
             return { success: true };
         }),
 
-    createSR: roleProcedure(["admin", "manager", "business", "pm"])
+    createSR: roleProcedure(["admin", "business", "pm"])
         .input(z.object({
             opportunityId: z.string(),
             title: z.string(),
             contractAmount: z.number(),
             pmId: z.string().optional(),
-            techId: z.string().optional(),
+            techId: z.string().optional()
         }))
         .mutation(async ({ input, ctx }) => {
             const opportunity = assertFound(
@@ -398,22 +410,12 @@ export const opportunitiesRouter = router({
             assertAuthorized(canManageOpportunity(ctx.user, opportunity), "您沒有權限從此商機建立 SR");
             assertOpportunityNotConverted(opportunity);
 
-            const members: Array<{ userId: string; memberRole: "owner" | "assignee" | "watcher" }> = [
-                { userId: ctx.user.id, memberRole: "owner" }
-            ];
-            if (input.pmId && input.pmId !== ctx.user.id) {
-                members.push({ userId: input.pmId, memberRole: "assignee" });
-            }
-            if (input.techId && input.techId !== ctx.user.id && input.techId !== input.pmId) {
-                members.push({ userId: input.techId, memberRole: "assignee" });
-            }
-
             const result = await ServiceRequestModel.create({
                 title: input.title,
                 contractAmount: input.contractAmount,
                 opportunityId: input.opportunityId,
-                pmId: input.pmId || ctx.user.id,
-                members,
+                pmId: input.pmId ? toObjectId(input.pmId) : undefined,
+                members: buildSrMembers(ctx.user.id, input.pmId, input.techId),
                 status: "new"
             });
 
@@ -426,7 +428,16 @@ export const opportunitiesRouter = router({
                 await createNotification({
                     userId: input.pmId,
                     type: "approval",
-                    message: `商機「${opportunity.title}」已轉為專案「${input.title}」，請前往專案管理確認後續規劃。`,
+                    message: `商機「${opportunity.title}」已轉為專案「${input.title}」，您已被指派為 PM。`,
+                    actionUrl: "/projects"
+                });
+            }
+
+            if (input.techId) {
+                await createNotification({
+                    userId: input.techId,
+                    type: "todo",
+                    message: `您已被選中為專案「${input.title}」的技術人員，請開始您的工作。`,
                     actionUrl: "/projects"
                 });
             }
