@@ -82,11 +82,12 @@ export const canAccessOpportunity = (user: UserSession, opportunity: Opportunity
     (opportunity.members || []).some(member => idsMatch(member.userId, user.id)) ||
     (opportunity.presalesAssignments || []).some(assignment => idsMatch(assignment.techId, user.id));
 
-// canManageOpportunity = owner/admin can fully manage, manager can also create+edit
+// canManageOpportunity = owner/admin can fully manage, manager can also create+edit, and assigned presales can manage
 export const canManageOpportunity = (user: UserSession, opportunity: OpportunityLike) =>
     hasAnyRole(user, ["admin", "manager"]) ||
     isOpportunityOwner(user, opportunity) ||
-    isOpportunityBusinessOwner(user, opportunity);
+    isOpportunityBusinessOwner(user, opportunity) ||
+    (opportunity.presalesAssignments || []).some(assignment => idsMatch(assignment.techId, user.id));
 
 export const isResponsiblePm = (user: UserSession, serviceRequest: ServiceRequestLike) =>
     idsMatch(serviceRequest.pmId, user.id);

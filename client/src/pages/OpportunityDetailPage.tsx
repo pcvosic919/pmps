@@ -52,7 +52,7 @@ export function OpportunityDetailPage() {
     const { data: assignments, isLoading: isAssignmentsLoading, refetch: refetchAssignments } = trpc.opportunities.getAssignments.useQuery({ opportunityId: id }, { enabled: !!id });
     const { data: timesheets, isLoading: isTimesheetsLoading, refetch: refetchTimesheets } = trpc.opportunities.getTimesheets.useQuery({ opportunityId: id }, { enabled: !!id });
     const { data: presalesList } = trpc.users.presalesList.useQuery();
-    const { data: allUsers } = trpc.users.list.useQuery({ limit: 100 });
+    const { data: allUsers } = trpc.users.list.useQuery({ limit: 500 });
     const { data: customFieldDefs } = trpc.system.getCustomFields.useQuery();
 
     const oppFields = customFieldDefs?.filter((f: any) => f.entityType === "opportunity") || [];
@@ -336,15 +336,14 @@ export function OpportunityDetailPage() {
                         {members && members.length > 0 ? (
                             <div className="space-y-3">
                                 {members.map((m: any) => {
-                                    const user = allUsers?.items?.find((u: any) => u.id === m.userId);
                                     return (
                                         <div key={m.id} className="p-3 border rounded-lg flex justify-between items-center hover:bg-muted/50 transition-colors group">
                                             <div className="flex items-center space-x-3">
                                                 <div className="w-8 h-8 rounded-full bg-primary/10 flex items-center justify-center text-primary font-bold text-xs">
-                                                    {user ? user.name.charAt(0) : "U"}
+                                                    {m.userName.charAt(0).toUpperCase()}
                                                 </div>
                                                 <div>
-                                                    <p className="font-medium text-sm">{user?.name ?? `使用者 #${m.userId}`}</p>
+                                                    <p className="font-medium text-sm">{m.userName}</p>
                                                     <p className="text-xs text-muted-foreground capitalize">{m.memberRole}</p>
                                                 </div>
                                             </div>

@@ -4,6 +4,7 @@ import { OpportunityModel } from "../models/Opportunity";
 import { SettlementLockModel } from "../models/SettlementLock";
 import { TimesheetModel } from "../models/Timesheet";
 import { ServiceRequestModel } from "../models/ServiceRequest";
+import { UserModel } from "../models/User";
 import { TRPCError } from "@trpc/server";
 import { memberRoles, opportunityStatuses } from "../../shared/types";
 import {
@@ -180,15 +181,21 @@ export const opportunitiesRouter = router({
                 "找不到該商機"
             );
             assertAuthorized(canAccessOpportunity(ctx.user, opp), "您沒有權限檢視商機成員");
+            
+            const userIds = (opp.members || []).map((m: any) => m.userId);
+            const users = await UserModel.find({ _id: { $in: userIds } }, { name: 1 }).lean();
+            const userMap = Object.fromEntries(users.map(u => [u._id.toString(), u.name]));
+
             return (opp.members || []).map((m: any) => ({
                 id: m._id.toString(),
                 opportunityId: input.opportunityId,
                 userId: m.userId.toString(),
+                userName: userMap[m.userId.toString()] || `使用者 #${m.userId}`,
                 memberRole: m.memberRole
             }));
         }),
 
-    addMember: roleProcedure(["admin", "business", "manager"])
+    addMember: protectedProcedure
         .input(z.object({
             opportunityId: z.string(),
             userId: z.string(),
@@ -219,7 +226,7 @@ export const opportunitiesRouter = router({
             return { success: true };
         }),
 
-    removeMember: roleProcedure(["admin", "business", "manager"])
+    removeMember: protectedProcedure
         .input(z.object({ memberId: z.string() }))
         .mutation(async ({ input, ctx }) => {
             const opportunity = assertFound(
