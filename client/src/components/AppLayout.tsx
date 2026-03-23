@@ -77,7 +77,6 @@ const navGroups: NavGroup[] = [
         items: [
             { icon: FolderKanban, label: "專案管理", href: "/projects", roles: ["admin", "manager", "pm", "tech"] },
             { icon: CalendarDays, label: "專案工時", href: "/project-timesheets", roles: ["admin", "manager", "pm", "tech"] },
-            { icon: FileText, label: "服務請求 (SR)", href: "/service-requests", roles: ["admin", "manager", "pm", "tech", "business"] },
             { icon: FileCheck, label: "變更單 (CR)", href: "/change-requests", roles: ["admin", "manager", "pm", "tech"] },
         ],
     },
