@@ -294,7 +294,7 @@ export function WbsManagementPage() {
                                                         </div>
                                                     )}
                                                 </div>
-                                                {version.status === "submitted" && hasRole("manager") && (
+                                                {version.status === "submitted" && (hasRole("manager") || hasRole("pm")) && (
                                                     <div className="flex gap-2">
                                                         {reviewingId === version.id ? (
                                                             <span className="text-xs text-muted-foreground animate-pulse">處理中...</span>

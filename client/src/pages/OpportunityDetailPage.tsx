@@ -24,6 +24,7 @@ export function OpportunityDetailPage() {
 
     const { user } = useCurrentUser();
     const isPMOnly = user?.role === "pm" && !user?.roles?.includes("presales") && !user?.roles?.includes("tech") && !user?.roles?.includes("admin");
+    const hasRole = (role: string) => user?.role === role || (user?.roles || []).includes(role as any);
 
     // ------ Modal states ------
     const [showAssignModal, setShowAssignModal] = useState(false);
@@ -260,14 +261,16 @@ export function OpportunityDetailPage() {
                         </div>
                     </div>
                     {/* 一鍵建 SR */}
-                    <button
-                        onClick={() => { if (!isConverted) { setShowSRModal(true); setSrTitle(opp.title + " - SR"); setSrError(""); } }}
-                        disabled={isConverted}
-                        className="flex items-center gap-2 px-4 py-2 bg-primary text-primary-foreground rounded-lg hover:bg-primary/90 transition-colors text-sm font-medium shadow-sm disabled:opacity-50"
-                    >
-                        <FileText className="w-4 h-4" />
-                        {isConverted ? "已轉案，請結案重建" : "一鍵建立 SR / 專案"}
-                    </button>
+                    {!hasRole("business") && (
+                        <button
+                            onClick={() => { if (!isConverted) { setShowSRModal(true); setSrTitle(opp.title + " - SR"); setSrError(""); } }}
+                            disabled={isConverted}
+                            className="flex items-center gap-2 px-4 py-2 bg-primary text-primary-foreground rounded-lg hover:bg-primary/90 transition-colors text-sm font-medium shadow-sm disabled:opacity-50"
+                        >
+                            <FileText className="w-4 h-4" />
+                            {isConverted ? "已轉案，請結案重建" : "一鍵建立 SR / 專案"}
+                        </button>
+                    )}
                 </div>
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-6 pt-6 border-t border-border/50">
                     <div className="space-y-1">

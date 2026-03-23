@@ -54,16 +54,29 @@ const assertSettlementUnlocked = async (month: string, type: "presales" | "proje
     }
 };
 
-const buildSrMembers = (creatorId: string, pmId?: string, techId?: string) => {
+const buildSrMembers = (creatorId: string, pmId?: string, techId?: string, presalesAssignments?: any[]) => {
     const members: Array<{ userId: string; memberRole: "owner" | "assignee" }> = [
         { userId: creatorId, memberRole: "owner" }
     ];
-    if (pmId && pmId !== creatorId) {
-        members.push({ userId: pmId, memberRole: "assignee" as const });
-    }
-    if (techId && techId !== creatorId && techId !== pmId) {
-        members.push({ userId: techId, memberRole: "assignee" as const });
-    }
+    
+    const addedIds = new Set<string>([creatorId]);
+
+    const addIfUnique = (id: string | undefined, role: "owner" | "assignee") => {
+        if (id && !addedIds.has(id.toString())) {
+            members.push({ userId: id, memberRole: role });
+            addedIds.add(id.toString());
+        }
+    };
+
+    addIfUnique(pmId, "assignee");
+    addIfUnique(techId, "assignee");
+
+    (presalesAssignments || []).forEach((a: any) => {
+        if (a.techId) {
+            addIfUnique(a.techId.toString(), "assignee");
+        }
+    });
+
     return members;
 };
 
@@ -399,7 +412,7 @@ export const opportunitiesRouter = router({
             return { success: true };
         }),
 
-    createSR: roleProcedure(["admin", "business", "pm", "presales"])
+    createSR: roleProcedure(["admin", "pm", "presales"])
         .input(z.object({
             opportunityId: z.string(),
             title: z.string(),
@@ -422,7 +435,7 @@ export const opportunitiesRouter = router({
                 contractAmount: input.contractAmount,
                 opportunityId: input.opportunityId,
                 pmId: input.pmId ? toObjectId(input.pmId) : undefined,
-                members: buildSrMembers(ctx.user.id, input.pmId, input.techId),
+                members: buildSrMembers(ctx.user.id, input.pmId, input.techId, opportunity.presalesAssignments),
                 status: "new"
             });
 
