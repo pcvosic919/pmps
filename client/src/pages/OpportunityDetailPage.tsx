@@ -54,6 +54,8 @@ export function OpportunityDetailPage() {
     const { data: assignments, isLoading: isAssignmentsLoading, refetch: refetchAssignments } = trpc.opportunities.getAssignments.useQuery({ opportunityId: id }, { enabled: !!id });
     const { data: timesheets, isLoading: isTimesheetsLoading, refetch: refetchTimesheets } = trpc.opportunities.getTimesheets.useQuery({ opportunityId: id }, { enabled: !!id });
     const { data: presalesList } = trpc.users.presalesList.useQuery();
+    const { data: pmUsers } = trpc.users.pmList.useQuery();
+    const { data: techUsers } = trpc.users.techList.useQuery();
     const { data: allUsers } = trpc.users.list.useQuery({ limit: 500 });
     const { data: customFieldDefs } = trpc.system.getCustomFields.useQuery();
 
@@ -593,7 +595,7 @@ export function OpportunityDetailPage() {
                                 <select value={srPmId} onChange={e => setSrPmId(e.target.value)}
                                     className="w-full border border-border rounded-lg px-3 py-2 bg-background text-sm focus:outline-none focus:ring-2 focus:ring-primary/50">
                                     <option value="">-- 請選擇 PM --</option>
-                                    {allUsers?.items?.filter((u: any) => u.role === "pm" || u.roles?.includes("pm")).map((u: any) => (
+                                    {(pmUsers || []).map((u: any) => (
                                         <option key={u.id} value={u.id}>{u.name}</option>
                                     ))}
                                 </select>
@@ -603,7 +605,7 @@ export function OpportunityDetailPage() {
                                 <select value={srTechId} onChange={e => setSrTechId(e.target.value)}
                                     className="w-full border border-border rounded-lg px-3 py-2 bg-background text-sm focus:outline-none focus:ring-2 focus:ring-primary/50">
                                     <option value="">-- 請選擇技術人員 --</option>
-                                    {allUsers?.items?.filter((u: any) => u.role === "tech" || u.roles?.includes("tech")).map((u: any) => (
+                                    {(techUsers || []).map((u: any) => (
                                         <option key={u.id} value={u.id}>{u.name}</option>
                                     ))}
                                 </select>

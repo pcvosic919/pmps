@@ -9,7 +9,7 @@ import { assertEntraSyncConfigured, fetchEntraUsers, getEntraSettings } from "..
 const userSortFields = ["name", "email", "role", "createdAt"] as const;
 
 const userListInput = z.object({
-    limit: z.number().min(1).max(100).nullish(),
+    limit: z.number().min(1).max(500).nullish(),
     cursor: z.string().nullish(),
     search: z.string().trim().optional(),
     sortBy: z.enum(userSortFields).optional(),
@@ -94,6 +94,15 @@ export const usersRouter = router({
                     : undefined
             };
         }),
+
+    pmList: protectedProcedure.query(async () => {
+        const users = await UserModel.find({
+            $or: [{ role: "pm" }, { roles: "pm" }]
+        })
+            .select("name email department title role roles isActive provider")
+            .lean();
+        return users.map(u => ({ ...u, id: u._id.toString() }));
+    }),
 
     techList: protectedProcedure.query(async () => {
         const users = await UserModel.find({
