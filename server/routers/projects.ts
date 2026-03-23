@@ -424,7 +424,7 @@ export const projectsRouter = router({
                 ...sr,
                 id: sr._id.toString(),
                 opportunityId: sr.opportunityId?.toString(),
-                pmId: sr.pmId.toString(),
+                pmId: sr.pmId?.toString(),
                 wbsVersions
             };
         }),
