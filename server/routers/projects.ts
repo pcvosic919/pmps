@@ -87,25 +87,36 @@ const buildServiceRequestQuery = async ({
         clauses.push({ status });
     }
 
-    // Admin and manager can see ALL service requests
-    if (hasAnyRole(user as any, ["admin", "manager"])) {
+    // Admin can see ALL service requests
+    if (hasAnyRole(user as any, ["admin"])) {
         return clauses.length > 0 ? { $and: clauses } : {};
     }
 
-    // Other roles: only their own SRs
+    const accessClauses: Record<string, unknown>[] = [];
     const userObjectId = toObjectId(user.id);
+
+    // Manager can see all SRs where PM is in their department
+    if (hasAnyRole(user as any, ["manager"]) && user.department) {
+        const deptUsers = await UserModel.find({ department: user.department }, { _id: 1 }).lean();
+        const deptUserIds = deptUsers.map(u => u._id);
+        if (deptUserIds.length > 0) {
+            accessClauses.push({ pmId: { $in: deptUserIds } });
+        }
+    }
+
+    // Other roles: only their own SRs
     const accessibleOpportunities = await OpportunityModel.find(
         await getAccessibleOpportunityQuery(user as any),
         { _id: 1 }
     ).lean();
     const accessibleOpportunityIds = accessibleOpportunities.map((item) => item._id);
 
-    const accessClauses: Record<string, unknown>[] = [
+    accessClauses.push(
         { pmId: userObjectId },
         { "members.userId": userObjectId },
         { "changeRequests.requesterId": userObjectId },
         { "wbsVersions.items.assigneeId": userObjectId }
-    ];
+    );
 
     if (accessibleOpportunityIds.length > 0) {
         accessClauses.push({ opportunityId: { $in: accessibleOpportunityIds } });
@@ -241,11 +252,16 @@ export const projectsRouter = router({
             return { success: true };
         }),
 
-    getWbsPendingReview: roleProcedure(["manager"])
-        .query(async () => {
+    getWbsPendingReview: roleProcedure(["manager", "pm"])
+        .query(async ({ ctx }) => {
+            const matchClause: any = { "wbsVersions.status": "submitted" };
+            if (!hasAnyRole(ctx.user as any, ["admin", "manager"])) {
+                matchClause.pmId = toObjectId(ctx.user.id);
+            }
+
             const pending = await ServiceRequestModel.aggregate([
                 { $unwind: "$wbsVersions" },
-                { $match: { "wbsVersions.status": "submitted" } },
+                { $match: matchClause },
                 { $sort: { "wbsVersions.createdAt": -1 } },
                 {
                     $project: {
@@ -268,7 +284,7 @@ export const projectsRouter = router({
             }));
         }),
 
-    reviewWbsVersion: roleProcedure(["manager"])
+    reviewWbsVersion: roleProcedure(["manager", "pm"])
         .input(z.object({
             id: z.string(), // wbsVersion _id
             action: z.enum(approvalActions),

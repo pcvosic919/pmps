@@ -5,6 +5,8 @@ import {
     Building2, Calendar, ChevronLeft, Users, Briefcase, Clock,
     Plus, X, Check, UserPlus, Trash2, FileText, ChevronDown
 } from "lucide-react";
+import { useCurrentUser } from "../lib/useCurrentUser";
+
 
 const OPP_STATUSES = [
     { value: "new", label: "待處理", color: "bg-blue-100 text-blue-800 border-blue-200" },
@@ -20,9 +22,14 @@ export function OpportunityDetailPage() {
     const [match, params] = useRoute("/opportunities/:id");
     const id = match ? (params.id as string) : "";
 
+    const { user } = useCurrentUser();
+    const isPMOnly = user?.role === "pm" && !user?.roles?.includes("presales") && !user?.roles?.includes("tech") && !user?.roles?.includes("admin");
+
     // ------ Modal states ------
     const [showAssignModal, setShowAssignModal] = useState(false);
     const [assignTechId, setAssignTechId] = useState("");
+    const [assignTechSearchTerm, setAssignTechSearchTerm] = useState("");
+    const [showAssignSearchDropdown, setShowAssignSearchDropdown] = useState(false);
     const [assignHours, setAssignHours] = useState("8");
     const [assignError, setAssignError] = useState("");
 
@@ -66,7 +73,7 @@ export function OpportunityDetailPage() {
 
     // ------ Mutations ------
     const assignMutation = trpc.opportunities.assignPresales.useMutation({
-        onSuccess: () => { refetchAssignments(); refetchOpp(); setShowAssignModal(false); setAssignTechId(""); setAssignHours("8"); setAssignError(""); },
+        onSuccess: () => { refetchAssignments(); refetchOpp(); setShowAssignModal(false); setAssignTechId(""); setAssignTechSearchTerm(""); setShowAssignSearchDropdown(false); setAssignHours("8"); setAssignError(""); },
         onError: (err) => setAssignError(err.message || "指派失敗")
     });
 
@@ -378,10 +385,12 @@ export function OpportunityDetailPage() {
                 <div className="bg-card border border-border/50 rounded-xl shadow-sm overflow-hidden lg:col-span-2 flex flex-col">
                     <div className="p-4 border-b border-border/50 bg-muted/30 flex justify-between items-center">
                         <h3 className="font-bold flex items-center"><Clock className="w-5 h-5 mr-2 text-primary" />協銷工時紀錄</h3>
-                        <button onClick={() => { setShowTimesheetModal(true); setTsError(""); }}
-                            className="text-xs font-medium text-primary hover:text-primary/80 flex items-center px-2 py-1 rounded hover:bg-primary/10 transition-colors">
-                            <Plus className="w-3 h-3 mr-1" /> 回報工時
-                        </button>
+                        {!isPMOnly && (
+                            <button onClick={() => { setShowTimesheetModal(true); setTsError(""); }}
+                                className="text-xs font-medium text-primary hover:text-primary/80 flex items-center px-2 py-1 rounded hover:bg-primary/10 transition-colors">
+                                <Plus className="w-3 h-3 mr-1" /> 回報工時
+                            </button>
+                        )}
                     </div>
                     <div className="p-4">
                         {timesheets && timesheets.length > 0 ? (
@@ -413,10 +422,12 @@ export function OpportunityDetailPage() {
                             <div className="flex flex-col items-center justify-center text-muted-foreground py-12 border-2 border-dashed border-border/50 rounded-xl">
                                 <Clock className="w-8 h-8 opacity-20 mb-2" />
                                 <p className="text-sm">尚無工時紀錄</p>
-                                <button onClick={() => { setShowTimesheetModal(true); setTsError(""); }}
-                                    className="mt-3 text-xs text-primary hover:underline flex items-center">
-                                    <Plus className="w-3 h-3 mr-1" /> 立即回報工時
-                                </button>
+                                {!isPMOnly && (
+                                    <button onClick={() => { setShowTimesheetModal(true); setTsError(""); }}
+                                        className="mt-3 text-xs text-primary hover:underline flex items-center">
+                                        <Plus className="w-3 h-3 mr-1" /> 立即回報工時
+                                    </button>
+                                )}
                             </div>
                         )}
                     </div>
@@ -433,13 +444,43 @@ export function OpportunityDetailPage() {
                             <button onClick={() => setShowAssignModal(false)} className="p-1 rounded-full hover:bg-muted"><X className="w-5 h-5 text-muted-foreground" /></button>
                         </div>
                         <div className="space-y-4">
-                            <div>
+                            <div className="relative">
                                 <label className="block text-sm font-medium mb-1">選擇技術員 / 售前人員</label>
-                                <select value={assignTechId} onChange={e => setAssignTechId(e.target.value)}
-                                    className="w-full border border-border rounded-lg px-3 py-2 bg-background text-sm focus:outline-none focus:ring-2 focus:ring-primary/50">
-                                    <option value="">-- 請選擇 --</option>
-                                    {presalesList?.map((u: any) => <option key={u.id} value={u.id}>{u.name}（{u.role}）</option>)}
-                                </select>
+                                <input
+                                    type="text"
+                                    placeholder="輸入姓名搜尋..."
+                                    value={assignTechSearchTerm}
+                                    onChange={e => {
+                                        setAssignTechSearchTerm(e.target.value);
+                                        setShowAssignSearchDropdown(true);
+                                        if (!e.target.value) setAssignTechId("");
+                                    }}
+                                    onFocus={() => setShowAssignSearchDropdown(true)}
+                                    className="w-full border border-border rounded-lg px-3 py-2 bg-background text-sm focus:outline-none focus:ring-2 focus:ring-primary/50"
+                                />
+                                {showAssignSearchDropdown && (
+                                    <div className="absolute z-10 w-full mt-1 bg-card border border-border rounded-lg shadow-lg max-h-48 overflow-auto">
+                                        {presalesList?.filter((u: any) =>
+                                            u.name.toLowerCase().includes(assignTechSearchTerm.toLowerCase())
+                                        ).map((u: any) => (
+                                            <button
+                                                key={u.id}
+                                                type="button"
+                                                onClick={() => {
+                                                    setAssignTechId(u.id);
+                                                    setAssignTechSearchTerm(`${u.name} (${u.role})`);
+                                                    setShowAssignSearchDropdown(false);
+                                                }}
+                                                className={`w-full text-left px-3 py-2 text-sm hover:bg-muted transition-colors ${assignTechId === u.id ? 'bg-primary/10 text-primary font-medium' : ''}`}
+                                            >
+                                                {u.name} <span className="text-xs text-muted-foreground ml-1">({u.role})</span>
+                                            </button>
+                                        ))}
+                                        {presalesList?.filter((u: any) => u.name.toLowerCase().includes(assignTechSearchTerm.toLowerCase())).length === 0 && (
+                                            <div className="px-3 py-2 text-sm text-muted-foreground">找不到符合的使用者</div>
+                                        )}
+                                    </div>
+                                )}
                             </div>
                             <div>
                                 <label className="block text-sm font-medium mb-1">預估時數（小時）</label>

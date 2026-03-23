@@ -28,9 +28,11 @@ export function WbsManagementPage() {
     const [isDragging, setIsDragging] = useState(false);
     const [isUploading, setIsUploading] = useState(false);
 
-    const { data: sr, isLoading } = trpc.projects.srById.useQuery({ id: srId }, { enabled: !!srId });
+    const { data: sr, isLoading, error } = trpc.projects.srById.useQuery({ id: srId }, { enabled: !!srId });
     const { data: techs } = trpc.users.techList.useQuery();
     const { data: attachments, refetch: refetchAttachments } = trpc.projects.srAttachmentsList.useQuery({ srId }, { enabled: !!srId });
+
+    // Review state...
     
     const reviewMutation = trpc.projects.reviewWbsVersion.useMutation({
         onSuccess: () => {
@@ -59,6 +61,7 @@ export function WbsManagementPage() {
     });
 
     if (isLoading) return <div className="p-8 text-center text-muted-foreground">載入中...</div>;
+    if (error) return <div className="p-8 text-center text-destructive">無法存取：{error.message}</div>;
     if (!sr) return <div className="p-8 text-center text-destructive">找不到該服務請求 (SR)</div>;
 
     const nextVersionNumber = sr.wbsVersions && sr.wbsVersions.length > 0
