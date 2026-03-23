@@ -79,8 +79,11 @@ function ProjectManagementRoute() {
     return <AppLoadingFallback />;
   }
 
-  const canAccess = !!user && (user.role === "manager" || user.role === "pm" || user.roles.includes("manager") || user.roles.includes("pm"));
-  return canAccess ? <ProjectManagementPage /> : <RestrictedPage message="只有 Manager 與 PM 可以檢視專案管理。" />;
+  const canAccess = !!user && (
+    user.role === "manager" || user.role === "pm" || user.role === "tech" ||
+    user.roles.includes("manager") || user.roles.includes("pm") || user.roles.includes("tech")
+  );
+  return canAccess ? <ProjectManagementPage /> : <RestrictedPage message="只有 Manager、PM 與 Tech 可以檢視專案管理。" />;
 }
 
 const activeRoutes: ActiveRouteDefinition[] = [
