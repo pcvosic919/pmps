@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { trpc } from "../lib/trpc";
 import { useMsal } from "@azure/msal-react";
 import { loginRequest } from "../lib/msal";
@@ -43,7 +43,7 @@ const toFriendlyErrorMessage = (message: string) => {
 };
 
 export function LoginPage() {
-    const { instance } = useMsal();
+    const { instance, accounts, inProgress } = useMsal();
     const { setAuthSession } = useAuth();
     
     // Form state
@@ -51,6 +51,7 @@ export function LoginPage() {
     const [password, setPassword] = useState("");
     const [error, setError] = useState("");
     const [isLoading, setIsLoading] = useState(false);
+    const [isProcessingMsal, setIsProcessingMsal] = useState(false);
 
     // Mutations
     const { data: demoStatus } = trpc.auth.demoStatus.useQuery(undefined, {
@@ -69,6 +70,26 @@ export function LoginPage() {
         setAuthSession(payload.token, payload.user ?? null);
         window.location.href = "/";
     };
+
+    // Auto-login logic for MSAL redirect flow
+    useEffect(() => {
+        if (inProgress === "none" && accounts.length > 0 && !isProcessingMsal && !error) {
+            setIsProcessingMsal(true);
+            setIsLoading(true);
+            const account = accounts[0];
+            instance.acquireTokenSilent({ ...loginRequest, account })
+                .then(async (tokenResponse) => {
+                    if (tokenResponse?.accessToken) {
+                        const res = await entraLoginMutation.mutateAsync({ accessToken: tokenResponse.accessToken });
+                        handleLoginSuccess(res);
+                    }
+                })
+                .catch((err: any) => {
+                    setError(toFriendlyErrorMessage(err.message || ""));
+                    setIsLoading(false);
+                });
+        }
+    }, [inProgress, accounts, instance, isProcessingMsal, error]);
 
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
@@ -108,27 +129,9 @@ export function LoginPage() {
         setError("");
         setIsLoading(true);
         try {
-            const loginResponse = await instance.loginPopup(loginRequest);
-            const account = loginResponse.account;
-            const tokenResponse = loginResponse.accessToken
-                ? loginResponse
-                : account
-                    ? await instance.acquireTokenSilent({ ...loginRequest, account })
-                        .catch(() => instance.acquireTokenPopup({ ...loginRequest, account }))
-                    : null;
-
-            const accessToken = tokenResponse?.accessToken;
-            if (!accessToken) {
-                throw new Error("無法取得 Microsoft access token");
-            }
-
-            const res = await entraLoginMutation.mutateAsync({ accessToken });
-            handleLoginSuccess(res);
+            await instance.loginRedirect(loginRequest);
         } catch (err: any) {
-            if (err.name !== "BrowserAuthError") { // 略過使用者取消登入
-                setError(toFriendlyErrorMessage(err.message || ""));
-            }
-        } finally {
+            setError(toFriendlyErrorMessage(err.message || ""));
             setIsLoading(false);
         }
     };
