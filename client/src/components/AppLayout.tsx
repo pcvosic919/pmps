@@ -176,12 +176,12 @@ export function AppLayout({ children }: AppLayoutProps) {
             <Link key={item.href} href={item.href}>
                 <a
                     className={cn(
-                        "flex items-center rounded-md transition-colors",
+                        "flex items-center rounded-lg transition-all duration-200 group",
                         compact
-                            ? "justify-center px-0 py-2"
+                            ? "justify-center px-0 py-2.5"
                             : "mx-2 px-4 py-2",
                         isActive
-                            ? "bg-primary text-primary-foreground"
+                            ? "bg-primary text-primary-foreground shadow-sm"
                             : "text-muted-foreground hover:bg-muted hover:text-foreground"
                     )}
                 >
@@ -210,7 +210,7 @@ export function AppLayout({ children }: AppLayoutProps) {
                 </div>
                 <button
                     onClick={() => mobile ? setMobileSidebarOpen(false) : setSidebarOpen(!sidebarOpen)}
-                    className="p-1 rounded-md hover:bg-muted text-muted-foreground"
+                    className="p-1.5 rounded-lg hover:bg-muted text-muted-foreground transition-colors"
                     aria-label={mobile ? "關閉導覽" : "切換導覽列"}
                 >
                     {mobile ? <X className="w-5 h-5" /> : <Menu className="w-5 h-5" />}
@@ -277,7 +277,7 @@ export function AppLayout({ children }: AppLayoutProps) {
 
             <aside
                 className={cn(
-                    "hidden md:flex bg-card border-r border-border transition-all duration-300 flex-col",
+                    "hidden md:flex bg-card border-r border-border shadow-sm transition-all duration-300 flex-col relative z-20",
                     sidebarOpen ? "w-72" : "w-20"
                 )}
             >
@@ -294,7 +294,7 @@ export function AppLayout({ children }: AppLayoutProps) {
             </aside>
 
             <div className="flex-1 flex flex-col overflow-hidden min-w-0">
-                <header className="min-h-14 bg-card border-b border-border px-4 md:px-6 py-3 flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+                <header className="min-h-14 bg-card/95 backdrop-blur-sm border-b border-border px-4 md:px-6 py-3 flex flex-col gap-3 md:flex-row md:items-center md:justify-between sticky top-0 z-10 shadow-sm">
                     <div className="flex items-start gap-3 md:items-center md:flex-1 md:min-w-0">
                         <button
                             type="button"
