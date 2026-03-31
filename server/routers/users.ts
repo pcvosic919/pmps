@@ -4,7 +4,7 @@ import { UserModel } from "../models/User";
 import { TRPCError } from "@trpc/server";
 import { roles } from "../../shared/types";
 import { decodeCursor, encodeCursor, toObjectId } from "../_core/cursor";
-import { assertEntraSyncConfigured, fetchEntraUsers, getEntraSettings } from "../_core/entra";
+import { assertEntraSyncConfigured, getEntraSettings, syncEntraUsersJob } from "../_core/entra";
 
 const userSortFields = ["name", "email", "role", "createdAt"] as const;
 
@@ -149,60 +149,12 @@ export const usersRouter = router({
             const settings = await getEntraSettings();
             assertEntraSyncConfigured(settings);
 
-            const directoryUsers = await fetchEntraUsers(settings);
-            const syncCandidates = directoryUsers.filter((user) => {
-                const email = user.mail || user.userPrincipalName;
-                return !!email;
-            });
-
-            let created = 0;
-            let updated = 0;
-            let disabled = 0;
-
-            for (const directoryUser of syncCandidates) {
-                const email = (directoryUser.mail || directoryUser.userPrincipalName || "").trim().toLowerCase();
-                const existingUser = await UserModel.findOne({
-                    $or: [{ providerId: directoryUser.id }, { email }]
-                });
-
-                const nextIsActive = directoryUser.accountEnabled ?? true;
-                if (!nextIsActive) {
-                    disabled += 1;
-                }
-
-                const payload = {
-                    email,
-                    name: directoryUser.displayName || email,
-                    department: directoryUser.department || "",
-                    title: directoryUser.jobTitle || "",
-                    provider: "entra" as const,
-                    providerId: directoryUser.id,
-                    isActive: nextIsActive
-                };
-
-                if (existingUser) {
-                    await UserModel.updateOne(
-                        { _id: existingUser._id },
-                        { $set: payload }
-                    );
-                    updated += 1;
-                } else {
-                    await UserModel.create({
-                        ...payload,
-                        role: "user",
-                        roles: []
-                    });
-                    created += 1;
-                }
+            const result = await syncEntraUsersJob();
+            if (!result) {
+                throw new TRPCError({ code: "PRECONDITION_FAILED", message: "Entra ID sync is not configured properly." });
             }
 
-            return {
-                totalFetched: directoryUsers.length,
-                totalSynced: syncCandidates.length,
-                created,
-                updated,
-                disabled
-            };
+            return result;
         }),
 
     updateBatchRoles: roleProcedure(["admin"])

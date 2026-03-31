@@ -18,7 +18,7 @@ const SR_STATUSES = [
 type SRStatus = typeof SR_STATUSES[number]["value"];
 
 export function ProjectManagementPage() {
-    const { user } = useCurrentUser();
+    const { user, hasRole } = useCurrentUser();
     const isManager = !!user && (user.role === "manager" || user.roles.includes("manager"));
     const [search, setSearch] = useState("");
     const [filterStatus, setFilterStatus] = useState<string>("all");
@@ -172,12 +172,14 @@ export function ProjectManagementPage() {
                                                 </button>
                                             </div>
                                         ) : (
-                                            <button
-                                                onClick={() => setChangingStatus(sr.id)}
-                                                className="px-3 py-1.5 text-xs border border-border rounded-lg hover:bg-muted transition-colors text-muted-foreground whitespace-nowrap"
-                                            >
-                                                更改狀態
-                                            </button>
+                                            (isManager || hasRole("admin") || user?.id === sr.pmId) && (
+                                                <button
+                                                    onClick={() => setChangingStatus(sr.id)}
+                                                    className="px-3 py-1.5 text-xs border border-border rounded-lg hover:bg-muted transition-colors text-muted-foreground whitespace-nowrap"
+                                                >
+                                                    更改狀態
+                                                </button>
+                                            )
                                         )}
                                     </div>
                                     <Link href={`/service-requests/${sr.id}`}>

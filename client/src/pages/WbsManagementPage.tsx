@@ -10,10 +10,15 @@ export function WbsManagementPage() {
     const [, params] = useRoute("/service-requests/:id");
     const srId = params?.id || "";
     const utils = trpc.useContext();
-    const { hasRole } = useCurrentUser();
+    const { hasRole, user } = useCurrentUser();
 
     const [isBuildingVersion, setIsBuildingVersion] = useState(false);
-    const [draftItems, setDraftItems] = useState<{ title: string, estimatedHours: number, assigneeId: string | undefined }[]>([]);
+    const [draftItems, setDraftItems] = useState<{ title: string, estimatedHours: number, assigneeId: string | undefined, startDate?: Date, endDate?: Date, completionPercentage?: number, colorCode?: string }[]>([]);
+
+    // View settings
+    const [isDaysMode, setIsDaysMode] = useState(false);
+    const displayHours = (h: number) => isDaysMode ? (h / 8).toFixed(1) + ' 天' : h + ' 小時';
+    const displayHoursShort = (h: number) => isDaysMode ? (h / 8).toFixed(1) + 'd' : h + 'h';
 
     // Review state
     const [reviewingId, setReviewingId] = useState<string | null>(null);
@@ -28,8 +33,13 @@ export function WbsManagementPage() {
     const [isDragging, setIsDragging] = useState(false);
     const [isUploading, setIsUploading] = useState(false);
 
+    // Issue Management state
+    const [isCreatingIssue, setIsCreatingIssue] = useState(false);
+    const [newIssueData, setNewIssueData] = useState({ title: "", description: "", priority: "medium", assigneeId: "" });
+
     const { data: sr, isLoading, error } = trpc.projects.srById.useQuery({ id: srId }, { enabled: !!srId });
     const { data: techs } = trpc.users.techList.useQuery();
+    const { data: allUsers } = trpc.users.list.useQuery({ limit: 500 });
     const { data: attachments, refetch: refetchAttachments } = trpc.projects.srAttachmentsList.useQuery({ srId }, { enabled: !!srId });
 
     // Review state...
@@ -60,6 +70,24 @@ export function WbsManagementPage() {
         }
     });
 
+    const { data: issues, refetch: refetchIssues } = trpc.issues.listBySr.useQuery({ srId }, { enabled: !!srId });
+
+    const createIssueMutation = trpc.issues.create.useMutation({
+        onSuccess: () => {
+            refetchIssues();
+            setIsCreatingIssue(false);
+            setNewIssueData({ title: "", description: "", priority: "medium", assigneeId: "" });
+            toast.success("專案議題已建立");
+        }
+    });
+
+    const updateIssueMutation = trpc.issues.update.useMutation({
+        onSuccess: () => {
+            refetchIssues();
+            toast.success("專案議題狀態已更新");
+        }
+    });
+
     if (isLoading) return <div className="p-8 text-center text-muted-foreground">載入中...</div>;
     if (error) return <div className="p-8 text-center text-destructive">無法存取：{error.message}</div>;
     if (!sr) return <div className="p-8 text-center text-destructive">找不到該服務請求 (SR)</div>;
@@ -86,6 +114,15 @@ export function WbsManagementPage() {
         return map[status] || status;
     };
 
+    const getActionMeta = (action: string) => {
+        switch(action) {
+            case 'submitted': return { text: '提交版本', color: 'text-blue-600', bg: 'bg-blue-400' };
+            case 'approved': return { text: '核准版本', color: 'text-emerald-600', bg: 'bg-emerald-400' };
+            case 'rejected': return { text: '退回版本', color: 'text-rose-600', bg: 'bg-rose-400' };
+            default: return { text: action, color: 'text-gray-600', bg: 'bg-gray-400' };
+        }
+    };
+
     const handleAddDraftItem = () => setDraftItems([...draftItems, { title: "", estimatedHours: 4, assigneeId: undefined }]);
     const handleUpdateDraftItem = (index: number, field: string, value: any) => {
         const newItems = [...draftItems];
@@ -98,7 +135,11 @@ export function WbsManagementPage() {
             setDraftItems(latestVersion.items.map((item: any) => ({
                 title: item.title,
                 estimatedHours: item.estimatedHours,
-                assigneeId: item.assigneeId
+                assigneeId: item.assigneeId,
+                startDate: item.startDate ? new Date(item.startDate) : undefined,
+                endDate: item.endDate ? new Date(item.endDate) : undefined,
+                completionPercentage: item.completionPercentage || 0,
+                colorCode: item.colorCode || "#E2E8F0"
             })));
         } else {
             setDraftItems([]);
@@ -131,6 +172,30 @@ export function WbsManagementPage() {
         if (draftItems.length === 0) { toast.error("請至少新增一項任務"); return; }
         if (draftItems.some(i => !i.title || i.estimatedHours <= 0)) { toast.error("請確實填寫項目名稱與工時"); return; }
         submitVersion.mutate({ srId: sr.id, versionNumber: nextVersionNumber, items: draftItems });
+    };
+
+    const handleExportCsv = () => {
+        if (!latestVersion || !latestVersion.items?.length) {
+            toast.error("沒有可匯出的 WBS 版本資料");
+            return;
+        }
+        const headers = ["任務標題", "預估工時 (Hours)", "指派對象", "進度百分比 (%)", "十六進位色彩色標"];
+        const rows = latestVersion.items.map((item: any) => [
+            `"${item.title.replace(/"/g, '""')}"`,
+            item.estimatedHours,
+            `"${techs?.find(t => t.id === item.assigneeId)?.name || '未指派'}"`,
+            item.completionPercentage || 0,
+            `"${item.colorCode || '#E2E8F0'}"`
+        ]);
+        const csvContent = "data:text/csv;charset=utf-8,\uFEFF" + [headers.join(","), ...rows.map((r: any[]) => r.join(","))].join("\n");
+        const encodedUri = encodeURI(csvContent);
+        const link = document.createElement("a");
+        link.setAttribute("href", encodedUri);
+        link.setAttribute("download", `WBS_Export_SR${sr.id}_v${latestVersion.version}.csv`);
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        toast.success("WBS 已成功匯出");
     };
 
     // File upload (Mock implementation)
@@ -241,6 +306,47 @@ export function WbsManagementPage() {
                             </div>
                         )}
                     </div>
+
+                    {/* Issues Tracking Area */}
+                    <div className="bg-card border border-border rounded-xl p-5 shadow-sm">
+                        <div className="flex justify-between items-center mb-3">
+                            <h3 className="font-semibold text-base flex items-center"><AlertCircle className="w-4 h-4 mr-2 text-primary" />專案議題追蹤</h3>
+                            <button onClick={() => setIsCreatingIssue(true)} className="p-1.5 hover:bg-muted bg-primary/10 rounded-lg text-primary transition-colors"><Plus className="w-4 h-4" /></button>
+                        </div>
+                        {issues && issues.length > 0 ? (
+                            <div className="space-y-3 max-h-[400px] overflow-y-auto pr-1">
+                                {issues.map((i: any) => (
+                                    <div key={i.id} className="p-3 border border-border rounded-lg bg-background text-sm hover:border-primary/40 transition-colors">
+                                        <div className="flex justify-between items-start mb-2">
+                                            <span className="font-bold truncate text-[13px]" title={i.title}>{i.title}</span>
+                                            <select 
+                                                value={i.status} 
+                                                onChange={e => updateIssueMutation.mutate({ id: i.id, status: e.target.value as any })}
+                                                className={`text-[10px] px-1.5 py-0.5 rounded border font-semibold outline-none focus:ring-2 focus:ring-primary/30 ${i.status === 'resolved' || i.status === 'closed' ? 'bg-green-100 text-green-700 border-green-200' : 'bg-amber-100 text-amber-700 border-amber-200'}`}
+                                            >
+                                                <option value="open">待處理 (Open)</option>
+                                                <option value="in_progress">處理中 (WIP)</option>
+                                                <option value="resolved">已解決 (Resolved)</option>
+                                                <option value="closed">已結案 (Closed)</option>
+                                            </select>
+                                        </div>
+                                        <p className="text-xs text-muted-foreground line-clamp-2 leading-relaxed">{i.description}</p>
+                                        <div className="flex justify-between items-center mt-3 text-[10px] text-muted-foreground border-t border-border/50 pt-2">
+                                            <div className="flex items-center gap-2">
+                                                <span className={`px-1 rounded font-medium ${i.priority === 'critical' ? 'bg-red-100 text-red-600' : i.priority === 'high' ? 'bg-orange-100 text-orange-600' : 'bg-muted'}`}>
+                                                    {i.priority.toUpperCase()}
+                                                </span>
+                                                <span className="bg-muted px-1.5 py-0.5 rounded border border-border/50 text-foreground">指派: {i.assigneeId?.name || "未分派"}</span>
+                                            </div>
+                                            <span>{new Date(i.createdAt).toLocaleDateString()}</span>
+                                        </div>
+                                    </div>
+                                ))}
+                            </div>
+                        ) : (
+                            <div className="text-center p-6 border border-dashed rounded-lg bg-background text-xs text-muted-foreground">目前專案運作良好，尚無未結案之議題。</div>
+                        )}
+                    </div>
                 </div>
 
                 {/* Right Column: Versions */}
@@ -249,10 +355,23 @@ export function WbsManagementPage() {
                         <>
                             <div className="flex justify-between items-center bg-card p-4 rounded-xl shadow-sm border border-border">
                                 <h3 className="font-bold text-lg flex items-center"><FileText className="w-5 h-5 mr-2 text-primary" />WBS 版本歷史</h3>
-                                <button onClick={handleStartBuild}
-                                    className="bg-primary text-primary-foreground hover:bg-primary/90 px-4 py-2 rounded-md inline-flex items-center text-sm font-medium transition-colors">
-                                    <Plus className="w-4 h-4 mr-2" />建立 v{nextVersionNumber} 版本
-                                </button>
+                                <div className="flex items-center gap-3">
+                                    <label onClick={() => setIsDaysMode(!isDaysMode)} className="flex items-center gap-2 cursor-pointer text-sm font-medium mr-2">
+                                        <div className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors ${isDaysMode ? 'bg-primary' : 'bg-muted border border-border'}`}>
+                                            <span className={`inline-block h-4 w-4 rounded-full bg-white transition-transform ${isDaysMode ? 'translate-x-[18px]' : 'translate-x-0.5'}`} />
+                                        </div>
+                                        <span className="text-muted-foreground">{isDaysMode ? '人天模式 (Days)' : '人時模式 (Hours)'}</span>
+                                    </label>
+                                    <button onClick={handleExportCsv} className="bg-muted text-foreground hover:bg-muted/80 border px-3 py-1.5 rounded-md inline-flex items-center text-sm font-medium transition-colors shadow-sm">
+                                        匯出 CSV
+                                    </button>
+                                    {(!latestVersion || latestVersion.status !== "submitted") && (hasRole("admin") || hasRole("manager") || hasRole("tech") || hasRole("presales") || user?.id === sr.pmId) && (
+                                        <button onClick={handleStartBuild}
+                                            className="bg-primary text-primary-foreground hover:bg-primary/90 px-4 py-1.5 rounded-md inline-flex items-center text-sm font-medium transition-colors shadow-sm">
+                                            <Plus className="w-4 h-4 mr-1.5" />建立 v{nextVersionNumber} 
+                                        </button>
+                                    )}
+                                </div>
                             </div>
 
                             <div className="space-y-3">
@@ -285,7 +404,7 @@ export function WbsManagementPage() {
                                                     </div>
                                                     <div className="flex items-center text-sm text-muted-foreground space-x-4">
                                                         <span className="flex items-center"><Clock className="w-3.5 h-3.5 mr-1" />{new Date(version.createdAt).toLocaleDateString()}</span>
-                                                        <span>總預估工時: <span className="font-medium text-foreground">{version.totalEstimatedHours || 0}</span> 小時</span>
+                                                        <span>總預估工量: <span className="font-medium text-foreground">{displayHours(version.totalEstimatedHours || 0)}</span></span>
                                                     </div>
                                                     {version.rejectionReason && (
                                                         <div className="mt-2 flex items-start gap-2 text-sm text-red-600 bg-red-50 dark:bg-red-950/30 px-3 py-2 rounded-lg">
@@ -294,7 +413,7 @@ export function WbsManagementPage() {
                                                         </div>
                                                     )}
                                                 </div>
-                                                {version.status === "submitted" && (hasRole("manager") || hasRole("pm")) && (
+                                                {version.status === "submitted" && (hasRole("admin") || hasRole("manager") || user?.id === sr.pmId) && (
                                                     <div className="flex gap-2">
                                                         {reviewingId === version.id ? (
                                                             <span className="text-xs text-muted-foreground animate-pulse">處理中...</span>
@@ -319,6 +438,34 @@ export function WbsManagementPage() {
                                                     </div>
                                                 )}
                                             </div>
+
+                                            {version.auditLogs && version.auditLogs.length > 0 && (
+                                                <div className="mt-2 pt-3 border-t border-border">
+                                                    <h4 className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider mb-2">審核歷程 (Audit Logs)</h4>
+                                                    <div className="space-y-3 pl-1">
+                                                        {version.auditLogs.map((log: any, i: number) => {
+                                                            const user = allUsers?.items?.find(u => u.id === log.userId);
+                                                            const meta = getActionMeta(log.action);
+                                                            return (
+                                                                <div key={i} className="text-xs relative">
+                                                                    {i !== version.auditLogs.length - 1 && (
+                                                                        <div className="absolute left-[3px] top-3 w-[1.5px] h-full bg-border" />
+                                                                    )}
+                                                                    <div className="flex items-start gap-2 relative z-10">
+                                                                        <div className={`mt-0.5 w-2 h-2 rounded-full ${meta.bg} flex-shrink-0 shadow-sm ring-2 ring-background`} />
+                                                                        <div className="flex-1 -mt-0.5">
+                                                                            <span className="font-medium mr-1 text-foreground">{user?.name || log.userId}</span>
+                                                                            <span className={meta.color}>{meta.text}</span>
+                                                                            <span className="text-[10px] text-muted-foreground ml-2 bg-muted/50 px-1.5 py-0.5 rounded">{new Date(log.timestamp).toLocaleString()}</span>
+                                                                            {log.reason && <p className="text-muted-foreground mt-1 bg-muted/30 border border-border/50 p-1.5 rounded text-[11px] leading-relaxed">原因：{log.reason}</p>}
+                                                                        </div>
+                                                                    </div>
+                                                                </div>
+                                                            )
+                                                        })}
+                                                    </div>
+                                                </div>
+                                            )}
 
                                             {comparison && (
                                                 <div className="grid gap-2 sm:grid-cols-3">
@@ -345,29 +492,40 @@ export function WbsManagementPage() {
 
                                                         return (
                                                             <div key={item.id} className={`
-                                                                text-sm flex justify-between items-center bg-background border p-2 rounded hover:shadow-sm transition-shadow
-                                                                ${isAdded ? "border-emerald-300 bg-emerald-50/60" : "border-border"}
+                                                                text-sm flex justify-between items-center border p-2 rounded hover:shadow-sm transition-shadow relative overflow-hidden
+                                                                ${isAdded ? "border-emerald-300 bg-emerald-50/60" : "border-border bg-background"}
                                                             `}>
-                                                                <div>
+                                                                {item.colorCode && (
+                                                                    <div className="absolute left-0 top-0 bottom-0 w-1.5" style={{ backgroundColor: item.colorCode }} />
+                                                                )}
+                                                                <div className="pl-2">
                                                                     <div className="font-medium flex items-center gap-2">
                                                                         {item.title}
                                                                         {isAdded && <span className="rounded bg-emerald-100 px-1.5 py-0.5 text-[10px] font-semibold text-emerald-700">新增</span>}
                                                                         {assigneeChanged && <span className="rounded bg-blue-100 px-1.5 py-0.5 text-[10px] font-semibold text-blue-700">改派</span>}
                                                                     </div>
-                                                                    {compareItem && assigneeChanged && (
-                                                                        <div className="mt-1 text-[11px] text-muted-foreground">
-                                                                            指派變更：{techs?.find(t => t.id === compareItem.assigneeId)?.name || "未指派"} → {techs?.find(t => t.id === item.assigneeId)?.name || "未指派"}
+                                                                    <div className="mt-1.5 flex items-center gap-2 w-48">
+                                                                        <div className="h-1.5 w-full bg-muted rounded-full overflow-hidden">
+                                                                            <div className="h-full bg-primary transition-all" style={{ width: `${item.completionPercentage || 0}%`, backgroundColor: item.colorCode || 'hsl(var(--primary))' }} />
                                                                         </div>
-                                                                    )}
+                                                                        <span className="text-[10px] text-muted-foreground font-mono">{item.completionPercentage || 0}%</span>
+                                                                    </div>
                                                                 </div>
-                                                                <div className="flex items-center gap-4 text-xs text-muted-foreground">
+                                                                <div className="flex items-center gap-4 text-xs text-muted-foreground z-10">
                                                                     {hourDiff !== null && hourDiff !== 0 && (
                                                                         <span className={`font-bold px-1.5 py-0.5 rounded flex items-center text-[10px] ${hourDiff > 0 ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'}`}>
-                                                                            {hourDiff > 0 ? '+' : ''}{hourDiff}h
+                                                                            {hourDiff > 0 ? '+' : ''}{displayHoursShort(hourDiff)}
                                                                         </span>
                                                                     )}
-                                                                    <span>工時: {item.estimatedHours}h</span>
-                                                                    <span className="min-w-[60px] text-right">{techs?.find(t => t.id === item.assigneeId)?.name || '未指派'}</span>
+                                                                    <span className="bg-muted px-1.5 py-0.5 rounded font-mono">{displayHoursShort(item.estimatedHours)}</span>
+                                                                    <div className="flex flex-col items-end gap-1">
+                                                                        <span className="min-w-[60px] text-right">{techs?.find(t => t.id === item.assigneeId)?.name || '未指派'}</span>
+                                                                        {(item.startDate || item.endDate) && (
+                                                                            <span className="text-[9px] text-muted-foreground bg-primary/5 border border-primary/10 px-1 rounded whitespace-nowrap">
+                                                                                {item.startDate ? new Date(item.startDate).toLocaleDateString() : '未定'} ~ {item.endDate ? new Date(item.endDate).toLocaleDateString() : '未定'}
+                                                                            </span>
+                                                                        )}
+                                                                    </div>
                                                                 </div>
                                                             </div>
                                                         );
@@ -426,9 +584,24 @@ export function WbsManagementPage() {
                                                         onChange={(e) => handleUpdateDraftItem(idx, 'title', e.target.value)}
                                                         className="w-full text-sm font-medium bg-transparent border-0 border-b border-transparent hover:border-border focus:border-primary focus:ring-0 px-1 py-1 transition-colors outline-none"
                                                     />
-                                                    <div className="flex gap-4">
+                                                    <div className="flex gap-4 items-center">
                                                         <div className="flex items-center text-xs text-muted-foreground">
-                                                            <span className="mr-2">預估(H):</span>
+                                                            <span className="mr-2">色標:</span>
+                                                            <input type="color" value={item.colorCode || "#E2E8F0"}
+                                                                onChange={(e) => handleUpdateDraftItem(idx, 'colorCode', e.target.value)}
+                                                                className="w-12 h-6 p-0 border-0 rounded cursor-pointer ring-1 ring-border"
+                                                            />
+                                                        </div>
+                                                        <div className="flex items-center text-xs text-muted-foreground w-32">
+                                                            <span className="mr-2">進度:</span>
+                                                            <input type="range" min="0" max="100" step="5" value={item.completionPercentage || 0}
+                                                                onChange={(e) => handleUpdateDraftItem(idx, 'completionPercentage', Number(e.target.value))}
+                                                                className="flex-1 accent-primary"
+                                                            />
+                                                            <span className="ml-2 min-w-8 font-mono">{item.completionPercentage || 0}%</span>
+                                                        </div>
+                                                        <div className="flex items-center text-xs text-muted-foreground">
+                                                            <span className="mr-2">預估工量(H):</span>
                                                             <input type="number" min="0.5" step="0.5" value={item.estimatedHours}
                                                                 onChange={(e) => handleUpdateDraftItem(idx, 'estimatedHours', Number(e.target.value))}
                                                                 className="w-16 px-2 py-1 bg-muted rounded border border-transparent focus:bg-background focus:border-primary outline-none"
@@ -442,6 +615,18 @@ export function WbsManagementPage() {
                                                                 <option value="">-- 未指派 --</option>
                                                                 {techs?.map(tech => <option key={tech.id} value={tech.id}>{tech.name}</option>)}
                                                             </select>
+                                                        </div>
+                                                        <div className="flex items-center text-xs text-muted-foreground">
+                                                            <span className="mr-1">排程起訖:</span>
+                                                            <input type="date" value={item.startDate ? typeof item.startDate === "string" ? item.startDate : new Date(item.startDate).toISOString().slice(0, 10) : ""}
+                                                                onChange={(e) => handleUpdateDraftItem(idx, 'startDate', e.target.value)}
+                                                                className="w-28 text-[10px] px-1 py-1 bg-muted rounded border border-transparent focus:bg-background focus:border-primary outline-none"
+                                                            />
+                                                            <span className="mx-1">-</span>
+                                                            <input type="date" value={item.endDate ? typeof item.endDate === "string" ? item.endDate : new Date(item.endDate).toISOString().slice(0, 10) : ""}
+                                                                onChange={(e) => handleUpdateDraftItem(idx, 'endDate', e.target.value)}
+                                                                className="w-28 text-[10px] px-1 py-1 bg-muted rounded border border-transparent focus:bg-background focus:border-primary outline-none"
+                                                            />
                                                         </div>
                                                     </div>
                                                 </div>
@@ -499,6 +684,59 @@ export function WbsManagementPage() {
                                 className="px-4 py-2 text-sm bg-red-500 text-white rounded-lg hover:bg-red-600 transition-colors disabled:opacity-50"
                             >
                                 確認退回
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {/* Create Issue Modal */}
+            {isCreatingIssue && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm shadow-2xl transition-opacity animate-in fade-in">
+                    <div className="bg-card border border-border rounded-xl shadow-2xl w-full max-w-lg mx-4 p-6 space-y-5 animate-in zoom-in-95">
+                        <div className="flex justify-between items-center border-b border-border/50 pb-3">
+                            <h2 className="text-xl font-bold flex items-center tracking-tight"><AlertCircle className="w-5 h-5 mr-2 text-primary" />建立專案追蹤議題</h2>
+                            <button onClick={() => setIsCreatingIssue(false)} className="p-1.5 rounded-full hover:bg-muted bg-muted/50 transition-colors"><X className="w-5 h-5 text-muted-foreground" /></button>
+                        </div>
+                        <div className="space-y-4">
+                            <div>
+                                <label className="block text-sm font-semibold mb-1.5 text-foreground/90">議題標題</label>
+                                <input value={newIssueData.title} onChange={e => setNewIssueData({...newIssueData, title: e.target.value})} placeholder="簡述發生的問題或阻礙" className="w-full border border-input rounded-lg px-3 py-2.5 bg-background text-sm focus:outline-none focus:ring-2 focus:ring-primary/50 transition-shadow" />
+                            </div>
+                            <div>
+                                <label className="block text-sm font-semibold mb-1.5 text-foreground/90">詳細說明與重現步驟</label>
+                                <textarea value={newIssueData.description} onChange={e => setNewIssueData({...newIssueData, description: e.target.value})} rows={4} placeholder="盡可能提供詳細的背景資訊以便釐清問題..." className="w-full border border-input rounded-lg px-3 py-2 bg-background text-sm focus:outline-none focus:ring-2 focus:ring-primary/50 resize-none transition-shadow" />
+                            </div>
+                            <div className="grid grid-cols-2 gap-4">
+                                <div>
+                                    <label className="block text-sm font-semibold mb-1.5 text-foreground/90">優先等級</label>
+                                    <select value={newIssueData.priority} onChange={e => setNewIssueData({...newIssueData, priority: e.target.value})} className="w-full border border-input rounded-lg px-3 py-2.5 bg-background text-sm focus:outline-none focus:ring-2 focus:ring-primary/50 transition-shadow">
+                                        <option value="low">低優先 (Low)</option>
+                                        <option value="medium">一般 (Medium)</option>
+                                        <option value="high">高優先 (High)</option>
+                                        <option value="critical">緊急且阻礙進度 (Critical)</option>
+                                    </select>
+                                </div>
+                                <div>
+                                    <label className="block text-sm font-semibold mb-1.5 text-foreground/90">指派對象</label>
+                                    <select value={newIssueData.assigneeId} onChange={e => setNewIssueData({...newIssueData, assigneeId: e.target.value})} className="w-full border border-input rounded-lg px-3 py-2.5 bg-background text-sm focus:outline-none focus:ring-2 focus:ring-primary/50 transition-shadow">
+                                        <option value="">-- 保留未指派 --</option>
+                                        {techs?.map(t => <option key={t.id} value={t.id}>{t.name} ({t.role})</option>)}
+                                    </select>
+                                </div>
+                            </div>
+                        </div>
+                        <div className="flex justify-end gap-3 mt-6 pt-4 border-t border-border/50">
+                            <button onClick={() => setIsCreatingIssue(false)} className="px-5 py-2 text-sm font-medium border border-border rounded-lg hover:bg-muted transition-colors">取消</button>
+                            <button
+                                onClick={() => {
+                                    if (!newIssueData.title || !newIssueData.description) { toast.error("為確保追蹤品質，標題與說明為必填項目"); return; }
+                                    createIssueMutation.mutate({ srId, ...newIssueData, priority: newIssueData.priority as any, assigneeId: newIssueData.assigneeId || undefined });
+                                }}
+                                disabled={createIssueMutation.isPending}
+                                className="px-5 py-2 text-sm font-medium bg-primary text-primary-foreground rounded-lg hover:bg-primary/90 transition-all active:scale-95 disabled:opacity-50 shadow-sm"
+                            >
+                                確認建立
                             </button>
                         </div>
                     </div>

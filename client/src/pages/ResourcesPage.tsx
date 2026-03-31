@@ -135,13 +135,15 @@ export function ResourcesPage() {
                                     </div>
                                 </div>
                                 <span className="flex h-2 w-2 relative mt-1">
-                                    {utilization > 80 ? (
+                                    {utilization > 100 ? (
                                         <>
-                                            <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-amber-400 opacity-75"></span>
-                                            <span className="relative inline-flex rounded-full h-2 w-2 bg-amber-500" title="高負載"></span>
+                                            <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75"></span>
+                                            <span className="relative inline-flex rounded-full h-2 w-2 bg-red-500" title="超載 (Over-utilized)"></span>
                                         </>
+                                    ) : utilization >= 80 ? (
+                                        <span className="relative inline-flex rounded-full h-2 w-2 bg-green-500" title="滿載 (Optimal)"></span>
                                     ) : (
-                                        <span className="relative inline-flex rounded-full h-2 w-2 bg-green-500" title="正常"></span>
+                                        <span className="relative inline-flex rounded-full h-2 w-2 bg-slate-300 dark:bg-slate-600" title="閒置 (Available)"></span>
                                     )}
                                 </span>
                             </div>
@@ -161,10 +163,10 @@ export function ResourcesPage() {
                                 <div>
                                     <div className="flex justify-between text-sm mb-1">
                                         <span className="text-muted-foreground flex items-center"><LineChart className="w-3.5 h-3.5 mr-1" /> 當月稼動率</span>
-                                        <span className="font-medium text-foreground">{utilization}%</span>
+                                        <span className={`font-bold ${utilization > 100 ? 'text-red-500' : utilization >= 80 ? 'text-green-500' : 'text-foreground'}`}>{utilization}%</span>
                                     </div>
-                                    <div className="w-full bg-muted rounded-full h-2">
-                                        <div className={`h-2 rounded-full ${utilization > 80 ? 'bg-amber-500' : 'bg-green-500'}`} style={{ width: `${utilization}%` }}></div>
+                                    <div className="w-full bg-muted rounded-full h-2 overflow-hidden border border-border/50">
+                                        <div className={`h-full rounded-full ${utilization > 100 ? 'bg-red-500' : utilization >= 80 ? 'bg-green-500' : 'bg-slate-400'}`} style={{ width: `${Math.min(utilization, 100)}%` }}></div>
                                     </div>
                                 </div>
 

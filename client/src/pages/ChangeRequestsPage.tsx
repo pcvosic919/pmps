@@ -23,6 +23,7 @@ const crSchema = z.object({
 export function ChangeRequestsPage() {
     const { data, isLoading, refetch } = trpc.projects.crList.useQuery();
     const { data: srList } = trpc.projects.srList.useQuery();
+    const { data: allUsers } = trpc.users.list.useQuery({ limit: 500 });
     const crs = (data || []) as any[];
     const { hasRole } = useCurrentUser();
 
@@ -100,6 +101,16 @@ export function ChangeRequestsPage() {
         }
     };
 
+    const getCrActionText = (action: string) => {
+        switch(action) {
+            case 'created': return '發起申請';
+            case 'business_approved': return '業務核准';
+            case 'manager_approved': return '主管/系統核准';
+            case 'rejected': return '已退回';
+            default: return action;
+        }
+    };
+
     if (isLoading) {
         return <div className="p-8 text-center text-muted-foreground">載入中...</div>;
     }
@@ -111,12 +122,14 @@ export function ChangeRequestsPage() {
                     <h2 className="text-3xl font-bold tracking-tight bg-clip-text text-transparent bg-gradient-to-r from-primary to-primary/60">變更請求 (CR) 管理</h2>
                     <p className="text-muted-foreground mt-1">追蹤專案範圍調整與額外工時審核狀況</p>
                 </div>
-                <button 
-                    onClick={() => setIsCreating(true)}
-                    className="bg-primary text-primary-foreground hover:bg-primary/90 px-5 py-2.5 rounded-lg inline-flex items-center text-sm font-medium transition-all shadow-md hover:shadow-lg">
-                    <Plus className="w-4 h-4 mr-2" />
-                    發起 CR
-                </button>
+                {(hasRole("admin") || hasRole("manager") || hasRole("pm") || hasRole("tech") || hasRole("presales")) && (
+                    <button 
+                        onClick={() => setIsCreating(true)}
+                        className="bg-primary text-primary-foreground hover:bg-primary/90 px-5 py-2.5 rounded-lg inline-flex items-center text-sm font-medium transition-all shadow-md hover:shadow-lg">
+                        <Plus className="w-4 h-4 mr-2" />
+                        發起 CR
+                    </button>
+                )}
             </div>
 
             <div className="flex gap-4">
@@ -213,6 +226,25 @@ export function ChangeRequestsPage() {
                                                     <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold border ${getStatusColor(cr.status)}`}>
                                                         {getStatusLabel(cr.status)}
                                                     </span>
+                                                    {cr.auditLogs && cr.auditLogs.length > 0 && (
+                                                        <div className="mt-3 space-y-2">
+                                                            {cr.auditLogs.map((log: any, idx: number) => {
+                                                                const user = allUsers?.items?.find((u: any) => u.id === log.userId);
+                                                                return (
+                                                                    <div key={idx} className="text-[11px] text-muted-foreground flex items-start gap-1.5 border-l-2 border-border pl-2">
+                                                                        <div className="flex flex-col">
+                                                                            <div className="flex gap-1.5 items-center">
+                                                                                <span className="font-semibold text-foreground/80">{user?.name || log.userId}</span>
+                                                                                <span className={log.action.includes('reject') ? 'text-rose-600' : 'text-primary'}>{getCrActionText(log.action)}</span>
+                                                                            </div>
+                                                                            <span className="text-[9px] opacity-70 leading-none mt-0.5">{new Date(log.timestamp).toLocaleString()}</span>
+                                                                            {log.reason && log.reason !== "發起 CR" && <span className="mt-1 bg-muted/40 p-1 rounded text-xs">📝 {log.reason}</span>}
+                                                                        </div>
+                                                                    </div>
+                                                                )
+                                                            })}
+                                                        </div>
+                                                    )}
                                                 </td>
                                                 <td className="px-6 py-4 text-center">
                                                     {canReview(cr.status) && (

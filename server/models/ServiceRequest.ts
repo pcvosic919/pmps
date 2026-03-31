@@ -6,19 +6,21 @@ export interface IWbsItem extends Omit<WbsItemInput, "assigneeId"> {
     assigneeId?: mongoose.Types.ObjectId;
 }
 
-export interface IWbsVersion extends Omit<WbsVersionInput, "submittedBy" | "reviewedBy" | "items"> {
+export interface IWbsVersion extends Omit<WbsVersionInput, "submittedBy" | "reviewedBy" | "items" | "auditLogs"> {
     _id: mongoose.Types.ObjectId;
     status: WbsVersionStatus;
     submittedBy?: mongoose.Types.ObjectId;
     reviewedBy?: mongoose.Types.ObjectId;
     items: IWbsItem[];
+    auditLogs?: { action: string; userId: mongoose.Types.ObjectId; timestamp: Date; reason?: string }[];
 }
 
-export interface IChangeRequest extends Omit<ChangeRequestInput, "wbsItemId" | "requesterId"> {
+export interface IChangeRequest extends Omit<ChangeRequestInput, "wbsItemId" | "requesterId" | "auditLogs"> {
     _id: mongoose.Types.ObjectId;
     wbsItemId?: mongoose.Types.ObjectId;
     requesterId: mongoose.Types.ObjectId;
     status: ChangeRequestStatus;
+    auditLogs?: { action: string; userId: mongoose.Types.ObjectId; timestamp: Date; reason?: string }[];
 }
 
 export interface IServiceRequestMember {
@@ -53,7 +55,16 @@ const WbsItemSchema = new Schema<IWbsItem>({
     actualHours: { type: Number, default: 0 },
     startDate: { type: Date },
     endDate: { type: Date },
-    assigneeId: { type: Schema.Types.ObjectId, ref: "User" }
+    assigneeId: { type: Schema.Types.ObjectId, ref: "User" },
+    completionPercentage: { type: Number, default: 0, min: 0, max: 100 },
+    colorCode: { type: String, default: "#E2E8F0" }
+});
+
+const AuditLogSchema = new Schema({
+    action: { type: String, required: true },
+    userId: { type: Schema.Types.ObjectId, ref: "User", required: true },
+    timestamp: { type: Date, default: Date.now },
+    reason: { type: String }
 });
 
 const WbsVersionSchema = new Schema<IWbsVersion>({
@@ -63,6 +74,7 @@ const WbsVersionSchema = new Schema<IWbsVersion>({
     submittedBy: { type: Schema.Types.ObjectId, ref: "User" },
     reviewedBy: { type: Schema.Types.ObjectId, ref: "User" },
     items: [WbsItemSchema],
+    auditLogs: [AuditLogSchema],
     createdAt: { type: Date, default: Date.now }
 });
 
@@ -74,6 +86,7 @@ const ChangeRequestSchema = new Schema<IChangeRequest>({
     amountAdjustment: { type: Number, default: 0 },
     status: { type: String, enum: changeRequestStatuses, default: "pending_business", required: true },
     rejectionReason: { type: String },
+    auditLogs: [AuditLogSchema],
     createdAt: { type: Date, default: Date.now }
 });
 
@@ -95,6 +108,8 @@ const ServiceRequestSchema = new Schema<IServiceRequest>({
         fileUrl: { type: String, required: true },
         fileSize: { type: Number, required: true },
         mimeType: { type: String, required: true },
+        sharePointDriveId: { type: String },
+        sharePointItemId: { type: String },
         uploadedById: { type: Schema.Types.ObjectId, ref: "User", required: true },
         createdAt: { type: Date, default: Date.now }
     }],

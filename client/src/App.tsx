@@ -28,6 +28,9 @@ const KpiDashboardPage = lazy(() => import("./pages/KpiDashboardPage").then((mod
 const WbsManagementPage = lazy(() => import("./pages/WbsManagementPage").then((module) => ({ default: module.WbsManagementPage })));
 const ChangeRequestsPage = lazy(() => import("./pages/ChangeRequestsPage").then((module) => ({ default: module.ChangeRequestsPage })));
 const DashboardPage = lazy(() => import("./pages/DashboardPage").then((module) => ({ default: module.DashboardPage })));
+const PmDashboardPage = lazy(() => import("./pages/PmDashboardPage").then((module) => ({ default: module.PmDashboardPage })));
+const CalendarPage = lazy(() => import("./pages/CalendarPage").then((module) => ({ default: module.CalendarPage })));
+const ReportBuilderPage = lazy(() => import("./pages/ReportBuilderPage").then((module) => ({ default: module.ReportBuilderPage })));
 const ResourcesPage = lazy(() => import("./pages/ResourcesPage").then((module) => ({ default: module.ResourcesPage })));
 const OpportunityDetailPage = lazy(() => import("./pages/OpportunityDetailPage").then((module) => ({ default: module.OpportunityDetailPage })));
 const ProjectManagementPage = lazy(() => import("./pages/ProjectManagementPage").then((module) => ({ default: module.ProjectManagementPage })));
@@ -99,12 +102,15 @@ const activeRoutes: ActiveRouteDefinition[] = [
   { path: "/opportunities", component: OpportunitiesPage, pageFile: "OpportunitiesPage.tsx", lifecycle: "保留 / 上線", notes: "商機清單。" },
   { path: "/opportunities/:id", component: OpportunityDetailPage, pageFile: "OpportunityDetailPage.tsx", lifecycle: "保留 / 上線", notes: "商機詳情。" },
   { path: "/projects", component: ProjectManagementRoute, pageFile: "ProjectManagementPage.tsx", lifecycle: "保留 / 上線（權限控管）", notes: "正式專案管理入口，僅 Manager / PM 可見。" },
+  { path: "/pm-dashboard", component: PmDashboardPage, pageFile: "PmDashboardPage.tsx", lifecycle: "保留 / 上線", notes: "專案高階儀表板與卡片看板" },
+  { path: "/calendar", component: CalendarPage, pageFile: "CalendarPage.tsx", lifecycle: "保留 / 上線", notes: "技服人員的行事曆排程" },
   { path: "/service-requests", component: ServiceRequestsPage, pageFile: "ServiceRequestsPage.tsx", lifecycle: "保留 / 上線", notes: "SR 清單。" },
   { path: "/service-requests/:id", component: WbsManagementPage, pageFile: "WbsManagementPage.tsx", lifecycle: "保留 / 上線", notes: "SR 對應 WBS 管理。" },
   { path: "/change-requests", component: ChangeRequestsPage, pageFile: "ChangeRequestsPage.tsx", lifecycle: "保留 / 上線", notes: "CR 清單與審核。" },
   { path: "/presales-timesheets", component: PresalesTimesheetsPage, pageFile: "PresalesTimesheetsPage.tsx", lifecycle: "保留 / 上線", notes: "協銷工時填報。" },
   { path: "/project-timesheets", component: ProjectTimesheetsPage, pageFile: "ProjectTimesheetsPage.tsx", lifecycle: "保留 / 上線", notes: "專案工時填報。" },
   { path: "/kpi", component: KpiDashboardPage, pageFile: "KpiDashboardPage.tsx", lifecycle: "保留 / 上線", notes: "KPI 儀表板。" },
+  { path: "/reports", component: ReportBuilderPage, pageFile: "ReportBuilderPage.tsx", lifecycle: "保留 / 上線", notes: "自訂報表產生與匯出。" },
 ];
 
 // `client/src/App.tsx` is the source of truth for routed pages; README and navigation

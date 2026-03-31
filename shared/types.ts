@@ -55,7 +55,8 @@ export const customFieldTypes = [
     "multiselect",
     "date",
     "switch",
-    "url"
+    "url",
+    "textarea"
 ] as const;
 
 export type CustomFieldType = typeof customFieldTypes[number];
@@ -88,6 +89,19 @@ export const wbsVersionStatuses = [
 ] as const;
 
 export type WbsVersionStatus = typeof wbsVersionStatuses[number];
+
+export const issueStatuses = ["open", "in_progress", "resolved", "closed"] as const;
+export type IssueStatus = typeof issueStatuses[number];
+
+export const issuePriorities = ["low", "medium", "high", "critical"] as const;
+export type IssuePriority = typeof issuePriorities[number];
+
+export interface AuditLog {
+    action: string;
+    userId: string;
+    timestamp: Date;
+    reason?: string;
+}
 
 export interface UserSkill {
     category: string;
@@ -126,6 +140,8 @@ export interface ServiceRequestAttachment {
     fileUrl: string;
     fileSize: number;
     mimeType: string;
+    sharePointDriveId?: string;
+    sharePointItemId?: string;
     uploadedById: string;
     createdAt: Date;
 }
@@ -137,6 +153,8 @@ export interface WbsItemInput {
     startDate?: Date;
     endDate?: Date;
     assigneeId?: string;
+    completionPercentage?: number;
+    colorCode?: string;
 }
 
 export interface WbsVersionInput {
@@ -146,6 +164,7 @@ export interface WbsVersionInput {
     submittedBy?: string;
     reviewedBy?: string;
     items: WbsItemInput[];
+    auditLogs?: AuditLog[];
     createdAt: Date;
 }
 
@@ -157,7 +176,27 @@ export interface ChangeRequestInput {
     amountAdjustment: number;
     status: ChangeRequestStatus;
     rejectionReason?: string;
+    auditLogs?: AuditLog[];
     createdAt: Date;
+}
+
+export interface IssueAttachment {
+    fileName: string;
+    fileUrl: string;
+    uploadedAt: Date;
+}
+
+export interface IssueInput {
+    srId: string;
+    title: string;
+    description: string;
+    status: IssueStatus;
+    priority: IssuePriority;
+    assigneeId?: string;
+    reporterId: string;
+    attachments?: IssueAttachment[];
+    createdAt?: Date;
+    updatedAt?: Date;
 }
 
 // Auth schemas

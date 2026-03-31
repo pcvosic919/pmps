@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { router, protectedProcedure, roleProcedure } from "../_core/trpc";
+import { sharePointService } from "../services/SharePointService";
 import { OpportunityModel } from "../models/Opportunity";
 import { SettlementLockModel } from "../models/SettlementLock";
 import { TimesheetModel } from "../models/Timesheet";
@@ -319,8 +320,19 @@ export const opportunitiesRouter = router({
 
 
     getPresalesTimesheetOverview: roleProcedure(["admin", "manager", "pm"])
-        .query(async () => {
-            const items = await TimesheetModel.find({ type: "presales" })
+        .query(async ({ ctx }) => {
+            let userQuery: any = {};
+            if (!hasAnyRole(ctx.user as any, ["admin"]) && hasAnyRole(ctx.user as any, ["manager"]) && ctx.user.department) {
+                const deptUsers = await UserModel.find({ department: ctx.user.department }, { _id: 1 }).lean();
+                const deptUserIds = deptUsers.map(u => u._id);
+                if (deptUserIds.length > 0) {
+                    userQuery = { techId: { $in: deptUserIds } };
+                } else {
+                    return [];
+                }
+            }
+
+            const items = await TimesheetModel.find({ type: "presales", ...userQuery })
                 .populate("opportunityId", "title customerName")
                 .populate("techId", "name email")
                 .sort({ workDate: -1 })
@@ -487,6 +499,31 @@ export const opportunitiesRouter = router({
             return { success: true };
         }),
 
+    updateCustomFields: protectedProcedure
+        .input(z.object({
+            id: z.string(),
+            customFields: z.array(z.object({
+                fieldId: z.string(),
+                value: z.string()
+            }))
+        }))
+        .mutation(async ({ input, ctx }) => {
+            const opportunity = assertFound(
+                await OpportunityModel.findById(input.id)
+                    .select("ownerId members status")
+                    .lean(),
+                "找不到該商機"
+            );
+            assertAuthorized(canManageOpportunity(ctx.user, opportunity), "您沒有權限更新自訂欄位");
+            assertOpportunityNotConverted(opportunity);
+
+            await OpportunityModel.updateOne(
+                { _id: input.id },
+                { $set: { customFields: input.customFields.map((cf) => ({ fieldId: toObjectId(cf.fieldId), value: cf.value })) } }
+            );
+            return { success: true };
+        }),
+
     logPresalesTime: roleProcedure(["tech", "presales", "pm"])
         .input(z.object({
             opportunityId: z.string(),
@@ -540,6 +577,47 @@ export const opportunitiesRouter = router({
             );
 
             await TimesheetModel.deleteOne({ _id: input.id });
+            return { success: true };
+        }),
+
+    uploadAttachment: roleProcedure(["admin", "business", "manager", "presales"])
+        .input(z.object({
+            opportunityId: z.string(),
+            fileName: z.string(),
+            fileSize: z.number(),
+            mimeType: z.string()
+        }))
+        .mutation(async ({ ctx, input }) => {
+            const opp = assertFound(
+                await OpportunityModel.findById(input.opportunityId)
+                    .select("ownerId members presalesAssignments status")
+                    .lean(),
+                "找不到該商機"
+            );
+            assertAuthorized(canManageOpportunity(ctx.user, opp) || hasAnyRole(ctx.user, ["admin", "manager"]), "您沒有權限上傳附件");
+            
+            const spResult = await sharePointService.uploadFile(
+                `OPP-${input.opportunityId}`, 
+                input.fileName, 
+                { size: input.fileSize }, 
+                input.mimeType
+            );
+
+            await OpportunityModel.updateOne(
+                { _id: input.opportunityId },
+                {
+                    $push: {
+                        attachments: {
+                            fileName: input.fileName,
+                            fileUrl: spResult.fileUrl,
+                            sharePointDriveId: spResult.driveId,
+                            sharePointItemId: spResult.itemId,
+                            uploadedById: toObjectId(ctx.user.id),
+                            uploadedAt: new Date()
+                        }
+                    }
+                }
+            );
             return { success: true };
         }),
 });

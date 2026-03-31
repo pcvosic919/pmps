@@ -1,5 +1,6 @@
 import { TRPCError } from "@trpc/server";
 import { SystemSettingModel } from "../models/Settings";
+import { UserModel } from "../models/User";
 
 type RawSettingValue = string | undefined;
 
@@ -137,4 +138,63 @@ export async function fetchEntraUsers(settings: EntraSettings): Promise<EntraDir
     }
 
     return users;
+}
+
+export async function syncEntraUsersJob() {
+    try {
+        const settings = await getEntraSettings();
+        if (!settings.enabled || !settings.clientId || !settings.tenantId || !settings.clientSecret) {
+            return null;
+        }
+
+        const directoryUsers = await fetchEntraUsers(settings);
+        const syncCandidates = directoryUsers.filter((user) => !!(user.mail || user.userPrincipalName));
+
+        let created = 0;
+        let updated = 0;
+        let disabled = 0;
+
+        for (const directoryUser of syncCandidates) {
+            const email = (directoryUser.mail || directoryUser.userPrincipalName || "").trim().toLowerCase();
+            const existingUser = await UserModel.findOne({
+                $or: [{ providerId: directoryUser.id }, { email }]
+            });
+
+            const nextIsActive = directoryUser.accountEnabled ?? true;
+            if (!nextIsActive) disabled += 1;
+
+            const payload = {
+                email,
+                name: directoryUser.displayName || email,
+                department: directoryUser.department || "",
+                title: directoryUser.jobTitle || "",
+                provider: "entra" as const,
+                providerId: directoryUser.id,
+                isActive: nextIsActive
+            };
+
+            if (existingUser) {
+                await UserModel.updateOne({ _id: existingUser._id }, { $set: payload });
+                updated += 1;
+            } else {
+                await UserModel.create({
+                    ...payload,
+                    role: "user",
+                    roles: []
+                });
+                created += 1;
+            }
+        }
+
+        return {
+            totalFetched: directoryUsers.length,
+            totalSynced: syncCandidates.length,
+            created,
+            updated,
+            disabled
+        };
+    } catch (error) {
+        console.error("syncEntraUsersJob failed:", error);
+        throw error;
+    }
 }

@@ -6,17 +6,21 @@ import * as trpcExpress from "@trpc/server/adapters/express";
 import path from "path";
 import mongoose from "mongoose";
 import { appRouter } from "./routers";
+import { copilotApiRouter } from "./api/v1/routes";
 import { createContext } from "./_core/trpc";
 import { connectDB } from "./db";
 import { notificationEvents } from "./_core/events";
 import { verifyNotificationStreamToken } from "./_core/tokens";
 import { encryptPayload, decryptPayload } from "../shared/crypto";
+import { startBackgroundJobs } from "./_core/jobs";
 
 dotenv.config();
 
 const app = express();
 app.use(cors());
 app.use(express.json());
+
+app.use("/api/v1", copilotApiRouter);
 
 app.use("/api/trpc", (req, res, next) => {
     const API_ENCRYPTION_KEY = process.env.API_ENCRYPTION_KEY;
@@ -112,6 +116,7 @@ const PORT = process.env.PORT ? parseInt(process.env.PORT, 10) : 5000;
 
 async function startServer() {
     await connectDB();
+    startBackgroundJobs();
 
     app.listen(PORT, "0.0.0.0", () => {
         console.log(`Server started on port ${PORT}`);

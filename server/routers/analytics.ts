@@ -7,13 +7,19 @@ import { NotificationModel } from "../models/Notification";
 import { SettlementLockModel } from "../models/SettlementLock";
 import { z } from "zod";
 import { settlementTypes } from "../../shared/types";
+import { hasAnyRole } from "../_core/authorization";
 
 const toIdMap = (items: Array<{ _id: unknown; totalHours?: number; totalCost?: number; totalRevenue?: number }>, key: "totalHours" | "totalCost" | "totalRevenue") =>
     new Map(items.map((item) => [item._id?.toString(), item[key] ?? 0]));
 
 export const analyticsRouter = router({
-    getUtilization: roleProcedure(["admin", "manager", "pm"]).query(async () => {
-        const users = await UserModel.find({}, { _id: 1, name: 1, department: 1, role: 1 }).lean();
+    getUtilization: roleProcedure(["admin", "manager", "pm"]).query(async ({ ctx }) => {
+        let userQuery: any = {};
+        if (!hasAnyRole(ctx.user as any, ["admin"]) && hasAnyRole(ctx.user as any, ["manager"]) && ctx.user.department) {
+            userQuery.department = ctx.user.department;
+        }
+
+        const users = await UserModel.find(userQuery, { _id: 1, name: 1, department: 1, role: 1 }).lean();
 
         const now = new Date();
         const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
@@ -54,20 +60,41 @@ export const analyticsRouter = router({
 
     getSettlements: roleProcedure(["admin", "manager"])
         .input(z.object({ month: z.string().optional() }))
-        .query(async ({ input }) => {
+        .query(async ({ input, ctx }) => {
             const currentMonth = input.month || new Date().toISOString().slice(0, 7);
             const startDate = new Date(`${currentMonth}-01T00:00:00.000Z`);
             const endDate = new Date(startDate.getUTCFullYear(), startDate.getUTCMonth() + 1, 0, 23, 59, 59, 999);
 
+            let srQuery: any = {};
+            let oppQuery: any = {};
+            let tsMatchProj: any = { type: "project", workDate: { $gte: startDate, $lte: endDate } };
+            let tsMatchPre: any = { type: "presales", workDate: { $gte: startDate, $lte: endDate } };
+
+            if (!hasAnyRole(ctx.user as any, ["admin"]) && hasAnyRole(ctx.user as any, ["manager"]) && ctx.user.department) {
+                const deptUsers = await UserModel.find({ department: ctx.user.department }, { _id: 1 }).lean();
+                const deptUserIds = deptUsers.map(u => u._id);
+                if (deptUserIds.length > 0) {
+                    srQuery = { pmId: { $in: deptUserIds } };
+                    oppQuery = { ownerId: { $in: deptUserIds } };
+                    tsMatchProj.techId = { $in: deptUserIds };
+                    tsMatchPre.techId = { $in: deptUserIds };
+                } else {
+                    srQuery = { _id: null };
+                    oppQuery = { _id: null };
+                    tsMatchProj.techId = null;
+                    tsMatchPre.techId = null;
+                }
+            }
+
             const [srs, opps, projectCostAgg, presalesCostAgg, locks] = await Promise.all([
-                ServiceRequestModel.find({}, { _id: 1, title: 1, pmId: 1, contractAmount: 1, status: 1 }).lean(),
-                OpportunityModel.find({}, { _id: 1, title: 1, customerName: 1, status: 1 }).lean(),
+                ServiceRequestModel.find(srQuery, { _id: 1, title: 1, pmId: 1, contractAmount: 1, status: 1 }).lean(),
+                OpportunityModel.find(oppQuery, { _id: 1, title: 1, customerName: 1, status: 1 }).lean(),
                 TimesheetModel.aggregate([
-                    { $match: { type: "project", workDate: { $gte: startDate, $lte: endDate } } },
+                    { $match: tsMatchProj },
                     { $group: { _id: "$srId", totalCost: { $sum: "$costAmount" } } }
                 ]),
                 TimesheetModel.aggregate([
-                    { $match: { type: "presales", workDate: { $gte: startDate, $lte: endDate } } },
+                    { $match: tsMatchPre },
                     { $group: { _id: "$opportunityId", totalCost: { $sum: "$costAmount" } } }
                 ]),
                 SettlementLockModel.find({ month: currentMonth }).lean()
@@ -115,9 +142,39 @@ export const analyticsRouter = router({
             return { success: true };
         }),
 
-    getKpiData: roleProcedure(["admin", "manager"]).query(async () => {
+    getKpiData: roleProcedure(["admin", "manager"])
+        .input(z.object({ startDate: z.string().optional(), endDate: z.string().optional() }).optional())
+        .query(async ({ ctx, input }) => {
+        let srMatch: any = {};
+        let oppMatch: any = {};
+        let tsMatch: any = { type: "project" };
+
+        if (input?.startDate && input?.endDate) {
+            const minDate = new Date(input.startDate);
+            const maxDate = new Date(input.endDate);
+            maxDate.setHours(23, 59, 59, 999);
+            srMatch.createdAt = { $gte: minDate, $lte: maxDate };
+            oppMatch.createdAt = { $gte: minDate, $lte: maxDate };
+            tsMatch.workDate = { $gte: minDate, $lte: maxDate };
+        }
+
+        if (!hasAnyRole(ctx.user as any, ["admin"]) && hasAnyRole(ctx.user as any, ["manager"]) && ctx.user.department) {
+            const deptUsers = await UserModel.find({ department: ctx.user.department }, { _id: 1 }).lean();
+            const deptUserIds = deptUsers.map(u => u._id);
+            if (deptUserIds.length > 0) {
+                srMatch = { pmId: { $in: deptUserIds } };
+                oppMatch = { ownerId: { $in: deptUserIds } };
+                tsMatch = { type: "project", techId: { $in: deptUserIds } };
+            } else {
+                srMatch = { pmId: null };
+                oppMatch = { ownerId: null };
+                tsMatch = { type: "project", techId: null };
+            }
+        }
+
         const [srTotals, recentSrs, oppStats, totalCostAgg] = await Promise.all([
             ServiceRequestModel.aggregate([
+                { $match: srMatch },
                 {
                     $group: {
                         _id: null,
@@ -130,11 +187,12 @@ export const analyticsRouter = router({
                     }
                 }
             ]),
-            ServiceRequestModel.find({}, { _id: 1, title: 1, status: 1, contractAmount: 1 })
+            ServiceRequestModel.find(srMatch, { _id: 1, title: 1, status: 1, contractAmount: 1 })
                 .sort({ createdAt: -1, _id: -1 })
                 .limit(5)
                 .lean(),
             OpportunityModel.aggregate([
+                { $match: oppMatch },
                 {
                     $group: {
                         _id: null,
@@ -154,7 +212,7 @@ export const analyticsRouter = router({
                 }
             ]),
             TimesheetModel.aggregate([
-                { $match: { type: "project" } },
+                { $match: tsMatch },
                 { $group: { _id: null, totalCost: { $sum: "$costAmount" } } }
             ])
         ]);
@@ -182,8 +240,20 @@ export const analyticsRouter = router({
         };
     }),
 
-    getWinRateTrend: roleProcedure(["admin", "manager"]).query(async () => {
+    getWinRateTrend: roleProcedure(["admin", "manager"]).query(async ({ ctx }) => {
+        let oppMatch: any = {};
+        if (!hasAnyRole(ctx.user as any, ["admin"]) && hasAnyRole(ctx.user as any, ["manager"]) && ctx.user.department) {
+            const deptUsers = await UserModel.find({ department: ctx.user.department }, { _id: 1 }).lean();
+            const deptUserIds = deptUsers.map(u => u._id);
+            if (deptUserIds.length > 0) {
+                oppMatch = { ownerId: { $in: deptUserIds } };
+            } else {
+                oppMatch = { ownerId: null };
+            }
+        }
+
         const trend = await OpportunityModel.aggregate([
+            { $match: oppMatch },
             {
                 $group: {
                     _id: {
@@ -207,9 +277,14 @@ export const analyticsRouter = router({
         }));
     }),
 
-    getCostVsRevenuePerPerson: roleProcedure(["admin", "manager"]).query(async () => {
+    getCostVsRevenuePerPerson: roleProcedure(["admin", "manager"]).query(async ({ ctx }) => {
+        let userQuery: any = {};
+        if (!hasAnyRole(ctx.user as any, ["admin"]) && hasAnyRole(ctx.user as any, ["manager"]) && ctx.user.department) {
+            userQuery.department = ctx.user.department;
+        }
+
         const [users, costAgg, revenueAgg] = await Promise.all([
-            UserModel.find({}, { _id: 1, name: 1 }).lean(),
+            UserModel.find(userQuery, { _id: 1, name: 1 }).lean(),
             TimesheetModel.aggregate([
                 { $group: { _id: "$techId", totalCost: { $sum: "$costAmount" } } }
             ]),
@@ -258,4 +333,150 @@ export const analyticsRouter = router({
         );
         return { success: true };
     }),
+
+    generateReport: roleProcedure(["admin", "manager"])
+        .input(z.object({
+            reportType: z.enum(["utilization", "settlement", "timesheets"]),
+            startDate: z.string(),
+            endDate: z.string(),
+            department: z.string().optional()
+        }))
+        .query(async ({ ctx, input }) => {
+            const start = new Date(input.startDate);
+            const end = new Date(input.endDate);
+            end.setHours(23, 59, 59, 999);
+
+            if (input.reportType === "timesheets") {
+                let tsMatch: any = { workDate: { $gte: start, $lte: end } };
+                if (!hasAnyRole(ctx.user as any, ["admin"]) && hasAnyRole(ctx.user as any, ["manager"]) && ctx.user.department) {
+                    const deptUsers = await UserModel.find({ department: ctx.user.department }, { _id: 1 }).lean();
+                    tsMatch.techId = { $in: deptUsers.map(u => u._id) };
+                } else if (input.department) {
+                    const deptUsers = await UserModel.find({ department: input.department }, { _id: 1 }).lean();
+                    tsMatch.techId = { $in: deptUsers.map(u => u._id) };
+                }
+                const data = await TimesheetModel.find(tsMatch).populate("techId", "name department").populate("srId", "title").populate("opportunityId", "title").lean();
+                return data.map((d: any) => ({
+                    Date: new Date(d.workDate).toLocaleDateString(),
+                    User: d.techId?.name || "Unknown",
+                    Department: d.techId?.department || "N/A",
+                    Type: d.type === "project" ? "Project" : "Presales",
+                    Target: d.srId?.title || d.opportunityId?.title || "-",
+                    Hours: d.hours,
+                    Description: d.description
+                }));
+            } else if (input.reportType === "utilization") {
+                let userMatch: any = {};
+                if (!hasAnyRole(ctx.user as any, ["admin"]) && hasAnyRole(ctx.user as any, ["manager"]) && ctx.user.department) {
+                    userMatch.department = ctx.user.department;
+                } else if (input.department) {
+                    userMatch.department = input.department;
+                }
+                
+                const users = await UserModel.find(userMatch).lean();
+                const [projectAgg, presalesAgg] = await Promise.all([
+                    TimesheetModel.aggregate([
+                        { $match: { type: "project", workDate: { $gte: start, $lte: end } } },
+                        { $group: { _id: "$techId", totalHours: { $sum: "$hours" } } }
+                    ]),
+                    TimesheetModel.aggregate([
+                        { $match: { type: "presales", workDate: { $gte: start, $lte: end } } },
+                        { $group: { _id: "$techId", totalHours: { $sum: "$hours" } } }
+                    ])
+                ]);
+                const projectHoursMap = new Map(projectAgg.map(i => [i._id?.toString(), i.totalHours]));
+                const presalesHoursMap = new Map(presalesAgg.map(i => [i._id?.toString(), i.totalHours]));
+
+                const daysInterval = Math.max(1, Math.floor((end.getTime() - start.getTime()) / (1000 * 60 * 60 * 24)));
+                const businessDays = daysInterval * (5 / 7);
+                const capacityHours = Math.max(8, businessDays * 8); // At least 1 day length
+
+                return users.map(u => {
+                    const id = u._id.toString();
+                    const proj = projectHoursMap.get(id) || 0;
+                    const pre = presalesHoursMap.get(id) || 0;
+                    const total = proj + pre;
+                    return {
+                        User: u.name,
+                        Department: u.department || "N/A",
+                        Role: u.role,
+                        "Project Hours": proj,
+                        "Presales Hours": pre,
+                        "Total Hours": total,
+                        "Capacity": Math.round(capacityHours),
+                        "Utilization %": Math.round((total / capacityHours) * 100)
+                    };
+                }).filter(u => u["Total Hours"] > 0 || u.Role === "tech" || u.Role === "presales");
+            } else if (input.reportType === "settlement") {
+                let srMatch: any = {};
+                let oppMatch: any = {};
+                
+                if (!hasAnyRole(ctx.user as any, ["admin"]) && hasAnyRole(ctx.user as any, ["manager"]) && ctx.user.department) {
+                    const deptUsers = await UserModel.find({ department: ctx.user.department }, { _id: 1 }).lean();
+                    const deptIds = deptUsers.map(u => u._id);
+                    srMatch.pmId = { $in: deptIds };
+                    oppMatch.ownerId = { $in: deptIds };
+                } else if (input.department) {
+                    const deptUsers = await UserModel.find({ department: input.department }, { _id: 1 }).lean();
+                    const deptIds = deptUsers.map(u => u._id);
+                    srMatch.pmId = { $in: deptIds };
+                    oppMatch.ownerId = { $in: deptIds };
+                }
+
+                const [srs, opps] = await Promise.all([
+                    ServiceRequestModel.find(srMatch).populate("pmId", "name department").lean(),
+                    OpportunityModel.find(oppMatch).populate("ownerId", "name department").lean()
+                ]);
+
+                // Query timesheets spanning the selected period mapped to projects/opportunities
+                const tsMatchProject = { type: "project", workDate: { $gte: start, $lte: end } };
+                const tsMatchPresales = { type: "presales", workDate: { $gte: start, $lte: end } };
+
+                const [projCosts, preCosts] = await Promise.all([
+                    TimesheetModel.aggregate([
+                        { $match: tsMatchProject },
+                        { $group: { _id: "$srId", totalCost: { $sum: "$costAmount" } } }
+                    ]),
+                    TimesheetModel.aggregate([
+                        { $match: tsMatchPresales },
+                        { $group: { _id: "$opportunityId", totalCost: { $sum: "$costAmount" } } }
+                    ])
+                ]);
+
+                const pCostMap = new Map(projCosts.map(i => [i._id?.toString(), i.totalCost]));
+                const oCostMap = new Map(preCosts.map(i => [i._id?.toString(), i.totalCost]));
+
+                const projectRows = srs.map((sr: any) => {
+                    const spent = pCostMap.get(sr._id.toString()) || 0;
+                    return {
+                        Type: "Project",
+                        Name: sr.title,
+                        Owner: sr.pmId?.name || "Unknown",
+                        Department: sr.pmId?.department || "N/A",
+                        Status: sr.status,
+                        "Period Spent": spent,
+                        "Total Value": sr.contractAmount,
+                        "Health Indicator": spent > sr.contractAmount ? "Loss" : "Profit"
+                    };
+                });
+
+                const oppRows = opps.map((opp: any) => {
+                    const spent = oCostMap.get(opp._id.toString()) || 0;
+                    return {
+                        Type: "Opportunity",
+                        Name: opp.title,
+                        Owner: opp.ownerId?.name || "Unknown",
+                        Department: opp.ownerId?.department || "N/A",
+                        Status: opp.status,
+                        "Period Spent": spent,
+                        "Total Value": opp.estimatedValue,
+                        "Health Indicator": opp.status === "won" || opp.status === "converted" ? "Profit" : (spent > 0 ? "Under Negotiation" : "New")
+                    };
+                });
+
+                return [...projectRows, ...oppRows];
+            }
+            
+            return [];
+        }),
 });

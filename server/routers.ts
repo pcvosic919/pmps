@@ -6,6 +6,7 @@ import { analyticsRouter } from "./routers/analytics";
 import { systemRouter } from "./routers/system";
 import { integrationsRouter } from "./routers/integrations";
 import { authRouter } from "./routers/auth";
+import { issuesRouter } from "./routers/issues";
 
 export const appRouter = router({
     auth: authRouter,
@@ -14,7 +15,8 @@ export const appRouter = router({
     projects: projectsRouter,
     analytics: analyticsRouter,
     system: systemRouter,
-    integrations: integrationsRouter
+    integrations: integrationsRouter,
+    issues: issuesRouter
 });
 
 export type AppRouter = typeof appRouter;

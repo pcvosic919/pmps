@@ -1,5 +1,6 @@
 import { hasAnyRole } from "../_core/authorization";
 import { toObjectId, type CursorValue } from "../_core/cursor";
+import { UserModel } from "../models/User";
 
 
 export const opportunitySortFields = ["createdAt", "estimatedValue", "status"] as const;
@@ -48,9 +49,24 @@ export const getAccessibleOpportunityQuery = async (ctxUser: OpportunityListUser
         { "presalesAssignments.techId": userObjectId }
     ];
 
-    // Admin and manager can see ALL records (no filter)
-    if (hasAnyRole(ctxUser as any, ["admin", "manager"])) {
+    // Admin can see ALL records (no filter)
+    if (hasAnyRole(ctxUser as any, ["admin"])) {
         return {};
+    }
+
+    if (hasAnyRole(ctxUser as any, ["manager"]) && ctxUser.department) {
+        const deptUsers = await UserModel.find({ department: ctxUser.department }, { _id: 1 }).lean();
+        const deptUserIds = deptUsers.map(u => u._id);
+        if (deptUserIds.length > 0) {
+            return {
+                $or: [
+                    ...baseAccess,
+                    { ownerId: { $in: deptUserIds } },
+                    { "members.userId": { $in: deptUserIds } },
+                    { "presalesAssignments.techId": { $in: deptUserIds } }
+                ]
+            };
+        }
     }
 
     return { $or: baseAccess };

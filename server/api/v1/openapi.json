@@ -1,0 +1,116 @@
+{
+  "openapi": "3.0.0",
+  "info": {
+    "title": "PMP System Copilot API",
+    "version": "1.0.0",
+    "description": "Standard REST API for Microsoft Copilot Studio Custom Connector integration. Designed to retrieve Semantic, RAG-optimized operational data."
+  },
+  "servers": [
+    {
+      "url": "https://your-pmp-domain.com/api/v1",
+      "description": "Production Server"
+    }
+  ],
+  "components": {
+    "securitySchemes": {
+      "ApiKeyAuth": {
+        "type": "apiKey",
+        "in": "header",
+        "name": "X-API-KEY"
+      }
+    }
+  },
+  "security": [
+    {
+      "ApiKeyAuth": []
+    }
+  ],
+  "paths": {
+    "/projects/active": {
+      "get": {
+        "summary": "Get Active Projects",
+        "description": "Retrieves the highest value active projects and their financial health.",
+        "operationId": "getActiveProjects",
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "id": { "type": "string" },
+                          "projectName": { "type": "string" },
+                          "status": { "type": "string" },
+                          "financials": {
+                            "type": "object",
+                            "properties": {
+                              "contractAmount": { "type": "number" },
+                              "estimatedMarginPercent": { "type": "number" },
+                              "isMarginAtRisk": { "type": "boolean" }
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/opportunities/won": {
+      "get": {
+        "summary": "Get Recently Won Opportunities",
+        "description": "Retrieves business deals that have been marked as won or converted to projects.",
+        "operationId": "getWonOpportunities",
+        "parameters": [
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "default": 10
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response"
+          }
+        }
+      }
+    },
+    "/issues/critical": {
+      "get": {
+        "summary": "Get Critical Project Issues",
+        "description": "Fetches highly severe issues that are actively blocking delivery.",
+        "operationId": "getCriticalIssues",
+        "parameters": [
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "default": 15
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response"
+          }
+        }
+      }
+    }
+  }
+}

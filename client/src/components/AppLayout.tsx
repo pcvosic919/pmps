@@ -1,5 +1,7 @@
 import { useEffect, useState } from "react";
 import { Link, useLocation } from "wouter";
+import { useTranslation } from "react-i18next";
+import { GlobalSearch } from "./GlobalSearch";
 import {
     Activity,
     Bell,
@@ -10,12 +12,15 @@ import {
     CreditCard,
     FileCheck,
     FileSpreadsheet,
+    FileText,
     FolderKanban,
+    Globe,
     Info,
     LayoutDashboard,
     LogOut,
     Menu,
     PieChart,
+    Search,
     Settings,
     Settings2,
     Users,
@@ -74,8 +79,10 @@ const navGroups: NavGroup[] = [
         key: "delivery",
         label: "專案 / 工時",
         items: [
+            { icon: LayoutDashboard, label: "專案總表", href: "/pm-dashboard", roles: ["admin", "manager", "pm"] },
             { icon: FolderKanban, label: "專案管理", href: "/projects", roles: ["admin", "manager", "pm", "tech"] },
-            { icon: CalendarDays, label: "專案工時", href: "/project-timesheets", roles: ["admin", "manager", "pm", "tech"] },
+            { icon: CalendarDays, label: "排程行事曆", href: "/calendar", roles: ["admin", "manager", "pm", "tech"] },
+            { icon: Clock, label: "專案工時", href: "/project-timesheets", roles: ["admin", "manager", "pm", "tech"] },
             { icon: FileCheck, label: "變更單 (CR)", href: "/change-requests", roles: ["admin", "manager", "pm", "tech"] },
         ],
     },
@@ -87,6 +94,7 @@ const navGroups: NavGroup[] = [
             { icon: Activity, label: "稼動率", href: "/utilization", roles: ["admin", "manager"] },
             { icon: PieChart, label: "KPI 儀表板", href: "/kpi", roles: ["admin", "manager"] },
             { icon: FileSpreadsheet, label: "月度結算", href: "/settlements", roles: ["admin", "manager"] },
+            { icon: FileText, label: "自訂報表", href: "/reports", roles: ["admin", "manager"] },
         ],
     },
     {
@@ -119,6 +127,7 @@ export function AppLayout({ children }: AppLayoutProps) {
     const { instance } = useMsal();
     const { clearAuth } = useAuth();
     const { user } = useCurrentUser();
+    const { i18n } = useTranslation();
     const { data: notifications } = trpc.analytics.getNotifications.useQuery(
         { limit: 20 },
         { staleTime: 30_000, refetchOnWindowFocus: true }
@@ -334,6 +343,21 @@ export function AppLayout({ children }: AppLayoutProps) {
                     </div>
 
                     <div className="flex items-center justify-between gap-3 md:justify-end">
+                        <button
+                            onClick={() => {
+                                const nextLng = i18n.language === 'en' ? 'zh' : 'en';
+                                i18n.changeLanguage(nextLng);
+                                localStorage.setItem("pmp_language", nextLng);
+                            }}
+                            className="inline-flex items-center gap-2 rounded-full border border-border px-3 py-1.5 text-sm text-muted-foreground hover:bg-muted font-medium"
+                        >
+                            <Globe className="h-4 w-4" />
+                            <span className="hidden sm:inline">{i18n.language === 'en' ? 'EN' : '中文'}</span>
+                        </button>
+                        <button onClick={() => document.dispatchEvent(new KeyboardEvent('keydown', { key: 'k', metaKey: true }))} className="hidden sm:flex items-center gap-2 rounded-full border border-border px-3 py-1.5 text-sm text-muted-foreground hover:bg-muted font-medium bg-muted/30">
+                            <Search className="h-4 w-4" />
+                            <span className="text-xs border border-border/60 bg-background px-1 py-0.5 rounded shadow-sm opacity-80">⌘K</span>
+                        </button>
                         <Link href="/notifications">
                             <a className="inline-flex items-center gap-2 rounded-full border border-border px-3 py-1.5 text-sm text-muted-foreground hover:bg-muted">
                                 <Bell className="h-4 w-4" />
@@ -401,6 +425,7 @@ export function AppLayout({ children }: AppLayoutProps) {
                     {children}
                 </main>
             </div>
+            <GlobalSearch />
         </div>
     );
 }

@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Settings, Save, Database, Shield, Layout, Bell } from "lucide-react";
+import { Settings, Save, Database, Shield, Layout, Bell, Activity } from "lucide-react";
 import { toast } from "react-hot-toast";
 import { trpc } from "../lib/trpc";
 
@@ -78,6 +78,7 @@ export function SystemSettingsPage() {
                         { key: "security", icon: <Shield className="w-5 h-5" />, label: "安全與存取" },
                         { key: "notifications", icon: <Bell className="w-5 h-5" />, label: "通知與郵件" },
                         { key: "integrations", icon: <Database className="w-5 h-5" />, label: "整合與 API" },
+                        { key: "jobs", icon: <Activity className="w-5 h-5" />, label: "背景作業排程" },
                     ].map(tab => (
                         <button
                             key={tab.key}
@@ -313,6 +314,39 @@ export function SystemSettingsPage() {
                                             className="w-full p-2.5 rounded-lg border border-input bg-background/50 focus:bg-background text-sm"
                                         />
                                         <p className="text-xs text-muted-foreground mt-1">自動同步員工名單與部門資訊</p>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    )}
+
+                    {activeTab === "jobs" && (
+                        <div className="space-y-6">
+                            <h3 className="text-lg font-bold mb-4 border-b pb-2">背景作業與排程監控</h3>
+                            <div className="grid gap-6 max-w-2xl">
+                                <div className="border border-border rounded-xl p-5 bg-card shadow-sm relative overflow-hidden">
+                                    <div className="flex items-start justify-between">
+                                        <div>
+                                            <h4 className="font-bold flex items-center">
+                                                Entra ID 每日人員排程同步
+                                                <span className="ml-3 px-2 py-0.5 rounded text-[10px] font-medium bg-green-100 text-green-700">執行中 (Active)</span>
+                                            </h4>
+                                            <p className="text-sm text-muted-foreground mt-2">
+                                                每日凌晨 02:00 自動從 Microsoft Azure 讀取 Active Directory 異動並更新至本機資料庫。
+                                            </p>
+                                        </div>
+                                    </div>
+                                    <div className="mt-5 border-t border-border/50 pt-4 flex flex-col md:flex-row md:items-center justify-between gap-4">
+                                        <span className="text-xs text-muted-foreground font-mono bg-muted/50 px-2 py-1 rounded">伺服器節點常駐 (Cron: 0 2 * * *)</span>
+                                        <button className="text-sm bg-primary text-primary-foreground px-4 py-2 rounded-lg hover:bg-primary/90 transition-all shadow-sm active:scale-95 whitespace-nowrap" onClick={() => {
+                                            toast.promise(utils.client.users.syncEntraUsers.mutate(), {
+                                                loading: '手動觸發 Graph API 同步中...',
+                                                success: (res: any) => `同步成功 (建立 ${res.created} 筆, 更新 ${res.updated} 筆)`,
+                                                error: '同步失敗，請確認「整合與 API」設定檔'
+                                            });
+                                        }}>
+                                            立即手動觸發
+                                        </button>
                                     </div>
                                 </div>
                             </div>

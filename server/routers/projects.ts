@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { router, protectedProcedure, roleProcedure } from "../_core/trpc";
+import { sharePointService } from "../services/SharePointService";
 import { ServiceRequestModel } from "../models/ServiceRequest";
 import { SettlementLockModel } from "../models/SettlementLock";
 import { TimesheetModel } from "../models/Timesheet";
@@ -51,8 +52,10 @@ const getEffectiveWbsVersion = (sr: any) => {
     }
 
     const approvedVersions = versions.filter((version: any) => version.status === "approved");
-    const source = approvedVersions.length > 0 ? approvedVersions : versions;
-    return source.sort((left: any, right: any) => right.versionNumber - left.versionNumber)[0];
+    if (approvedVersions.length === 0) {
+        return null; // STRICT LOCK: Cannot log time against unapproved WBS
+    }
+    return approvedVersions.sort((left: any, right: any) => right.versionNumber - left.versionNumber)[0];
 };
 
 const buildServiceRequestSearchQuery = (search?: string) => {
@@ -294,6 +297,13 @@ export const projectsRouter = router({
             const sr = await ServiceRequestModel.findOne({ "wbsVersions._id": input.id });
             if (!sr) throw new TRPCError({ code: "NOT_FOUND", message: "找不到該 WBS 版本" });
 
+            const opportunity = sr.opportunityId
+                ? await OpportunityModel.findById(sr.opportunityId)
+                    .select("ownerId members presalesAssignments")
+                    .lean()
+                : null;
+            assertAuthorized(canManageServiceRequestStatus(ctx.user, sr, opportunity), "您沒有權限審核此 WBS 版本");
+
             const version = sr.wbsVersions.id(input.id);
             if (!version) throw new TRPCError({ code: "NOT_FOUND", message: "找不到該 WBS 版本" });
             if (version.status !== "submitted") {
@@ -307,6 +317,14 @@ export const projectsRouter = router({
                         "wbsVersions.$.status": input.action,
                         "wbsVersions.$.reviewedBy": ctx.user.id,
                         "wbsVersions.$.rejectionReason": input.rejectionReason ?? null
+                    },
+                    $push: {
+                        "wbsVersions.$.auditLogs": {
+                            action: input.action,
+                            userId: toObjectId(ctx.user.id),
+                            timestamp: new Date(),
+                            reason: input.rejectionReason ?? null
+                        }
                     }
                 }
             );
@@ -370,6 +388,13 @@ export const projectsRouter = router({
                 : null;
             assertAuthorized(canAccessServiceRequest(ctx.user, sr, opportunity), "您沒有權限上傳附件");
 
+            const spResult = await sharePointService.uploadFile(
+                `SR-${input.srId}`, 
+                input.fileName, 
+                { size: input.fileSize }, 
+                input.mimeType
+            );
+
             // Generating dummy fileKey for mongo structure consistency
             const fileKey = `uploads/${input.srId}/${Date.now()}-${input.fileName}`;
 
@@ -381,7 +406,9 @@ export const projectsRouter = router({
                             fileName: input.fileName,
                             fileSize: input.fileSize,
                             mimeType: input.mimeType,
-                            fileUrl: input.fileUrl,
+                            fileUrl: spResult.fileUrl,
+                            sharePointDriveId: spResult.driveId,
+                            sharePointItemId: spResult.itemId,
                             fileKey: fileKey,
                             uploadedById: toObjectId(ctx.user.id)
                         }
@@ -414,7 +441,15 @@ export const projectsRouter = router({
                     items: (v.items || []).map((item: any) => ({
                         ...item,
                         id: item._id.toString(),
-                        assigneeId: item.assigneeId?.toString()
+                        assigneeId: item.assigneeId?.toString(),
+                        startDate: item.startDate,
+                        endDate: item.endDate
+                    })),
+                    auditLogs: (v.auditLogs || []).map((log: any) => ({
+                        action: log.action,
+                        userId: log.userId.toString(),
+                        timestamp: log.timestamp,
+                        reason: log.reason
                     })),
                     totalEstimatedHours
                 };
@@ -459,7 +494,13 @@ export const projectsRouter = router({
                     title: item.title,
                     estimatedHours: item.estimatedHours,
                     assigneeId: item.assigneeId ? new mongoose.Types.ObjectId(item.assigneeId) : undefined
-                }))
+                })),
+                auditLogs: [{
+                    action: "submitted",
+                    userId: toObjectId(ctx.user.id),
+                    timestamp: new Date(),
+                    reason: "提交 WBS 版本"
+                }]
             };
 
             await ServiceRequestModel.updateOne(
@@ -505,6 +546,12 @@ export const projectsRouter = router({
                     hoursAdjustment: changeRequest.hoursAdjustment,
                     amountAdjustment: changeRequest.amountAdjustment,
                     status: changeRequest.status,
+                    auditLogs: (changeRequest.auditLogs || []).map((log: any) => ({
+                        action: log.action,
+                        userId: log.userId.toString(),
+                        timestamp: log.timestamp,
+                        reason: log.reason
+                    })),
                     createdAt: changeRequest.createdAt,
                     srTitle: sr.title
                 }));
@@ -537,7 +584,13 @@ export const projectsRouter = router({
                 reason: input.reason,
                 hoursAdjustment: input.hoursAdjustment,
                 amountAdjustment: input.amountAdjustment,
-                status: "pending_business"
+                status: "pending_business",
+                auditLogs: [{
+                    action: "created",
+                    userId: toObjectId(ctx.user.id),
+                    timestamp: new Date(),
+                    reason: input.reason
+                }]
             });
 
             await sr.save();
@@ -599,6 +652,16 @@ export const projectsRouter = router({
                 }
             }
 
+            if (!cr.auditLogs) cr.auditLogs = [];
+            cr.auditLogs.push({
+                action: input.action === "approved" && cr.status === "approved" ? "manager_approved" 
+                        : input.action === "approved" ? "business_approved" 
+                        : "rejected",
+                userId: toObjectId(ctx.user.id),
+                timestamp: new Date(),
+                reason: input.rejectionReason ?? null
+            });
+
             await sr.save();
 
             await createNotification({
@@ -634,6 +697,8 @@ export const projectsRouter = router({
                         title: item.title,
                         estimatedHours: item.estimatedHours,
                         actualHours: item.actualHours || 0,
+                        startDate: item.startDate,
+                        endDate: item.endDate,
                         srTitle: sr.title
                     }));
             });

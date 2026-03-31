@@ -56,6 +56,9 @@ export function OpportunityDetailPage() {
 
     const [showStatusDropdown, setShowStatusDropdown] = useState(false);
 
+    const [showCustomFieldsModal, setShowCustomFieldsModal] = useState(false);
+    const [editingCustomFields, setEditingCustomFields] = useState<{fieldId: string, value: string}[]>([]);
+
     // ------ Queries ------
     const { data: opp, isLoading: isOppLoading, refetch: refetchOpp } = trpc.opportunities.getById.useQuery({ id }, { enabled: !!id });
     const { data: members, isLoading: isMembersLoading, refetch: refetchMembers } = trpc.opportunities.getMembers.useQuery({ opportunityId: id }, { enabled: !!id });
@@ -94,6 +97,10 @@ export function OpportunityDetailPage() {
 
     const updateStatusMutation = trpc.opportunities.updateStatus.useMutation({
         onSuccess: () => { refetchOpp(); setShowStatusDropdown(false); }
+    });
+
+    const updateCustomFieldsMutation = trpc.opportunities.updateCustomFields.useMutation({
+        onSuccess: () => { refetchOpp(); setShowCustomFieldsModal(false); }
     });
 
     const createSRMutation = trpc.opportunities.createSR.useMutation({
@@ -288,19 +295,40 @@ export function OpportunityDetailPage() {
                 </div>
 
                 {/* 自訂欄位表格展示 */}
-                {oppFields.length > 0 && (
-                    <div className="grid grid-cols-1 md:grid-cols-3 gap-6 pt-4 mt-4 border-t border-border/30 border-dashed animate-in fade-in duration-300">
+                <div className="flex justify-between items-center pt-6 mt-6 border-t border-border/50">
+                    <h3 className="font-semibold text-lg flex items-center">
+                        <FileText className="w-5 h-5 mr-2 text-primary" /> 商機自訂欄位
+                    </h3>
+                    {!isConverted && (hasRole("admin") || hasRole("manager") || hasRole("business") || user?.id === opp.ownerId) && (
+                        <button 
+                            onClick={() => { 
+                                setShowCustomFieldsModal(true); 
+                                setEditingCustomFields(opp.customFields?.map((c: any) => ({ fieldId: c.fieldId, value: c.value })) || []);
+                            }} 
+                            className="text-xs font-medium bg-primary/10 text-primary hover:bg-primary/20 px-3 py-1.5 flex items-center rounded-lg transition-colors"
+                        >
+                            編輯欄位
+                        </button>
+                    )}
+                </div>
+                
+                {oppFields.length > 0 ? (
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mt-4">
                         {oppFields.map((f: any) => (
-                            <div key={f.id} className="space-y-1">
-                                <span className="text-sm text-muted-foreground">{f.name}</span>
-                                <p className="font-semibold text-sm">
-                                    {f.fieldType === "switch" 
-                                        ? (getFieldValue(f.id) === "true" ? "✅ 啟用" : "❌ 關閉") 
-                                        : getFieldValue(f.id)}
-                                </p>
+                            <div key={f.id} className={`space-y-1.5 ${f.fieldType === 'textarea' ? 'md:col-span-3' : ''}`}>
+                                <span className="text-sm font-medium text-muted-foreground">{f.name}</span>
+                                <div className={`font-semibold text-sm ${f.fieldType === 'textarea' ? 'whitespace-pre-wrap bg-muted/40 p-4 rounded-xl border border-border/50 text-base leading-relaxed' : 'text-base'}`}>
+                                    {getFieldValue(f.id) !== "未填寫" ? (
+                                        f.fieldType === "switch" ? (getFieldValue(f.id) === "true" ? "✅ 啟用" : "❌ 關閉") : getFieldValue(f.id)
+                                    ) : (
+                                        <span className="text-muted-foreground italic font-normal text-xs">未填寫</span>
+                                    )}
+                                </div>
                             </div>
                         ))}
                     </div>
+                ) : (
+                    <div className="text-center p-6 border border-dashed rounded-lg bg-background text-sm text-muted-foreground mt-4">尚無設定自訂欄位系統</div>
                 )}
             </div>
 
@@ -389,8 +417,9 @@ export function OpportunityDetailPage() {
                     <div className="p-4 border-b border-border/50 bg-muted/30 flex justify-between items-center">
                         <h3 className="font-bold flex items-center"><Clock className="w-5 h-5 mr-2 text-primary" />協銷工時紀錄</h3>
                         {!isPMOnly && (
-                            <button onClick={() => { setShowTimesheetModal(true); setTsError(""); }}
-                                className="text-xs font-medium text-primary hover:text-primary/80 flex items-center px-2 py-1 rounded hover:bg-primary/10 transition-colors">
+                            <button onClick={() => { if (!isConverted) { setShowTimesheetModal(true); setTsError(""); } }}
+                                disabled={isConverted}
+                                className="text-xs font-medium text-primary hover:text-primary/80 flex items-center px-2 py-1 rounded hover:bg-primary/10 transition-colors disabled:opacity-50">
                                 <Plus className="w-3 h-3 mr-1" /> 回報工時
                             </button>
                         )}
@@ -426,8 +455,9 @@ export function OpportunityDetailPage() {
                                 <Clock className="w-8 h-8 opacity-20 mb-2" />
                                 <p className="text-sm">尚無工時紀錄</p>
                                 {!isPMOnly && (
-                                    <button onClick={() => { setShowTimesheetModal(true); setTsError(""); }}
-                                        className="mt-3 text-xs text-primary hover:underline flex items-center">
+                                    <button onClick={() => { if (!isConverted) { setShowTimesheetModal(true); setTsError(""); } }}
+                                        disabled={isConverted}
+                                        className="mt-3 text-xs text-primary hover:underline flex items-center disabled:opacity-50 disabled:hover:no-underline">
                                         <Plus className="w-3 h-3 mr-1" /> 立即回報工時
                                     </button>
                                 )}
@@ -661,6 +691,87 @@ export function OpportunityDetailPage() {
                             <button onClick={handleCreateSR} disabled={createSRMutation.isPending}
                                 className="px-4 py-2 text-sm bg-primary text-primary-foreground rounded-lg hover:bg-primary/90 disabled:opacity-50 flex items-center">
                                 {createSRMutation.isPending ? <><span className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin mr-2" />建立中...</> : <><Check className="w-4 h-4 mr-1" />確認建立</>}
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {showCustomFieldsModal && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm shadow-2xl transition-opacity animate-in fade-in">
+                    <div className="bg-card border border-border rounded-xl shadow-2xl w-full max-w-2xl mx-4 p-6 space-y-5 animate-in zoom-in-95 max-h-[85vh] flex flex-col">
+                        <div className="flex justify-between items-center border-b border-border/50 pb-3">
+                            <h2 className="text-xl font-bold flex items-center tracking-tight"><FileText className="w-5 h-5 mr-2 text-primary" />編輯商機細節欄位</h2>
+                            <button onClick={() => setShowCustomFieldsModal(false)} className="p-1.5 rounded-full hover:bg-muted bg-muted/50 transition-colors"><X className="w-5 h-5 text-muted-foreground" /></button>
+                        </div>
+                        
+                        <div className="space-y-5 flex-1 overflow-y-auto pr-2">
+                            {oppFields.length === 0 ? (
+                                <p className="text-sm text-muted-foreground p-4 text-center">後台設定中尚未建立對應商機的可用欄位。</p>
+                            ) : (
+                                oppFields.map((field: any) => {
+                                    const currentValue = editingCustomFields.find(f => f.fieldId === field.id)?.value || "";
+                                    const handleFieldChange = (val: string) => {
+                                        const newFields = [...editingCustomFields];
+                                        const exist = newFields.find(f => f.fieldId === field.id);
+                                        if (exist) { exist.value = val; } else { newFields.push({ fieldId: field.id, value: val }); }
+                                        setEditingCustomFields(newFields);
+                                    };
+
+                                    return (
+                                        <div key={field.id} className={`space-y-1.5 ${field.fieldType === 'textarea' ? 'col-span-full' : ''}`}>
+                                            <label className="block text-sm font-semibold text-foreground/90">
+                                                {field.name} {field.isRequired && <span className="text-red-500">*</span>}
+                                            </label>
+                                            
+                                            {field.fieldType === "textarea" ? (
+                                                <textarea 
+                                                    rows={4} 
+                                                    value={currentValue}
+                                                    onChange={e => handleFieldChange(e.target.value)}
+                                                    className="w-full border border-input rounded-lg px-3 py-2 bg-background text-sm focus:outline-none focus:ring-2 focus:ring-primary/50 resize-y"
+                                                />
+                                            ) : field.fieldType === "switch" ? (
+                                                <select 
+                                                    value={currentValue}
+                                                    onChange={e => handleFieldChange(e.target.value)}
+                                                    className="w-full border border-input rounded-lg px-3 py-2 bg-background text-sm focus:outline-none focus:ring-2 focus:ring-primary/50"
+                                                >
+                                                    <option value="">未設定</option>
+                                                    <option value="true">啟用</option>
+                                                    <option value="false">關閉</option>
+                                                </select>
+                                            ) : field.fieldType === "select" && field.options ? (
+                                                <select 
+                                                    value={currentValue}
+                                                    onChange={e => handleFieldChange(e.target.value)}
+                                                    className="w-full border border-input rounded-lg px-3 py-2 bg-background text-sm focus:outline-none focus:ring-2 focus:ring-primary/50"
+                                                >
+                                                    <option value="">請選擇...</option>
+                                                    {field.options.map((opt: string) => <option key={opt} value={opt}>{opt}</option>)}
+                                                </select>
+                                            ) : (
+                                                <input 
+                                                    type={field.fieldType === "number" ? "number" : field.fieldType === "date" ? "date" : "text"} 
+                                                    value={currentValue}
+                                                    onChange={e => handleFieldChange(e.target.value)}
+                                                    className="w-full border border-input rounded-lg px-3 py-2 bg-background text-sm focus:outline-none focus:ring-2 focus:ring-primary/50"
+                                                />
+                                            )}
+                                        </div>
+                                    );
+                                })
+                            )}
+                        </div>
+
+                        <div className="flex justify-end gap-3 pt-4 border-t border-border/50">
+                            <button onClick={() => setShowCustomFieldsModal(false)} className="px-5 py-2 text-sm font-medium border border-border rounded-lg hover:bg-muted transition-colors">取消</button>
+                            <button 
+                                onClick={() => updateCustomFieldsMutation.mutate({ id, customFields: editingCustomFields })}
+                                disabled={updateCustomFieldsMutation.isPending}
+                                className="px-5 py-2 text-sm font-medium bg-primary text-primary-foreground rounded-lg hover:bg-primary/90 transition-all active:scale-95 disabled:opacity-50 shadow-sm"
+                            >
+                                儲存欄位變更
                             </button>
                         </div>
                     </div>
