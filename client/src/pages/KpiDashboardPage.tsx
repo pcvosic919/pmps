@@ -275,7 +275,7 @@ export function KpiDashboardPage() {
                                         formatter={(value: any) => [new Intl.NumberFormat().format(value), '金額']}
                                     />
                                     <Bar dataKey="value" radius={[4, 4, 0, 0]}>
-                                        {projectStatusData?.map((entry: any, index: number) => (
+                                        {projectStatusData?.map((_: any, index: number) => (
                                             <Cell key={`cell-${index}`} fill={index === 0 ? '#10b981' : '#3b82f6'} />
                                         ))}
                                     </Bar>

@@ -1,6 +1,5 @@
 import { trpc } from "../lib/trpc";
 import { Folder, File, ExternalLink, RefreshCw, AlertTriangle } from "lucide-react";
-import { useState } from "react";
 
 interface SharePointFilesSectionProps {
   category: "商機" | "專案";
