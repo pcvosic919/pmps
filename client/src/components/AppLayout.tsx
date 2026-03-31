@@ -15,7 +15,6 @@ import {
     FileText,
     FolderKanban,
     Globe,
-    Info,
     LayoutDashboard,
     LogOut,
     Menu,

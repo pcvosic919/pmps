@@ -181,4 +181,17 @@ export const systemRouter = router({
         await CustomFieldModel.deleteOne({ _id: input.id });
         return { success: true };
     }),
+
+    updateCustomField: roleProcedure(["admin"]).input(z.object({
+        id: z.string(),
+        name: z.string().optional(),
+        fieldType: z.enum(["text", "number", "select", "multiselect", "date", "switch", "url"]).optional(),
+        entityType: z.enum(["opportunity", "sr", "wbs", "cr"]).optional(),
+        options: z.array(z.string()).optional(),
+        isRequired: z.boolean().optional()
+    })).mutation(async ({ input }) => {
+        const { id, ...data } = input;
+        await CustomFieldModel.findByIdAndUpdate(id, data);
+        return { success: true };
+    }),
 });
