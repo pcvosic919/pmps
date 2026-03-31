@@ -25,6 +25,7 @@ const defaultSettings = {
     pcSlaTarget: 95,
     pcRenewalTarget: 85,
     pcUtilizationTarget: 80,
+    sharePointSiteUrl: "",
 };
 
 export function SystemSettingsPage() {
@@ -332,6 +333,28 @@ export function SystemSettingsPage() {
                                             className="w-full p-2.5 rounded-lg border border-input bg-background/50 focus:bg-background text-sm"
                                         />
                                         <p className="text-xs text-muted-foreground mt-1">自動同步員工名單與部門資訊</p>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div>
+                                <h3 className="text-lg font-bold mb-4 border-b pb-2">📁 SharePoint Online 整合</h3>
+                                <div className="grid gap-4 max-w-2xl">
+                                    <div className="rounded-lg border border-dashed border-blue-200 bg-blue-50/50 dark:bg-blue-950/20 p-3 text-xs text-muted-foreground">
+                                        建立商機／SR 時，系統將自動在指定 SharePoint Site 建立目錄。<br />
+                                        目錄命名：<span className="font-mono font-semibold">YYYYMMDD_名稱_Owner</span><br />
+                                        需要 Entra App 具備 <span className="font-semibold text-foreground">Sites.Manage.All</span> 應用程式權限。
+                                    </div>
+                                    <div>
+                                        <label className="block text-sm font-medium mb-1">SharePoint Site URL</label>
+                                        <input
+                                            type="url"
+                                            value={(settings as any).sharePointSiteUrl || ""}
+                                            placeholder="https://yourdomain.sharepoint.com/sites/PMP"
+                                            onChange={e => setSettings(s => ({ ...s, sharePointSiteUrl: e.target.value }))}
+                                            className="w-full p-2.5 rounded-lg border border-input bg-background/50 focus:bg-background text-sm"
+                                        />
+                                        <p className="text-xs text-muted-foreground mt-1">留空則會停用自動建立目錄功能（mock 模式）</p>
                                     </div>
                                 </div>
                             </div>

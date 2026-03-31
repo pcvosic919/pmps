@@ -6,6 +6,7 @@ import {
     Plus, X, Check, UserPlus, Trash2, FileText, ChevronDown
 } from "lucide-react";
 import { useCurrentUser } from "../lib/useCurrentUser";
+import { SharePointFilesSection } from "../components/SharePointFilesSection";
 
 
 const OPP_STATUSES = [
@@ -489,6 +490,16 @@ export function OpportunityDetailPage() {
                             </div>
                         )}
                     </div>
+                </div>
+            </div>
+
+            <div className="grid grid-cols-1 lg:grid-cols-1 gap-6 mb-8">
+                <div className="bg-card border border-border/50 rounded-xl shadow-sm overflow-hidden p-6">
+                    <SharePointFilesSection 
+                        category="商機" 
+                        sharePointFolderUrl={opp.sharePointFolderUrl} 
+                        title="商機專屬 SharePoint 文件庫"
+                    />
                 </div>
             </div>
 

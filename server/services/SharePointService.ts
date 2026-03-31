@@ -77,6 +77,137 @@ export class SharePointService {
     
     throw new Error("Real Graph API not yet fully implemented");
   }
+
+  /**
+   * Builds a sanitized SharePoint folder name.
+   * Pattern: YYYYMMDD_[name]_[owner]
+   */
+  static buildFolderName(name: string, owner: string): string {
+    const today = new Date().toISOString().slice(0, 10).replace(/-/g, "");
+    const sanitize = (s: string) => s.replace(/[/\\?<>*|":]/g, "_").trim().slice(0, 60);
+    return `${today}_${sanitize(name)}_${sanitize(owner)}`;
+  }
+
+  /**
+   * Creates a folder in SharePoint for an Opportunity or Project.
+   * @param siteUrl  Full SharePoint site URL, e.g. https://contoso.sharepoint.com/sites/PMP
+   * @param category "商機" | "專案"
+   * @param folderName Already-built folder name (use buildFolderName)
+   */
+  async createProjectFolder(
+    siteUrl: string,
+    category: string,
+    folderName: string
+  ): Promise<{ folderUrl: string }> {
+    if (this.isMockMode || !siteUrl) {
+      const domain = siteUrl || `https://${process.env.SHAREPOINT_DOMAIN || "contoso.sharepoint.com"}/sites/PMP`;
+      return { folderUrl: `${domain}/Shared%20Documents/${encodeURIComponent(category)}/${encodeURIComponent(folderName)}` };
+    }
+
+    try {
+      // Get access token via client_credentials
+      const tenantId = process.env.ENTRA_TENANT_ID || "";
+      const clientId = process.env.ENTRA_CLIENT_ID || "";
+      const clientSecret = process.env.GRAPH_API_SECRET || "";
+
+      const tokenRes = await fetch(
+        `https://login.microsoftonline.com/${tenantId}/oauth2/v2.0/token`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/x-www-form-urlencoded" },
+          body: new URLSearchParams({
+            grant_type: "client_credentials",
+            client_id: clientId,
+            client_secret: clientSecret,
+            scope: "https://graph.microsoft.com/.default"
+          })
+        }
+      );
+      const tokenData = await tokenRes.json() as any;
+      const accessToken = tokenData.access_token as string;
+
+      // Resolve Site ID from URL
+      const siteRes = await fetch(
+        `https://graph.microsoft.com/v1.0/sites/${new URL(siteUrl).host}:${new URL(siteUrl).pathname}`,
+        { headers: { Authorization: `Bearer ${accessToken}` } }
+      );
+      const siteData = await siteRes.json() as any;
+      const siteId = siteData.id as string;
+
+      // Create parent folder if needed, then sub-folder
+      const parentPath = encodeURIComponent(category);
+      await fetch(
+        `https://graph.microsoft.com/v1.0/sites/${siteId}/drive/root:/${parentPath}:/children`,
+        {
+          method: "POST",
+          headers: { Authorization: `Bearer ${accessToken}`, "Content-Type": "application/json" },
+          body: JSON.stringify({ name: folderName, folder: {}, "@microsoft.graph.conflictBehavior": "rename" })
+        }
+      );
+
+      return { folderUrl: `${siteUrl}/Shared%20Documents/${parentPath}/${encodeURIComponent(folderName)}` };
+    } catch (err) {
+      console.warn("[SharePointService] createProjectFolder failed:", err);
+      return { folderUrl: "" };
+    }
+  }
+
+  /**
+   * Lists files in a SharePoint folder path.
+   */
+  async listFolderFiles(
+    siteUrl: string,
+    category: string,
+    folderName: string
+  ): Promise<Array<{ name: string; url: string; size: number; modified: string }>> {
+    if (this.isMockMode || !siteUrl) {
+      return [];
+    }
+    try {
+      const tenantId = process.env.ENTRA_TENANT_ID || "";
+      const clientId = process.env.ENTRA_CLIENT_ID || "";
+      const clientSecret = process.env.GRAPH_API_SECRET || "";
+
+      const tokenRes = await fetch(
+        `https://login.microsoftonline.com/${tenantId}/oauth2/v2.0/token`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/x-www-form-urlencoded" },
+          body: new URLSearchParams({
+            grant_type: "client_credentials",
+            client_id: clientId,
+            client_secret: clientSecret,
+            scope: "https://graph.microsoft.com/.default"
+          })
+        }
+      );
+      const tokenData = await tokenRes.json() as any;
+      const accessToken = tokenData.access_token as string;
+
+      const siteRes = await fetch(
+        `https://graph.microsoft.com/v1.0/sites/${new URL(siteUrl).host}:${new URL(siteUrl).pathname}`,
+        { headers: { Authorization: `Bearer ${accessToken}` } }
+      );
+      const siteData = await siteRes.json() as any;
+      const siteId = siteData.id as string;
+
+      const folderPath = `${category}/${folderName}`;
+      const itemsRes = await fetch(
+        `https://graph.microsoft.com/v1.0/sites/${siteId}/drive/root:/${encodeURIComponent(folderPath)}:/children`,
+        { headers: { Authorization: `Bearer ${accessToken}` } }
+      );
+      const items = await itemsRes.json() as any;
+      return (items.value || []).map((f: any) => ({
+        name: f.name,
+        url: f.webUrl,
+        size: f.size,
+        modified: f.lastModifiedDateTime
+      }));
+    } catch (err) {
+      console.warn("[SharePointService] listFolderFiles failed:", err);
+      return [];
+    }
+  }
 }
 
 export const sharePointService = new SharePointService();

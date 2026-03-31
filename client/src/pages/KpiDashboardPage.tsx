@@ -4,12 +4,12 @@ import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip as RechartsTooltip, B
 import { TrendingUp, Users, AlertTriangle, CheckCircle, PieChart as PieChartIcon, Download } from "lucide-react";
 
 export function KpiDashboardPage() {
-    const [filterDept, setFilterDept] = useState<string>("");
-    const [filterUser, setFilterUser] = useState<string>("");
+    const [filterDepts, setFilterDepts] = useState<string[]>([]);
+    const [filterUsers, setFilterUsers] = useState<string[]>([]);
 
     const filterInput = {
-        department: filterDept || undefined,
-        userId: filterUser || undefined
+        departments: filterDepts.length > 0 ? filterDepts : undefined,
+        userIds: filterUsers.length > 0 ? filterUsers : undefined
     };
 
     const { data: usersData } = trpc.users.list.useQuery({ limit: 500 });
@@ -20,8 +20,10 @@ export function KpiDashboardPage() {
     const { data: utData, isLoading: utLoading } = trpc.analytics.getUtilization.useQuery(filterInput);
     const { data: trendData, isLoading: trendLoading } = trpc.analytics.getWinRateTrend.useQuery(filterInput);
     const { data: costRevData, isLoading: costRevLoading } = trpc.analytics.getCostVsRevenuePerPerson.useQuery(filterInput);
+    const { data: projectStatusData, isLoading: projectStatusLoading } = trpc.analytics.getProjectStatusData.useQuery(filterInput);
     const [visibleCharts, setVisibleCharts] = useState({
         opportunityMix: true,
+        projectStatus: true,
         utilization: true,
         winRateTrend: true,
         costVsRevenue: true,
@@ -66,8 +68,8 @@ export function KpiDashboardPage() {
         URL.revokeObjectURL(url);
     };
 
-    if (kpiLoading || utLoading || trendLoading || costRevLoading) {
-        return <div className="p-8 text-center text-muted-foreground">載入 KPI 數據中...</div>;
+    if (kpiLoading || utLoading || trendLoading || costRevLoading || projectStatusLoading) {
+        return <div className="p-8 text-center text-muted-foreground animate-pulse">載入 KPI 數據中...</div>;
     }
 
     return (
@@ -90,42 +92,76 @@ export function KpiDashboardPage() {
             <div className="bg-card border border-border rounded-xl p-4 shadow-sm flex flex-col md:flex-row gap-4 items-start md:items-center justify-between">
                 <div>
                     <div className="text-sm font-semibold mb-2">資料篩選 (Data Filters)</div>
-                    <div className="flex flex-wrap gap-3">
-                        <select
-                            value={filterDept}
-                            onChange={(e) => {
-                                setFilterDept(e.target.value);
-                                setFilterUser(""); // Reset user when department changes
-                            }}
-                            className="text-sm rounded-md border border-input bg-background px-3 py-1.5 focus:ring-1 focus:ring-primary outline-none min-w-[140px]"
-                        >
-                            <option value="">全部部門</option>
-                            {departments.map(d => <option key={d} value={d}>{d}</option>)}
-                        </select>
-                        <select
-                            value={filterUser}
-                            onChange={(e) => setFilterUser(e.target.value)}
-                            className="text-sm rounded-md border border-input bg-background px-3 py-1.5 focus:ring-1 focus:ring-primary outline-none min-w-[140px]"
-                        >
-                            <option value="">全部人員</option>
-                            {allUsers
-                                .filter((u: any) => !filterDept || u.department === filterDept)
-                                .map((u: any) => <option key={u.id} value={u.id}>{u.name} ({u.role})</option>)
-                            }
-                        </select>
+                    <div className="flex flex-wrap gap-4">
+                        <div className="flex flex-col gap-1.5">
+                            <label className="text-xs text-muted-foreground font-medium">部門 (多選)</label>
+                            <div className="flex flex-wrap gap-1 p-2 border border-input bg-background rounded-md min-w-[200px] max-w-[400px] max-h-[100px] overflow-y-auto">
+                                <button
+                                    type="button"
+                                    onClick={() => setFilterDepts([])}
+                                    className={`px-2 py-0.5 rounded text-xs ${filterDepts.length === 0 ? "bg-primary text-primary-foreground" : "bg-muted hover:bg-muted/80"}`}
+                                >
+                                    全部
+                                </button>
+                                {departments.map(d => (
+                                    <button
+                                        key={d}
+                                        type="button"
+                                        onClick={() => {
+                                            if (filterDepts.includes(d)) setFilterDepts(filterDepts.filter(i => i !== d));
+                                            else setFilterDepts([...filterDepts, d]);
+                                            setFilterUsers([]);
+                                        }}
+                                        className={`px-2 py-0.5 rounded text-xs transition-colors ${filterDepts.includes(d) ? "bg-primary text-primary-foreground" : "bg-muted hover:bg-muted/80"}`}
+                                    >
+                                        {d}
+                                    </button>
+                                ))}
+                            </div>
+                        </div>
+
+                        <div className="flex flex-col gap-1.5">
+                            <label className="text-xs text-muted-foreground font-medium">人員 (多選)</label>
+                            <div className="flex flex-wrap gap-1 p-2 border border-input bg-background rounded-md min-w-[200px] max-w-[500px] max-h-[100px] overflow-y-auto">
+                                <button
+                                    type="button"
+                                    onClick={() => setFilterUsers([])}
+                                    className={`px-2 py-0.5 rounded text-xs ${filterUsers.length === 0 ? "bg-primary text-primary-foreground" : "bg-muted hover:bg-muted/80"}`}
+                                >
+                                    全部
+                                </button>
+                                {allUsers
+                                    .filter((u: any) => filterDepts.length === 0 || filterDepts.includes(u.department))
+                                    .map((u: any) => (
+                                        <button
+                                            key={u.id}
+                                            type="button"
+                                            onClick={() => {
+                                                if (filterUsers.includes(u.id)) setFilterUsers(filterUsers.filter(i => i !== u.id));
+                                                else setFilterUsers([...filterUsers, u.id]);
+                                            }}
+                                            className={`px-2 py-0.5 rounded text-xs transition-colors ${filterUsers.includes(u.id) ? "bg-primary text-primary-foreground" : "bg-muted hover:bg-muted/80"}`}
+                                        >
+                                            {u.name}
+                                        </button>
+                                    ))
+                                }
+                            </div>
+                        </div>
                     </div>
                 </div>
                 
-                <div>
+                <div className="border-t md:border-t-0 md:border-l border-border pt-4 md:pt-0 md:pl-6">
                     <div className="text-sm font-semibold mb-2">顯示模組 (Visible Layout)</div>
                     <div className="flex flex-wrap gap-2">
                         {[
                             { key: "opportunityMix", label: "商機狀態" },
+                            { key: "projectStatus", label: "專案狀態" },
                             { key: "utilization", label: "稼動率" },
                             { key: "winRateTrend", label: "勝率趨勢" },
                             { key: "costVsRevenue", label: "成本 vs 營收" }
                         ].map((option) => {
-                            const enabled = visibleCharts[option.key as keyof typeof visibleCharts];
+                            const enabled = visibleCharts[option.key as keyof typeof visibleCharts] ?? true;
                             return (
                                 <button
                                     key={option.key}
@@ -183,61 +219,99 @@ export function KpiDashboardPage() {
             <div className="grid md:grid-cols-2 gap-6">
                 {/* Opp Status Pie Chart */}
                 {visibleCharts.opportunityMix && (
-                <div className="bg-card border border-border rounded-xl p-6 shadow-sm">
-                    <h3 className="text-lg font-bold mb-6 flex items-center">
-                        <PieChartIcon className="w-5 h-5 mr-2 text-muted-foreground" />
-                        商機狀態分佈
-                    </h3>
-                    <div className="h-64">
-                        <ResponsiveContainer width="100%" height="100%">
-                            <PieChart>
-                                <Pie
-                                    data={oppData}
-                                    cx="50%"
-                                    cy="50%"
-                                    innerRadius={60}
-                                    outerRadius={80}
-                                    paddingAngle={5}
-                                    dataKey="value"
-                                >
-                                    {oppData.map((entry, index) => (
-                                        <Cell key={`cell-${index}`} fill={entry.color} />
-                                    ))}
-                                </Pie>
-                                <RechartsTooltip />
-                            </PieChart>
-                        </ResponsiveContainer>
+                    <div className="bg-card border border-border rounded-xl p-6 shadow-sm">
+                        <h3 className="text-lg font-bold mb-6 flex items-center">
+                            <PieChartIcon className="w-5 h-5 mr-2 text-muted-foreground" />
+                            商機狀態分佈
+                        </h3>
+                        <div className="h-64">
+                            <ResponsiveContainer width="100%" height="100%">
+                                <PieChart>
+                                    <Pie
+                                        data={oppData}
+                                        cx="50%"
+                                        cy="50%"
+                                        innerRadius={60}
+                                        outerRadius={80}
+                                        paddingAngle={5}
+                                        dataKey="value"
+                                    >
+                                        {oppData.map((entry, index) => (
+                                            <Cell key={`cell-${index}`} fill={entry.color} />
+                                        ))}
+                                    </Pie>
+                                    <RechartsTooltip />
+                                </PieChart>
+                            </ResponsiveContainer>
+                        </div>
+                        <div className="flex justify-center gap-4 mt-4 flex-wrap">
+                            {oppData.map((d) => (
+                                <div key={d.name} className="flex items-center text-sm">
+                                    <span className="w-3 h-3 rounded-full mr-1.5" style={{ backgroundColor: d.color }}></span>
+                                    {d.name} ({d.value})
+                                </div>
+                            ))}
+                        </div>
                     </div>
-                    <div className="flex justify-center gap-4 mt-4 flex-wrap">
-                        {oppData.map((d) => (
-                            <div key={d.name} className="flex items-center text-sm">
-                                <span className="w-3 h-3 rounded-full mr-1.5" style={{ backgroundColor: d.color }}></span>
-                                {d.name} ({d.value})
-                            </div>
-                        ))}
+                )}
+
+                {/* Project Status Bar Chart */}
+                {visibleCharts.projectStatus && (
+                    <div className="bg-card p-6 border border-border rounded-xl shadow-sm">
+                        <div className="flex items-center justify-between mb-6">
+                            <h3 className="text-lg font-bold flex items-center gap-2">
+                                <TrendingUp className="h-5 w-5 text-green-500" />
+                                專案狀態分佈 (營收)
+                            </h3>
+                        </div>
+                        <div className="h-64">
+                            <ResponsiveContainer width="100%" height="100%">
+                                <BarChart data={projectStatusData}>
+                                    <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="rgba(0,0,0,0.05)" />
+                                    <XAxis dataKey="name" axisLine={false} tickLine={false} tick={{ fontSize: 11 }} />
+                                    <YAxis axisLine={false} tickLine={false} tickFormatter={(v) => `$${(v / 1000).toFixed(0)}k`} tick={{ fontSize: 11 }} />
+                                    <RechartsTooltip 
+                                        contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 10px 15px -3px rgba(0,0,0,0.1)' }}
+                                        formatter={(value: any) => [new Intl.NumberFormat().format(value), '金額']}
+                                    />
+                                    <Bar dataKey="value" radius={[4, 4, 0, 0]}>
+                                        {projectStatusData?.map((entry: any, index: number) => (
+                                            <Cell key={`cell-${index}`} fill={index === 0 ? '#10b981' : '#3b82f6'} />
+                                        ))}
+                                    </Bar>
+                                </BarChart>
+                            </ResponsiveContainer>
+                        </div>
+                        <div className="mt-4 grid grid-cols-2 gap-4">
+                            {projectStatusData?.map((d: any, i: number) => (
+                                <div key={i} className="bg-muted/30 p-3 rounded-lg flex justify-between items-center">
+                                    <span className="text-sm text-muted-foreground">{d.name}</span>
+                                    <span className="font-bold">{d.count} 筆</span>
+                                </div>
+                            ))}
+                        </div>
                     </div>
-                </div>
                 )}
 
                 {/* Utilization Bar Chart */}
                 {visibleCharts.utilization && (
-                <div className="bg-card border border-border rounded-xl p-6 shadow-sm">
-                    <h3 className="text-lg font-bold mb-6 flex items-center">
-                        <Users className="w-5 h-5 mr-2 text-muted-foreground" />
-                        人員稼動率分佈 (本月)
-                    </h3>
-                    <div className="h-64">
-                        <ResponsiveContainer width="100%" height="100%">
-                            <BarChart data={utilizationData}>
-                                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#88888833" />
-                                <XAxis dataKey="name" tick={{ fontSize: 12 }} axisLine={false} tickLine={false} />
-                                <YAxis tick={{ fontSize: 12 }} axisLine={false} tickLine={false} />
-                                <RechartsTooltip cursor={{ fill: '#88888811' }} />
-                                <Bar dataKey="稼動率" fill="var(--color-primary)" radius={[4, 4, 0, 0]} />
-                            </BarChart>
-                        </ResponsiveContainer>
+                    <div className="bg-card border border-border rounded-xl p-6 shadow-sm">
+                        <h3 className="text-lg font-bold mb-6 flex items-center">
+                            <Users className="w-5 h-5 mr-2 text-muted-foreground" />
+                            人員稼動率分佈 (本月)
+                        </h3>
+                        <div className="h-64">
+                            <ResponsiveContainer width="100%" height="100%">
+                                <BarChart data={utilizationData}>
+                                    <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#88888833" />
+                                    <XAxis dataKey="name" tick={{ fontSize: 12 }} axisLine={false} tickLine={false} />
+                                    <YAxis tick={{ fontSize: 12 }} axisLine={false} tickLine={false} />
+                                    <RechartsTooltip cursor={{ fill: '#88888811' }} />
+                                    <Bar dataKey="稼動率" fill="var(--color-primary)" radius={[4, 4, 0, 0]} />
+                                </BarChart>
+                            </ResponsiveContainer>
+                        </div>
                     </div>
-                </div>
                 )}
             </div>
 

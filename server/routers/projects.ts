@@ -1,10 +1,11 @@
 import { z } from "zod";
 import { router, protectedProcedure, roleProcedure } from "../_core/trpc";
-import { sharePointService } from "../services/SharePointService";
+import { sharePointService, SharePointService } from "../services/SharePointService";
 import { ServiceRequestModel } from "../models/ServiceRequest";
 import { SettlementLockModel } from "../models/SettlementLock";
 import { TimesheetModel } from "../models/Timesheet";
 import { UserModel } from "../models/User";
+import { SystemSettingModel } from "../models/Settings";
 import { OpportunityModel } from "../models/Opportunity";
 import mongoose from "mongoose";
 import { TRPCError } from "@trpc/server";
@@ -210,6 +211,21 @@ export const projectsRouter = router({
                 status: "new",
                 members: buildSrMembers(ctx.user.id, input.pmId, input.joinPmAsMember)
             });
+
+            // SharePoint Folder Hook
+            try {
+                const setting = await SystemSettingModel.findOne({ key: "sharePointSiteUrl" }).lean();
+                if (setting?.value) {
+                    const pm = await UserModel.findById(input.pmId).select("name").lean();
+                    const folderName = SharePointService.buildFolderName(input.title, pm?.name || "PM");
+                    const { folderUrl } = await sharePointService.createProjectFolder(setting.value, "專案", folderName);
+                    if (folderUrl) {
+                        await ServiceRequestModel.updateOne({ _id: sr._id }, { $set: { sharePointFolderUrl: folderUrl } });
+                    }
+                }
+            } catch (err) {
+                console.error("[SharePoint Hook] Project creation folder failed:", err);
+            }
 
             if (input.opportunityId) {
                 await OpportunityModel.updateOne(

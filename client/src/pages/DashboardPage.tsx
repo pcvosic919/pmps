@@ -133,7 +133,6 @@ export function DashboardPage() {
                     <div className="text-2xl font-bold mt-2">{activeOpps?.count ?? 0} <span className="text-sm font-normal text-muted-foreground">筆</span></div>
                     <p className="text-xs text-muted-foreground mt-1 text-blue-500">請前往商機管理進行排序與篩選</p>
                 </div>
-
                 <div className="p-6 bg-card border border-border shadow-sm rounded-xl">
                     <h3 className="font-medium text-sm text-muted-foreground flex items-center justify-between">
                         執行中專案
@@ -142,23 +141,20 @@ export function DashboardPage() {
                     <div className="text-2xl font-bold mt-2">{activeProjects?.count ?? 0} <span className="text-sm font-normal text-muted-foreground">個</span></div>
                     <p className="text-xs text-muted-foreground mt-1 text-green-500">專案列表已依帳號權限過濾</p>
                 </div>
-            </div>
-
-            <div className="grid gap-6 md:grid-cols-3">
                 {managementCards.map((card) => (
                     <Link key={card.label} href={card.href}>
-                        <a className="group relative overflow-hidden rounded-2xl border border-border bg-card p-6 shadow-sm transition-all duration-300 hover:shadow-md hover:border-primary/40 hover:-translate-y-1">
+                        <a className="group relative overflow-hidden rounded-xl border border-border bg-card p-6 shadow-sm transition-all duration-300 hover:shadow-md hover:border-primary/40 hover:-translate-y-1 block">
                             <div className="relative z-10 flex items-center justify-between">
                                 <div>
-                                    <div className="text-sm font-semibold text-muted-foreground uppercase tracking-wider">{card.label}</div>
-                                    <div className="mt-3 text-4xl font-black tracking-tight">{card.value}</div>
+                                    <div className="text-sm font-semibold text-muted-foreground">{card.label}</div>
+                                    <div className="mt-2 text-3xl font-black tracking-tight">{card.value}</div>
                                 </div>
-                                <div className={cn("rounded-2xl p-3 bg-muted/50", card.tone.replace('text-', 'bg-').replace('600', '100').replace('500', '100'))}>
-                                    <card.icon className={cn("h-6 w-6", card.tone)} />
+                                <div className={cn("rounded-xl p-3 bg-muted/50")}>
+                                    <card.icon className={cn("h-5 w-5", card.tone)} />
                                 </div>
                             </div>
-                            <p className="mt-4 text-xs text-muted-foreground leading-relaxed">{card.helper}</p>
-                            <div className={cn("absolute bottom-0 left-0 h-1.5 w-0 bg-primary transition-all duration-500 group-hover:w-full", card.tone.replace('text-', 'bg-'))} />
+                            <p className="mt-3 text-xs text-muted-foreground leading-relaxed">{card.helper}</p>
+                            <div className={cn("absolute bottom-0 left-0 h-1 w-0 bg-primary transition-all duration-500 group-hover:w-full", card.tone.replace('text-', 'bg-'))} />
                         </a>
                     </Link>
                 ))}

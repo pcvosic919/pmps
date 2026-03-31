@@ -1,6 +1,7 @@
-import { router, roleProcedure } from "../_core/trpc";
+import { router, roleProcedure, protectedProcedure } from "../_core/trpc";
 import { CustomFieldModel } from "../models/CustomField";
 import { SystemSettingModel } from "../models/Settings";
+import { sharePointService } from "../services/SharePointService";
 import { z } from "zod";
 
 const settingsPayloadSchema = z.object({
@@ -25,7 +26,8 @@ const settingsPayloadSchema = z.object({
     pcTargetMargin: z.number().min(0).max(100).default(30),
     pcSlaTarget: z.number().min(0).max(100).default(95),
     pcRenewalTarget: z.number().min(0).max(100).default(85),
-    pcUtilizationTarget: z.number().min(0).max(100).default(80)
+    pcUtilizationTarget: z.number().min(0).max(100).default(80),
+    sharePointSiteUrl: z.string().trim().default("")
 });
 
 const defaultSettings = {
@@ -49,7 +51,8 @@ const defaultSettings = {
     pcTargetMargin: 30,
     pcSlaTarget: 95,
     pcRenewalTarget: 85,
-    pcUtilizationTarget: 80
+    pcUtilizationTarget: 80,
+    sharePointSiteUrl: ""
 };
 
 type SettingsKey = keyof typeof defaultSettings;
@@ -80,7 +83,8 @@ const settingDefinitions: Record<SettingsKey, SettingDefinition> = {
     pcTargetMargin: { category: "general", valueType: "number" },
     pcSlaTarget: { category: "general", valueType: "number" },
     pcRenewalTarget: { category: "general", valueType: "number" },
-    pcUtilizationTarget: { category: "general", valueType: "number" }
+    pcUtilizationTarget: { category: "general", valueType: "number" },
+    sharePointSiteUrl: { category: "integrations", valueType: "string" }
 };
 
 function parseStoredValue(value: string, valueType: SettingDefinition["valueType"]) {
@@ -194,4 +198,25 @@ export const systemRouter = router({
         await CustomFieldModel.findByIdAndUpdate(id, data);
         return { success: true };
     }),
+
+    listSharePointFiles: protectedProcedure
+        .input(z.object({ 
+            category: z.enum(["商機", "專案"]), 
+            sharePointFolderUrl: z.string() 
+        }))
+        .query(async ({ input }) => {
+            const setting = await SystemSettingModel.findOne({ key: "sharePointSiteUrl" }).lean();
+            if (!setting?.value) return [];
+            
+            // Extract folder name from URL
+            // folderUrl looks like: `https://.../Shared%20Documents/商機/20260331_Title_Owner`
+            const parts = input.sharePointFolderUrl.split("/");
+            let folderName = parts[parts.length - 1];
+            if (!folderName && parts.length > 1) {
+                folderName = parts[parts.length - 2];
+            }
+            folderName = decodeURIComponent(folderName);
+            
+            return sharePointService.listFolderFiles(setting.value, input.category, folderName);
+        }),
 });

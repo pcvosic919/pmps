@@ -22,6 +22,7 @@ import {
     Search,
     Settings,
     Settings2,
+    TrendingUp,
     Users,
     X,
 } from "lucide-react";
@@ -97,12 +98,19 @@ const navGroups: NavGroup[] = [
         ],
     },
     {
+        key: "formula",
+        label: "公式設定",
+        items: [
+            { icon: CreditCard, label: "費率設定", href: "/cost-rates", roles: ["admin", "manager"] },
+            { icon: Settings2, label: "自訂欄位", href: "/custom-fields", roles: ["admin", "manager"] },
+            { icon: TrendingUp, label: "利潤中心公式", href: "/system-settings", roles: ["admin", "manager"] },
+        ],
+    },
+    {
         key: "system",
         label: "系統管理",
         items: [
             { icon: Settings, label: "帳號管理", href: "/users", roles: ["admin"] },
-            { icon: CreditCard, label: "費率設定", href: "/cost-rates", roles: ["admin"] },
-            { icon: Settings2, label: "自訂欄位", href: "/custom-fields", roles: ["admin"] },
             { icon: Settings, label: "系統設定", href: "/system-settings", roles: ["admin"] },
         ],
     },

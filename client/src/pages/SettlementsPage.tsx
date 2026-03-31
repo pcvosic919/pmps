@@ -2,7 +2,10 @@ import { useState } from "react";
 import { trpc } from "../lib/trpc";
 import { FileText, Search, Download, Lock, CheckCircle, CalendarDays } from "lucide-react";
 
+import { useCurrentUser } from "../lib/useCurrentUser";
+
 export function SettlementsPage() {
+    const { hasRole } = useCurrentUser();
     const [currentMonth, setCurrentMonth] = useState(new Date().toISOString().slice(0, 7));
     const [activeTab, setActiveTab] = useState<"project" | "presales">("project");
     const [searchTerm, setSearchTerm] = useState("");
@@ -150,7 +153,9 @@ export function SettlementsPage() {
                 <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
                     <div className="bg-card border border-border rounded-xl p-4 shadow-sm">
                         <div className="text-xs text-muted-foreground font-medium">合約營收</div>
-                        <div className="text-xl font-bold mt-1">${totalRevenue.toLocaleString()}</div>
+                        <div className="text-xl font-bold mt-1">
+                            {hasRole("tech") ? "---" : `$${totalRevenue.toLocaleString()}`}
+                        </div>
                     </div>
                     <div className="bg-card border border-border rounded-xl p-4 shadow-sm">
                         <div className="text-xs text-muted-foreground font-medium">直接人力成本</div>
@@ -239,7 +244,7 @@ export function SettlementsPage() {
                                 <tr>
                                     <th className="px-6 py-3 font-medium">SR 單號 / 名稱</th>
                                     <th className="px-6 py-3 font-medium">PM ID</th>
-                                    <th className="px-6 py-3 font-medium text-right">合約金額 (Revenue)</th>
+                                    {!hasRole("tech") && <th className="px-6 py-3 font-medium text-right">合約金額 (Revenue)</th>}
                                     <th className="px-6 py-3 font-medium text-right">本月工時成本 (Cost)</th>
                                     <th className="px-6 py-3 font-medium text-right">本月毛利預估</th>
                                     <th className="px-6 py-3 font-medium text-center">狀態</th>
@@ -270,7 +275,9 @@ export function SettlementsPage() {
                                                 <div className="text-muted-foreground mt-1 truncate max-w-xs">{sr.title}</div>
                                             </td>
                                             <td className="px-6 py-4 text-muted-foreground">#{sr.pmId ? sr.pmId.slice(-6) : "-"}</td>
-                                            <td className="px-6 py-4 text-right font-medium">${sr.contractAmount?.toLocaleString() || "0"}</td>
+                                            {!hasRole("tech") && (
+                                                <td className="px-6 py-4 text-right font-medium">${sr.contractAmount?.toLocaleString() || "0"}</td>
+                                            )}
                                             <td className="px-6 py-4 text-right text-rose-600 font-medium">${sr.totalCost?.toLocaleString() || "0"}</td>
                                             <td className="px-6 py-4 text-right">
                                                 <div className={`font-bold ${sr.margin >= 0 ? 'text-emerald-600' : 'text-rose-600'}`}>

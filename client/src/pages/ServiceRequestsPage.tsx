@@ -19,7 +19,10 @@ const srSchema = z.object({
     opportunityId: z.string().optional()
 });
 
+import { useCurrentUser } from "../lib/useCurrentUser";
+
 export function ServiceRequestsPage() {
+    const { hasRole } = useCurrentUser();
     const { data: srs, isLoading, refetch } = trpc.projects.srList.useQuery();
     const { data: opps } = trpc.opportunities.list.useInfiniteQuery({ limit: 100 });
     const { data: users } = trpc.users.list.useQuery({ limit: 100 });
@@ -80,12 +83,14 @@ export function ServiceRequestsPage() {
                     <h2 className="text-3xl font-bold tracking-tight bg-clip-text text-transparent bg-gradient-to-r from-primary to-primary/60">服務請求 (SR)</h2>
                     <p className="text-muted-foreground mt-1">管理各專案的服務執行狀況與毛利預期</p>
                 </div>
-                <button
-                    onClick={() => setIsCreating(true)}
-                    className="bg-primary text-primary-foreground hover:bg-primary/90 px-5 py-2.5 rounded-lg inline-flex items-center text-sm font-medium transition-all shadow-md hover:shadow-lg">
-                    <Plus className="w-4 h-4 mr-2" />
-                    建立 SR
-                </button>
+                {!hasRole("tech") && (
+                    <button
+                        onClick={() => setIsCreating(true)}
+                        className="bg-primary text-primary-foreground hover:bg-primary/90 px-5 py-2.5 rounded-lg inline-flex items-center text-sm font-medium transition-all shadow-md hover:shadow-lg">
+                        <Plus className="w-4 h-4 mr-2" />
+                        建立 SR
+                    </button>
+                )}
             </div>
 
             <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
@@ -112,10 +117,12 @@ export function ServiceRequestsPage() {
                         </h3>
 
                         <div className="space-y-3 py-3 border-t border-border/60">
-                            <div className="flex justify-between items-center text-sm">
-                                <span className="text-muted-foreground">合約金額</span>
-                                <span className="font-bold text-foreground">NT$ {sr.contractAmount?.toLocaleString() || 0}</span>
-                            </div>
+                            {!hasRole("tech") && (
+                                <div className="flex justify-between items-center text-sm">
+                                    <span className="text-muted-foreground">合約金額</span>
+                                    <span className="font-bold text-foreground">NT$ {sr.contractAmount?.toLocaleString() || 0}</span>
+                                </div>
+                            )}
                             <div className="flex justify-between items-center text-sm">
                                 <span className="text-muted-foreground flex items-center">
                                     <BarChart3 className="w-3.5 h-3.5 mr-1" />

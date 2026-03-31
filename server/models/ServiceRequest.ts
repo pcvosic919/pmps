@@ -45,6 +45,7 @@ export interface IServiceRequest extends Document {
     wbsVersions: IWbsVersion[];
     changeRequests: IChangeRequest[];
     customFields?: Array<Omit<CustomFieldValue, "fieldId"> & { fieldId: mongoose.Types.ObjectId }>;
+    sharePointFolderUrl?: string;
     createdAt: Date;
     updatedAt: Date;
 }
@@ -114,6 +115,7 @@ const ServiceRequestSchema = new Schema<IServiceRequest>({
         uploadedById: { type: Schema.Types.ObjectId, ref: "User", required: true },
         createdAt: { type: Date, default: Date.now }
     }],
+    sharePointFolderUrl: { type: String },
     wbsVersions: [WbsVersionSchema],
     changeRequests: [ChangeRequestSchema]
 }, { timestamps: true });

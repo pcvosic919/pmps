@@ -139,7 +139,7 @@ export function ProjectManagementPage() {
                                     </div>
                                     <h3 className="text-base font-bold text-foreground mb-2">{sr.title}</h3>
                                     <div className="flex items-center gap-6 text-sm text-muted-foreground flex-wrap">
-                                        <span>合約金額: <span className="font-semibold text-foreground">NT$ {sr.contractAmount?.toLocaleString()}</span></span>
+                                        {!hasRole("tech") && <span>合約金額: <span className="font-semibold text-foreground">NT$ {sr.contractAmount?.toLocaleString()}</span></span>}
                                         <span className="flex items-center gap-1">
                                             <BarChart3 className="w-3.5 h-3.5" />
                                             預估毛利: <span className={`font-semibold ml-1 ${sr.marginWarning ? "text-red-500" : "text-green-600"}`}>{sr.marginEstimate}%</span>

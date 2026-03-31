@@ -15,7 +15,12 @@ const toIdMap = (items: Array<{ _id: unknown; totalHours?: number; totalCost?: n
 
 export const analyticsRouter = router({
     getUtilization: roleProcedure(["admin", "manager", "pm"])
-        .input(z.object({ department: z.string().optional(), userId: z.string().optional() }).optional())
+        .input(z.object({ 
+            departments: z.array(z.string()).optional(), 
+            userIds: z.array(z.string()).optional(),
+            department: z.string().optional(), // backward compatibility
+            userId: z.string().optional()       // backward compatibility
+        }).optional())
         .query(async ({ ctx, input }) => {
         let userQuery: any = {
             $or: [
@@ -24,10 +29,15 @@ export const analyticsRouter = router({
             ]
         };
 
-        if (input?.department) {
+        if (input?.departments?.length) {
+            userQuery.department = { $in: input.departments };
+        } else if (input?.department) {
             userQuery.department = input.department;
         }
-        if (input?.userId) {
+
+        if (input?.userIds?.length) {
+            userQuery._id = { $in: input.userIds };
+        } else if (input?.userId) {
             userQuery._id = input.userId;
         }
         
@@ -76,7 +86,13 @@ export const analyticsRouter = router({
     }),
 
     getSettlements: roleProcedure(["admin", "manager"])
-        .input(z.object({ month: z.string().optional(), department: z.string().optional(), userId: z.string().optional() }))
+        .input(z.object({ 
+            month: z.string().optional(), 
+            departments: z.array(z.string()).optional(), 
+            userIds: z.array(z.string()).optional(),
+            department: z.string().optional(),
+            userId: z.string().optional()
+        }))
         .query(async ({ input }) => {
             const currentMonth = input.month || new Date().toISOString().slice(0, 7);
             const startDate = new Date(`${currentMonth}-01T00:00:00.000Z`);
@@ -84,15 +100,17 @@ export const analyticsRouter = router({
 
             let srQuery: any = {};
             let oppQuery: any = {};
-            let tsMatchProj: any = { type: "project", workDate: { $gte: startDate, $lte: endDate } };
-            let tsMatchPre: any = { type: "presales", workDate: { $gte: startDate, $lte: endDate } };
+            let tsMatch: any = { workDate: { $gte: startDate, $lte: endDate } };
 
             let filteringUserIds: any[] = [];
             
-            if (input.department || input.userId) {
+            if (input.departments?.length || input.userIds?.length || input.department || input.userId) {
                 let uq: any = {};
-                if (input.department) uq.department = input.department;
-                if (input.userId) uq._id = input.userId;
+                if (input.departments?.length) uq.department = { $in: input.departments };
+                else if (input.department) uq.department = input.department;
+
+                if (input.userIds?.length) uq._id = { $in: input.userIds };
+                else if (input.userId) uq._id = input.userId;
                 
                 const deptUsers = await UserModel.find(uq, { _id: 1 }).lean();
                 filteringUserIds = deptUsers.map(u => u._id);
@@ -100,46 +118,56 @@ export const analyticsRouter = router({
                 if (filteringUserIds.length > 0) {
                     srQuery = { pmId: { $in: filteringUserIds } };
                     oppQuery = { ownerId: { $in: filteringUserIds } };
-                    tsMatchProj.techId = { $in: filteringUserIds };
-                    tsMatchPre.techId = { $in: filteringUserIds };
+                    tsMatch.techId = { $in: filteringUserIds };
                 } else {
                     srQuery = { _id: null };
                     oppQuery = { _id: null };
-                    tsMatchProj.techId = null;
-                    tsMatchPre.techId = null;
+                    tsMatch.techId = null;
                 }
             }
 
-            const [srs, opps, projectCostAgg, presalesCostAgg, locks] = await Promise.all([
+            // Fetch timesheets and users to calculate REVENUE (hours * rate)
+            const [srs, opps, timesheets, locks] = await Promise.all([
                 ServiceRequestModel.find(srQuery, { _id: 1, title: 1, pmId: 1, contractAmount: 1, status: 1 }).lean(),
                 OpportunityModel.find(oppQuery, { _id: 1, title: 1, customerName: 1, status: 1 }).lean(),
-                TimesheetModel.aggregate([
-                    { $match: tsMatchProj },
-                    { $group: { _id: "$srId", totalCost: { $sum: "$costAmount" } } }
-                ]),
-                TimesheetModel.aggregate([
-                    { $match: tsMatchPre },
-                    { $group: { _id: "$opportunityId", totalCost: { $sum: "$costAmount" } } }
-                ]),
+                TimesheetModel.find(tsMatch).populate("techId").lean(),
                 SettlementLockModel.find({ month: currentMonth }).lean()
             ]);
 
-            const projectCostMap = toIdMap(projectCostAgg, "totalCost");
-            const presalesCostMap = toIdMap(presalesCostAgg, "totalCost");
+            const projectRevMap = new Map<string, number>();
+            const presalesRevMap = new Map<string, number>();
+
+            for (const ts of (timesheets as any[])) {
+                const user = ts.techId;
+                if (!user) continue;
+                
+                let val = 0;
+                if (ts.type === "presales") {
+                    // Presales: hourly rate
+                    val = ts.hours * (user.costRate?.hourlyRate || 0);
+                    const oppId = ts.opportunityId?.toString();
+                    if (oppId) presalesRevMap.set(oppId, (presalesRevMap.get(oppId) || 0) + val);
+                } else {
+                    // Project: daily rate (1 day = 8 hours)
+                    val = (ts.hours / 8) * (user.costRate?.dailyRate || 0);
+                    const srId = ts.srId?.toString();
+                    if (srId) projectRevMap.set(srId, (projectRevMap.get(srId) || 0) + val);
+                }
+            }
 
             return {
                 currentMonth,
                 isProjectLocked: locks.some((l: any) => l.type === "project" && l.isLocked),
                 isPresalesLocked: locks.some((l: any) => l.type === "presales" && l.isLocked),
                 projects: srs.map((sr: any) => {
-                    const totalCost = projectCostMap.get(sr._id.toString()) ?? 0;
-                    const margin = sr.contractAmount - totalCost;
+                    const totalRevenue = projectRevMap.get(sr._id.toString()) ?? 0;
+                    const margin = sr.contractAmount - totalRevenue;
                     return {
                         id: sr._id.toString(),
                         title: sr.title,
                         pmId: sr.pmId?.toString(),
                         contractAmount: sr.contractAmount,
-                        totalCost,
+                        totalCost: totalRevenue, // Still named totalCost in FE but shows calculated interior revenue
                         margin,
                         marginPercent: sr.contractAmount > 0 ? Math.round((margin / sr.contractAmount) * 100) : 0,
                         status: sr.status
@@ -149,7 +177,7 @@ export const analyticsRouter = router({
                     id: opp._id.toString(),
                     title: opp.title,
                     customerName: opp.customerName,
-                    totalCost: presalesCostMap.get(opp._id.toString()) ?? 0,
+                    totalCost: presalesRevMap.get(opp._id.toString()) ?? 0,
                     status: opp.status
                 }))
             };
@@ -170,8 +198,10 @@ export const analyticsRouter = router({
         .input(z.object({ 
             startDate: z.string().optional(), 
             endDate: z.string().optional(),
-            department: z.string().optional(), 
-            userId: z.string().optional() 
+            departments: z.array(z.string()).optional(), 
+            userIds: z.array(z.string()).optional(),
+            department: z.string().optional(),
+            userId: z.string().optional()
         }).optional())
         .query(async ({ input }) => {
         let srMatch: any = {};
@@ -187,10 +217,13 @@ export const analyticsRouter = router({
             tsMatch.workDate = { $gte: minDate, $lte: maxDate };
         }
 
-        if (input?.department || input?.userId) {
+        if (input?.departments?.length || input?.userIds?.length || input?.department || input?.userId) {
             let uq: any = {};
-            if (input.department) uq.department = input.department;
-            if (input.userId) uq._id = input.userId;
+            if (input.departments?.length) uq.department = { $in: input.departments };
+            else if (input.department) uq.department = input.department;
+
+            if (input.userIds?.length) uq._id = { $in: input.userIds };
+            else if (input.userId) uq._id = input.userId;
             
             const deptUsers = await UserModel.find(uq, { _id: 1 }).lean();
             const deptUserIds = deptUsers.map(u => u._id);
@@ -233,7 +266,7 @@ export const analyticsRouter = router({
                         pendingOpps: {
                             $sum: {
                                 $cond: [
-                                    { $in: ["$status", ["qualified", "presales_active", "new"]] },
+                                    { $in: ["$status", ["qualified", "presales_active", "new", "under_negotiation"]] },
                                     1,
                                     0
                                 ]
@@ -274,14 +307,22 @@ export const analyticsRouter = router({
     }),
 
     getWinRateTrend: roleProcedure(["admin", "manager"])
-        .input(z.object({ department: z.string().optional(), userId: z.string().optional() }).optional())
+        .input(z.object({ 
+            departments: z.array(z.string()).optional(), 
+            userIds: z.array(z.string()).optional(),
+            department: z.string().optional(),
+            userId: z.string().optional()
+        }).optional())
         .query(async ({ input }) => {
         let oppMatch: any = {};
         
-        if (input?.department || input?.userId) {
+        if (input?.departments?.length || input?.userIds?.length || input?.department || input?.userId) {
             let uq: any = {};
-            if (input.department) uq.department = input.department;
-            if (input.userId) uq._id = input.userId;
+            if (input.departments?.length) uq.department = { $in: input.departments };
+            else if (input.department) uq.department = input.department;
+
+            if (input.userIds?.length) uq._id = { $in: input.userIds };
+            else if (input.userId) uq._id = input.userId;
             
             const deptUsers = await UserModel.find(uq, { _id: 1 }).lean();
             const deptUserIds = deptUsers.map(u => u._id);
@@ -317,15 +358,60 @@ export const analyticsRouter = router({
         }));
     }),
 
-    getCostVsRevenuePerPerson: roleProcedure(["admin", "manager"])
-        .input(z.object({ department: z.string().optional(), userId: z.string().optional() }).optional())
+    getProjectStatusData: roleProcedure(["admin", "manager"])
+        .input(z.object({
+            departments: z.array(z.string()).optional(), 
+            userIds: z.array(z.string()).optional()
+        }).optional())
         .query(async ({ input }) => {
-        let userQuery: any = {};
+            let srMatch: any = {};
+            if (input?.departments?.length || input?.userIds?.length) {
+                let uq: any = {};
+                if (input.departments?.length) uq.department = { $in: input.departments };
+                if (input.userIds?.length) uq._id = { $in: input.userIds };
+                const users = await UserModel.find(uq, { _id: 1 }).lean();
+                srMatch.pmId = { $in: users.map(u => u._id) };
+            }
+
+            const stats = await ServiceRequestModel.aggregate([
+                { $match: srMatch },
+                {
+                    $group: {
+                        _id: "$status",
+                        totalRevenue: { $sum: "$contractAmount" },
+                        count: { $sum: 1 }
+                    }
+                }
+            ]);
+
+            const wonData = stats.find(s => s._id === "won") || { totalRevenue: 0, count: 0 };
+            const inProgressData = stats.find(s => s._id === "in_progress") || { totalRevenue: 0, count: 0 };
+            
+            return [
+                { name: "已成交營收 (Won)", value: wonData.totalRevenue, count: wonData.count },
+                { name: "執行中代收 (In-Progress)", value: inProgressData.totalRevenue, count: inProgressData.count }
+            ];
+        }),
+
+    getCostVsRevenuePerPerson: roleProcedure(["admin", "manager"])
+        .input(z.object({ 
+            departments: z.array(z.string()).optional(), 
+            userIds: z.array(z.string()).optional(),
+            department: z.string().optional(),
+            userId: z.string().optional()
+        }).optional())
+        .query(async ({ input }) => {
+        let userQuery: any = { role: { $in: ["pm", "tech", "presales"] } };
         
-        if (input?.department) {
+        if (input?.departments?.length) {
+            userQuery.department = { $in: input.departments };
+        } else if (input?.department) {
             userQuery.department = input.department;
         }
-        if (input?.userId) {
+
+        if (input?.userIds?.length) {
+            userQuery._id = { $in: input.userIds };
+        } else if (input?.userId) {
             userQuery._id = input.userId;
         }
 

@@ -26,6 +26,7 @@ export interface IOpportunity extends Document {
     presalesAssignments: IPresalesAssignment[];
     customFields?: IOpportunityCustomField[];
     attachments: { fileName: string; fileUrl: string; sharePointDriveId?: string; sharePointItemId?: string; uploadedById: mongoose.Types.ObjectId; uploadedAt: Date }[];
+    sharePointFolderUrl?: string;
     createdAt: Date;
     updatedAt: Date;
 }
@@ -59,7 +60,8 @@ const OpportunitySchema = new Schema<IOpportunity>({
         sharePointItemId: { type: String },
         uploadedById: { type: Schema.Types.ObjectId, ref: "User", required: true },
         uploadedAt: { type: Date, default: Date.now }
-    }]
+    }],
+    sharePointFolderUrl: { type: String }
 }, { timestamps: true });
 
 OpportunitySchema.index({ ownerId: 1, status: 1, createdAt: -1 });

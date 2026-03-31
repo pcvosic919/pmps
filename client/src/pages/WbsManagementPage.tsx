@@ -5,6 +5,8 @@ import { ArrowLeft, Plus, FileText, Clock, Trash2, Save, X, CheckCircle2, XCircl
 import { Link } from "wouter";
 import toast from "react-hot-toast";
 import { useCurrentUser } from "../lib/useCurrentUser";
+import * as XLSX from "xlsx";
+import { SharePointFilesSection } from "../components/SharePointFilesSection";
 
 export function WbsManagementPage() {
     const [, params] = useRoute("/service-requests/:id");
@@ -87,6 +89,42 @@ export function WbsManagementPage() {
             toast.success("專案議題狀態已更新");
         }
     });
+
+    const handleExcelImport = (e: React.ChangeEvent<HTMLInputElement>) => {
+        const file = e.target.files?.[0];
+        if (!file) return;
+
+        const reader = new FileReader();
+        reader.onload = (event) => {
+            try {
+                const data = new Uint8Array(event.target?.result as ArrayBuffer);
+                const workbook = XLSX.read(data, { type: 'array' });
+                const sheetName = workbook.SheetNames[0];
+                const worksheet = workbook.Sheets[sheetName];
+                const json = XLSX.utils.sheet_to_json(worksheet);
+
+                const importedItems = json.map((row: any) => {
+                    const assigneeName = row['負責人'] || row['Assignee'];
+                    const assignee = techs?.find(t => t.name === assigneeName);
+                    return {
+                        title: row['項目名稱'] || row['Title'] || row['項目'] || '未命名項目',
+                        estimatedHours: Number(row['預估工時'] || row['Hours'] || row['工時'] || 0),
+                        assigneeId: assignee?.id,
+                        level: Number(row['階層'] || row['Level'] || 0),
+                        completionPercentage: 0
+                    };
+                });
+
+                setDraftItems(prev => [...prev, ...importedItems]);
+                toast.success(`已匯入 ${importedItems.length} 項任務`);
+            } catch (err) {
+                console.error(err);
+                toast.error("解析 Excel 失敗，請檢查格式");
+            }
+            e.target.value = ''; // Reset input
+        };
+        reader.readAsArrayBuffer(file);
+    };
 
     if (isLoading) return <div className="p-8 text-center text-muted-foreground">載入中...</div>;
     if (error) return <div className="p-8 text-center text-destructive">無法存取：{error.message}</div>;
@@ -279,14 +317,18 @@ export function WbsManagementPage() {
                                 <span className="text-muted-foreground">建立日期</span>
                                 <span className="font-medium">{new Date(sr.createdAt).toLocaleDateString()}</span>
                             </div>
-                            <div className="flex justify-between">
-                                <span className="text-muted-foreground">合約金額</span>
-                                <span className="font-bold">NT$ {sr.contractAmount?.toLocaleString() || 0}</span>
-                            </div>
-                            <div className="flex justify-between items-center">
-                                <span className="text-muted-foreground">預估毛利</span>
-                                <span className={`font-bold ${sr.marginWarning ? 'text-destructive' : 'text-green-600'}`}>{sr.marginEstimate}%</span>
-                            </div>
+                            {!hasRole("tech") && (
+                                <>
+                                    <div className="flex justify-between">
+                                        <span className="text-muted-foreground">合約金額</span>
+                                        <span className="font-bold">NT$ {sr.contractAmount?.toLocaleString() || 0}</span>
+                                    </div>
+                                    <div className="flex justify-between items-center">
+                                        <span className="text-muted-foreground">預估毛利</span>
+                                        <span className={`font-bold ${sr.marginWarning ? 'text-destructive' : 'text-green-600'}`}>{sr.marginEstimate}%</span>
+                                    </div>
+                                </>
+                            )}
                         </div>
                     </div>
 
@@ -571,6 +613,14 @@ export function WbsManagementPage() {
                                         <p className="text-muted-foreground">目前還沒有任何 WBS 版本，請建立以開始派工</p>
                                     </div>
                                 )}
+                                
+                                <div className="mt-8 border-t pt-8">
+                                    <SharePointFilesSection 
+                                        category="專案" 
+                                        sharePointFolderUrl={sr.sharePointFolderUrl} 
+                                        title="專案專屬 SharePoint 文件庫"
+                                    />
+                                </div>
                             </div>
                         </>
                     ) : (
@@ -578,10 +628,27 @@ export function WbsManagementPage() {
                         <div className="bg-card border border-primary/20 rounded-xl shadow-lg ring-1 ring-primary/20 flex flex-col">
                             <div className="p-4 border-b border-border bg-muted/30 flex justify-between items-center rounded-t-xl">
                                 <h3 className="font-bold text-lg flex items-center"><Plus className="w-5 h-5 mr-2 text-primary" />草稿：建立版本 v{nextVersionNumber}</h3>
-                                <button onClick={() => { setIsBuildingVersion(false); setDraftItems([]); }}
-                                    className="p-1 hover:bg-muted rounded text-muted-foreground hover:text-foreground transition-colors">
-                                    <X className="w-5 h-5" />
-                                </button>
+                                <div className="flex items-center gap-2">
+                                    <button 
+                                        onClick={() => document.getElementById('wbs-excel-import')?.click()}
+                                        className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-xs font-semibold transition-all shadow-sm hover:shadow-md"
+                                        title="從 Excel/CSV 匯入 WBS 項目"
+                                    >
+                                        <Upload className="w-3.5 h-3.5" />
+                                        Excel 匯入
+                                    </button>
+                                    <input 
+                                        id="wbs-excel-import"
+                                        type="file" 
+                                        accept=".xlsx, .xls, .csv" 
+                                        className="hidden" 
+                                        onChange={handleExcelImport} 
+                                    />
+                                    <button onClick={() => { setIsBuildingVersion(false); setDraftItems([]); }}
+                                        className="p-1 hover:bg-muted rounded text-muted-foreground hover:text-foreground transition-colors">
+                                        <X className="w-5 h-5" />
+                                    </button>
+                                </div>
                             </div>
                             <div className="p-4 space-y-4 flex-1">
                                 <div className="rounded-lg border border-primary/15 bg-primary/5 px-4 py-3 text-sm text-muted-foreground">

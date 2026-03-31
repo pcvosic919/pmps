@@ -16,7 +16,10 @@ import {
     Cell
 } from "recharts";
 
+import { useCurrentUser } from "../lib/useCurrentUser";
+
 export function PmDashboardPage() {
+    const { hasRole } = useCurrentUser();
     const { data: projects, isLoading } = trpc.projects.srList.useQuery({ limit: 50 });
 
     const activeProjects = useMemo(() => 
@@ -93,9 +96,9 @@ export function PmDashboardPage() {
                         <div>
                             <p className="text-sm font-semibold tracking-wider text-muted-foreground uppercase text-xs">管理總合約額</p>
                             <h3 className="text-3xl font-black mt-2 bg-clip-text text-transparent bg-gradient-to-r from-emerald-600 to-emerald-400">
-                                {metrics.totalAmount >= 1000000 
+                                {hasRole("tech") ? "---" : (metrics.totalAmount >= 1000000 
                                     ? `NT$ ${(metrics.totalAmount / 1000000).toFixed(1)}M` 
-                                    : `NT$ ${(metrics.totalAmount / 1000).toFixed(0)}K`}
+                                    : `NT$ ${(metrics.totalAmount / 1000).toFixed(0)}K`)}
                             </h3>
                         </div>
                         <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-emerald-500/20 to-teal-500/10 flex items-center justify-center text-emerald-500 border border-emerald-500/20 shadow-inner">
@@ -156,34 +159,40 @@ export function PmDashboardPage() {
                         <Activity className="w-5 h-5 mr-2 text-primary drop-shadow-[0_0_5px_rgba(var(--primary),0.5)]" /> Top 10 活躍專案 (按合約額)
                     </h3>
                     <div className="h-[300px] w-full">
-                        <ResponsiveContainer width="100%" height="100%">
-                            <BarChart data={chartData} margin={{ top: 5, right: 30, left: 20, bottom: 5 }}>
-                                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="hsl(var(--border)/0.5)" />
-                                <XAxis dataKey="name" tick={{ fontSize: 12 }} stroke="hsl(var(--muted-foreground))" />
-                                <YAxis tick={{ fontSize: 12 }} stroke="hsl(var(--muted-foreground))" tickFormatter={(val) => `NT$${val/1000}k`} />
-                                <Tooltip 
-                                    formatter={(value: any) => [`NT$ ${Number(value).toLocaleString()}`, "合約金額"]}
-                                    labelFormatter={(label, payload) => payload?.[0]?.payload?.fullTitle || label}
-                                    cursor={{fill: 'hsl(var(--primary)/0.05)'}}
-                                    contentStyle={{ borderRadius: '12px', border: '1px solid hsl(var(--primary)/0.2)', backgroundColor: 'hsl(var(--card)/0.9)', backdropFilter: 'blur(8px)', boxShadow: '0 10px 25px -5px rgba(0, 0, 0, 0.1), 0 8px 10px -6px rgba(0, 0, 0, 0.1)' }}
-                                />
-                                <Bar dataKey="amount" radius={[6, 6, 0, 0]} barSize={40}>
-                                    {chartData.map((entry, index) => (
-                                        <Cell key={`cell-${index}`} fill={entry.warning ? "url(#colorWarning)" : "url(#colorPrimary)"} />
-                                    ))}
-                                </Bar>
-                                <defs>
-                                    <linearGradient id="colorPrimary" x1="0" y1="0" x2="0" y2="1">
-                                        <stop offset="5%" stopColor="hsl(var(--primary))" stopOpacity={0.9}/>
-                                        <stop offset="95%" stopColor="hsl(var(--primary))" stopOpacity={0.4}/>
-                                    </linearGradient>
-                                    <linearGradient id="colorWarning" x1="0" y1="0" x2="0" y2="1">
-                                        <stop offset="5%" stopColor="#ef4444" stopOpacity={0.9}/>
-                                        <stop offset="95%" stopColor="#ef4444" stopOpacity={0.4}/>
-                                    </linearGradient>
-                                </defs>
-                            </BarChart>
-                        </ResponsiveContainer>
+                        {hasRole("tech") ? (
+                            <div className="h-full flex items-center justify-center text-muted-foreground italic bg-muted/20 rounded-xl border border-dashed">
+                                合約金額資訊僅限特定角色查閱
+                            </div>
+                        ) : (
+                            <ResponsiveContainer width="100%" height="100%">
+                                <BarChart data={chartData} margin={{ top: 5, right: 30, left: 20, bottom: 5 }}>
+                                    <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="hsl(var(--border)/0.5)" />
+                                    <XAxis dataKey="name" tick={{ fontSize: 12 }} stroke="hsl(var(--muted-foreground))" />
+                                    <YAxis tick={{ fontSize: 12 }} stroke="hsl(var(--muted-foreground))" tickFormatter={(val) => `NT$${val/1000}k`} />
+                                    <Tooltip 
+                                        formatter={(value: any) => [`NT$ ${Number(value).toLocaleString()}`, "合約金額"]}
+                                        labelFormatter={(label, payload) => payload?.[0]?.payload?.fullTitle || label}
+                                        cursor={{fill: 'hsl(var(--primary)/0.05)'}}
+                                        contentStyle={{ borderRadius: '12px', border: '1px solid hsl(var(--primary)/0.2)', backgroundColor: 'hsl(var(--card)/0.9)', backdropFilter: 'blur(8px)', boxShadow: '0 10px 25px -5px rgba(0, 0, 0, 0.1), 0 8px 10px -6px rgba(0, 0, 0, 0.1)' }}
+                                    />
+                                    <Bar dataKey="amount" radius={[6, 6, 0, 0]} barSize={40}>
+                                        {chartData.map((entry, index) => (
+                                            <Cell key={`cell-${index}`} fill={entry.warning ? "url(#colorWarning)" : "url(#colorPrimary)"} />
+                                        ))}
+                                    </Bar>
+                                    <defs>
+                                        <linearGradient id="colorPrimary" x1="0" y1="0" x2="0" y2="1">
+                                            <stop offset="5%" stopColor="hsl(var(--primary))" stopOpacity={0.9}/>
+                                            <stop offset="95%" stopColor="hsl(var(--primary))" stopOpacity={0.4}/>
+                                        </linearGradient>
+                                        <linearGradient id="colorWarning" x1="0" y1="0" x2="0" y2="1">
+                                            <stop offset="5%" stopColor="#ef4444" stopOpacity={0.9}/>
+                                            <stop offset="95%" stopColor="#ef4444" stopOpacity={0.4}/>
+                                        </linearGradient>
+                                    </defs>
+                                </BarChart>
+                            </ResponsiveContainer>
+                        )}
                     </div>
                 </div>
 
@@ -207,7 +216,7 @@ export function PmDashboardPage() {
                                         <span className="bg-primary/10 text-primary border border-primary/20 shadow-inner px-2.5 py-1 rounded-md capitalize font-semibold tracking-wide">
                                             {p.status.replace("_", " ")}
                                         </span>
-                                        <span className="font-mono font-medium text-muted-foreground group-hover:text-foreground transition-colors">NT$ {p.contractAmount?.toLocaleString()}</span>
+                                        {!hasRole("tech") && <span className="font-mono font-medium text-muted-foreground group-hover:text-foreground transition-colors">NT$ {p.contractAmount?.toLocaleString()}</span>}
                                     </div>
                                 </a>
                             </Link>
