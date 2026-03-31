@@ -3,6 +3,7 @@ import { trpc } from "../lib/trpc";
 import { Link } from "wouter";
 import { AlertTriangle, CheckCircle2, Clock3, FolderKanban, Search, TrendingUp, Users } from "lucide-react";
 import { useCurrentUser } from "../lib/useCurrentUser";
+import { cn } from "../lib/utils";
 
 export function DashboardPage() {
     const { user, hasRole } = useCurrentUser();

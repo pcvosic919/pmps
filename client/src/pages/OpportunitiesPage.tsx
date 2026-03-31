@@ -274,7 +274,7 @@ export function OpportunitiesPage() {
                             <FormField
                                 control={form.control}
                                 name="status"
-                                render={({ field }: any) => (
+                                render={({ field: _field }: any) => (
                                     <FormItem>
                                         <FormLabel>狀態 (Status)</FormLabel>
                                         <FormMessage />

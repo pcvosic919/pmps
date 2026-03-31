@@ -77,7 +77,7 @@ export const analyticsRouter = router({
 
     getSettlements: roleProcedure(["admin", "manager"])
         .input(z.object({ month: z.string().optional(), department: z.string().optional(), userId: z.string().optional() }))
-        .query(async ({ input, ctx }) => {
+        .query(async ({ input }) => {
             const currentMonth = input.month || new Date().toISOString().slice(0, 7);
             const startDate = new Date(`${currentMonth}-01T00:00:00.000Z`);
             const endDate = new Date(startDate.getUTCFullYear(), startDate.getUTCMonth() + 1, 0, 23, 59, 59, 999);
@@ -173,7 +173,7 @@ export const analyticsRouter = router({
             department: z.string().optional(), 
             userId: z.string().optional() 
         }).optional())
-        .query(async ({ ctx, input }) => {
+        .query(async ({ input }) => {
         let srMatch: any = {};
         let oppMatch: any = {};
         let tsMatch: any = { type: "project" };
@@ -275,7 +275,7 @@ export const analyticsRouter = router({
 
     getWinRateTrend: roleProcedure(["admin", "manager"])
         .input(z.object({ department: z.string().optional(), userId: z.string().optional() }).optional())
-        .query(async ({ ctx, input }) => {
+        .query(async ({ input }) => {
         let oppMatch: any = {};
         
         if (input?.department || input?.userId) {
@@ -319,7 +319,7 @@ export const analyticsRouter = router({
 
     getCostVsRevenuePerPerson: roleProcedure(["admin", "manager"])
         .input(z.object({ department: z.string().optional(), userId: z.string().optional() }).optional())
-        .query(async ({ ctx, input }) => {
+        .query(async ({ input }) => {
         let userQuery: any = {};
         
         if (input?.department) {
