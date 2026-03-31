@@ -1,6 +1,9 @@
 # PMP System — 專案管理平台
 
-> **Project Management Platform** — 整合售前、SR 管理、WBS、工時、結算的全流程 SaaS 系統
+> **Project Management Platform (Full Phase 1-8)** — 整合售前、SR 管理、WBS、工時、結算、AI 整合與 SharePoint 的全流程 SaaS 系統
+
+[![Status](https://img.shields.io/badge/Status-100%25_Completed-success?style=for-the-badge)](https://github.com/pcvosic919/pmps)
+[![Stack](https://img.shields.io/badge/Stack-React_19_|_TRPC_|_MongoDB-blue?style=for-the-badge)](https://github.com/pcvosic919/pmps)
 
 ---
 
@@ -33,7 +36,9 @@ PMPsystem/
 | react-hook-form | 7.x | 表單管理 |
 | zod | 3.22 | 資料驗證 |
 | @hookform/resolvers | 2.9.11 | Zod 整合 |
-| recharts | 3.x | 圖表 |
+| recharts | 3.x | 專案報表與稼動率動態圖表 |
+| lucide-react | latest | 圖示系統 |
+| i18next | latest | 多語系支援 (zh-TW/en) |
 | wouter | 3.x | SPA 路由 |
 | react-hot-toast | latest | 通知提示 |
 
@@ -105,6 +110,8 @@ pnpm seed:demo     # 寫入 MongoDB demo 資料
 | `ENTRA_CLIENT_SECRET` | 否 | Entra ID 帳號同步 Client Secret 後備值 |
 | `ENTRA_TENANT_ID` | 否 | Entra ID Tenant ID 後備值 |
 | `GEMINI_API_KEY` | 否 | Google AI Studio 密鑰 (用於 AI 報表故事分析) |
+| `COPILOT_API_KEY` | **是** | Copilot Studio REST API 安全驗證密鑰 (X-API-KEY) |
+| `GRAPH_API_SECRET` | 否 | Microsoft Graph API 祕鑰 (SharePoint 整合用) |
 | `PORT` | 否 | 容器 Port，預設為 `5000` |
 
 ### 打包與運作原理
@@ -142,6 +149,8 @@ pnpm seed:demo     # 寫入 MongoDB demo 資料
 | `/change-requests` | `ChangeRequestsPage` | 上線 | 變更請求審核 |
 | `/presales-timesheets` | `PresalesTimesheetsPage` | 上線 | 協銷工時填報 |
 | `/project-timesheets` | `ProjectTimesheetsPage` | 上線 | 專案工時填報 |
+| `/reports` | `ReportBuilderPage` | 上線 | 報表產生器 (含 Recharts 視覺化) |
+| `/issues` | `IssueManagementPage` | 上線 | 專案議題管理 |
 | `/kpi` | `KpiDashboardPage` | 上線 | KPI 分析儀表板 |
 | `/login` | `LoginPage` | 上線 | 驗證入口，不顯示於主導覽 |
 
@@ -187,6 +196,7 @@ pnpm seed:demo     # 寫入 MongoDB demo 資料
 users                  # 使用者、技能、費率、成本歷程
 opportunities          # 商機、成員、協銷指派、自訂欄位值
 service_requests       # SR、附件、WBS 版本、變更請求
+issues                 # 專案議題、影響等級、處理狀態
 timesheets             # 協銷 / 專案工時
 notifications          # 系統通知
 settlementlocks        # 月結鎖定
@@ -250,6 +260,13 @@ user       → 一般用戶
 
 ### `integrations` — 整合
 - `syncEntra` — Microsoft Entra ID 同步 (骨架)
+- `sharePoint` — 透過 `SharePointService` 進行文件與 RAG 資訊對接
+
+### 🤖 `Copilot REST API (v1)` — AI 機器人對接 (非 tRPC)
+- `GET /api/v1/projects/active` — 提供給 Copilot 的進行中專案清單 (RAG 最佳化)
+- `GET /api/v1/opportunities/won` — 最近成交商機清單查詢
+- `GET /api/v1/issues/critical` — 暴露關鍵風險議題供 AI 回答專案狀態
+- `X-API-KEY` — 獨立於 JWT 的機器對機器驗證機制
 
 ---
 
@@ -368,10 +385,16 @@ pnpm dev
 - **動作**：人員於「專案工時」維護實際投入工時。
 - **變更**：如有範圍異動，PM 或負責人可於「變更單 (CR)」模組發起需求，經由 `business` 及 `manager` 確定簽核後，自動反映毛利狀態。
 
-### 4️⃣ 結算與 KPI (Settlement & Metrics)
+### 4️⃣ 結算、視覺化與 KPI (Settlement & Visual Analytics)
 - **情境**：月末或季末，確認交付狀況。
-- **動作**：主管進入「月度結算」，確認毛利與稼動率無誤後「點選月結鎖定 (Settlement Lock)」，鎖定後該月份工時不再允許編輯。
+- **動作**：主管進入「月度結算」，確認毛利與稼動率無誤後「點選月結鎖定 (Settlement Lock)」。
+- **視覺化**：進入「報表產生器 (Report Builder)」，系統會根據資料自動產出 Recharts 視覺化圖表，並支援匯出 PDF/CSV。
 - **儀表板**：KPI 與稼動率看板會根據正式費率、成本與實際工作時數，即時動態呈現公司全模組營收概覽。
+
+### 5️⃣ AI 與文件整合 (AI & SharePoint)
+- **文件**：所有的專案附件均同步至 SharePoint 目錄，並在資料庫中保留 `driveId` 與 `itemId`。
+- **AI 助手**：透過內建的 REST API，可將 PMP 數據輕鬆接入 Microsoft Copilot Studio，實現「語意化查詢專案狀態」或「自動回答毛利風險」。
+- **防呆鎖定**：已轉案商機自動鎖定、未經核准的 WBS 禁止填報工時，確保數據合規性。
 
 ---
 
