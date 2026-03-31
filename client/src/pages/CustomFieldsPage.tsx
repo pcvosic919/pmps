@@ -4,7 +4,9 @@ import { Settings2, Plus, Trash2, Edit } from "lucide-react";
 
 export function CustomFieldsPage() {
     const { data: fields, isLoading, refetch } = trpc.system.getCustomFields.useQuery();
+    const [editingId, setEditingId] = useState<string | null>(null);
     const createField = trpc.system.createCustomField.useMutation({ onSuccess: () => { setIsModalOpen(false); refetch(); } });
+    const updateField = trpc.system.updateCustomField.useMutation({ onSuccess: () => { setIsModalOpen(false); refetch(); } });
     const deleteField = trpc.system.deleteCustomField.useMutation({ onSuccess: () => refetch() });
 
     const [isModalOpen, setIsModalOpen] = useState(false);
@@ -19,13 +21,19 @@ export function CustomFieldsPage() {
     if (isLoading) return <div className="p-8 text-center text-muted-foreground">載入中...</div>;
 
     const handleSave = () => {
-        createField.mutate({
+        const payload = {
             entityType: form.entityType as any,
             name: form.name,
             fieldType: form.fieldType as any,
             options: form.fieldType === "select" || form.fieldType === "multiselect" ? form.options.split(",").map(s => s.trim()) : undefined,
             isRequired: form.isRequired
-        });
+        };
+
+        if (editingId) {
+            updateField.mutate({ id: editingId, ...payload });
+        } else {
+            createField.mutate(payload);
+        }
     };
 
     const handleDelete = (id: string) => {
@@ -104,7 +112,22 @@ export function CustomFieldsPage() {
                                         {f.isRequired ? <span className="text-emerald-600 font-bold">是</span> : <span className="text-muted-foreground">否</span>}
                                     </td>
                                     <td className="px-6 py-4 text-center space-x-2">
-                                        <button className="text-primary hover:text-primary/70 p-1"><Edit className="w-4 h-4" /></button>
+                                        <button 
+                                            onClick={() => {
+                                                setEditingId(f.id);
+                                                setForm({
+                                                    entityType: f.entityType,
+                                                    name: f.name,
+                                                    fieldType: f.fieldType,
+                                                    options: f.options ? (f.options as string[]).join(", ") : "",
+                                                    isRequired: !!f.isRequired
+                                                });
+                                                setIsModalOpen(true);
+                                            }}
+                                            className="text-primary hover:text-primary/70 p-1"
+                                        >
+                                            <Edit className="w-4 h-4" />
+                                        </button>
                                         <button onClick={() => handleDelete(f.id)} className="text-red-500 hover:text-red-700 p-1"><Trash2 className="w-4 h-4" /></button>
                                     </td>
                                 </tr>
@@ -117,7 +140,7 @@ export function CustomFieldsPage() {
             {isModalOpen && (
                 <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 animate-in fade-in duration-200">
                     <div className="bg-card w-full max-w-md rounded-xl shadow-lg border p-6">
-                        <h3 className="text-xl font-bold mb-4">新增自訂欄位</h3>
+                        <h3 className="text-xl font-bold mb-4">{editingId ? "編輯自訂欄位" : "新增自訂欄位"}</h3>
                         <div className="space-y-4">
                             <div>
                                 <label className="block text-sm font-medium mb-1">套用模組</label>
@@ -173,9 +196,9 @@ export function CustomFieldsPage() {
                             </div>
                         </div>
                         <div className="mt-6 flex justify-end space-x-3">
-                            <button onClick={() => setIsModalOpen(false)} className="px-4 py-2 text-sm font-medium border rounded-md hover:bg-accent transition-colors">取消</button>
-                            <button onClick={handleSave} disabled={createField.isPending || !form.name.trim()} className="px-4 py-2 text-sm font-medium bg-primary text-primary-foreground rounded-md hover:bg-primary/90 transition-colors disabled:opacity-50">
-                                {createField.isPending ? "儲存中..." : "確認建立"}
+                            <button onClick={() => { setIsModalOpen(false); setEditingId(null); }} className="px-4 py-2 text-sm font-medium border rounded-md hover:bg-accent transition-colors">取消</button>
+                            <button onClick={handleSave} disabled={createField.isPending || updateField.isPending || !form.name.trim()} className="px-4 py-2 text-sm font-medium bg-primary text-primary-foreground rounded-md hover:bg-primary/90 transition-colors disabled:opacity-50">
+                                {createField.isPending || updateField.isPending ? "儲存中..." : "確認儲存"}
                             </button>
                         </div>
                     </div>

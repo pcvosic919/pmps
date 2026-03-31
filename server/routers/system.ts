@@ -18,7 +18,14 @@ const settingsPayloadSchema = z.object({
     webhookUrl: z.string().trim(),
     webhookEnabled: z.boolean(),
     hrSyncUrl: z.string().trim(),
-    hrSyncEnabled: z.boolean()
+    hrSyncEnabled: z.boolean(),
+    availableProducts: z.array(z.string()).default([]),
+    // Profit Center Formula Settings
+    pcOverheadRate: z.number().min(0).max(100).default(15),
+    pcTargetMargin: z.number().min(0).max(100).default(30),
+    pcSlaTarget: z.number().min(0).max(100).default(95),
+    pcRenewalTarget: z.number().min(0).max(100).default(85),
+    pcUtilizationTarget: z.number().min(0).max(100).default(80)
 });
 
 const defaultSettings = {
@@ -36,8 +43,14 @@ const defaultSettings = {
     webhookUrl: "",
     webhookEnabled: false,
     hrSyncUrl: "",
-    hrSyncEnabled: false
-} as const;
+    hrSyncEnabled: false,
+    availableProducts: [],
+    pcOverheadRate: 15,
+    pcTargetMargin: 30,
+    pcSlaTarget: 95,
+    pcRenewalTarget: 85,
+    pcUtilizationTarget: 80
+};
 
 type SettingsKey = keyof typeof defaultSettings;
 
@@ -61,7 +74,13 @@ const settingDefinitions: Record<SettingsKey, SettingDefinition> = {
     webhookUrl: { category: "integrations", valueType: "string" },
     webhookEnabled: { category: "integrations", valueType: "boolean" },
     hrSyncUrl: { category: "integrations", valueType: "string" },
-    hrSyncEnabled: { category: "integrations", valueType: "boolean" }
+    hrSyncEnabled: { category: "integrations", valueType: "boolean" },
+    availableProducts: { category: "general", valueType: "json" },
+    pcOverheadRate: { category: "general", valueType: "number" },
+    pcTargetMargin: { category: "general", valueType: "number" },
+    pcSlaTarget: { category: "general", valueType: "number" },
+    pcRenewalTarget: { category: "general", valueType: "number" },
+    pcUtilizationTarget: { category: "general", valueType: "number" }
 };
 
 function parseStoredValue(value: string, valueType: SettingDefinition["valueType"]) {

@@ -3,9 +3,21 @@ import { trpc } from "../lib/trpc";
 import { Search, Download } from "lucide-react";
 
 export function UtilizationPage() {
-    const { data, isLoading } = trpc.analytics.getUtilization.useQuery();
-    const utilizationData = (data || []) as any[];
     const [searchTerm, setSearchTerm] = useState("");
+    const [filterDept, setFilterDept] = useState<string>("");
+    const [filterUser, setFilterUser] = useState<string>("");
+
+    const filterInput = {
+        department: filterDept || undefined,
+        userId: filterUser || undefined
+    };
+
+    const { data: usersData } = trpc.users.list.useQuery({ limit: 500 });
+    const allUsers = usersData?.items || [];
+    const departments = Array.from(new Set(allUsers.map((u: any) => u.department).filter(Boolean))) as string[];
+
+    const { data, isLoading } = trpc.analytics.getUtilization.useQuery(filterInput);
+    const utilizationData = (data || []) as any[];
 
     const filteredData = utilizationData?.filter(u =>
         u.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
@@ -43,18 +55,42 @@ export function UtilizationPage() {
                 </div>
             </div>
 
-            <div className="bg-card border rounded-xl shadow-sm p-4 flex justify-between items-center">
-                <div className="relative w-72">
-                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
-                    <input
-                        type="text"
-                        placeholder="搜尋人員姓名或部門..."
-                        value={searchTerm}
-                        onChange={(e) => setSearchTerm(e.target.value)}
-                        className="w-full pl-9 pr-4 py-2 text-sm rounded-md border border-input bg-background"
-                    />
+            <div className="bg-card border rounded-xl shadow-sm p-4 flex flex-col md:flex-row gap-4 justify-between items-start md:items-center">
+                <div className="flex flex-col md:flex-row gap-3 w-full md:w-auto">
+                    <div className="relative w-full md:w-64">
+                        <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+                        <input
+                            type="text"
+                            placeholder="搜尋人員姓名或部門..."
+                            value={searchTerm}
+                            onChange={(e) => setSearchTerm(e.target.value)}
+                            className="w-full pl-9 pr-4 py-2 text-sm rounded-md border border-input bg-background"
+                        />
+                    </div>
+                    <select
+                        value={filterDept}
+                        onChange={(e) => {
+                            setFilterDept(e.target.value);
+                            setFilterUser(""); // Reset user when department changes
+                        }}
+                        className="text-sm rounded-md border border-input bg-background px-3 py-2 outline-none w-full md:w-auto"
+                    >
+                        <option value="">全部部門</option>
+                        {departments.map(d => <option key={d} value={d}>{d}</option>)}
+                    </select>
+                    <select
+                        value={filterUser}
+                        onChange={(e) => setFilterUser(e.target.value)}
+                        className="text-sm rounded-md border border-input bg-background px-3 py-2 outline-none w-full md:w-auto"
+                    >
+                        <option value="">全部人員</option>
+                        {allUsers
+                            .filter((u: any) => !filterDept || u.department === filterDept)
+                            .map((u: any) => <option key={u.id} value={u.id}>{u.name} ({u.role})</option>)
+                        }
+                    </select>
                 </div>
-                <button className="bg-outline border border-input text-foreground hover:bg-accent px-4 py-2 rounded-lg flex items-center text-sm font-medium transition-colors">
+                <button className="bg-outline border border-input text-foreground hover:bg-accent px-4 py-2 rounded-lg flex items-center justify-center text-sm font-medium transition-colors w-full md:w-auto">
                     <Download className="w-4 h-4 mr-2" />
                     匯出報表
                 </button>

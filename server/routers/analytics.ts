@@ -5,6 +5,7 @@ import { TimesheetModel } from "../models/Timesheet";
 import { UserModel } from "../models/User";
 import { NotificationModel } from "../models/Notification";
 import { SettlementLockModel } from "../models/SettlementLock";
+import { SystemSettingModel } from "../models/Settings";
 import { z } from "zod";
 import { settlementTypes } from "../../shared/types";
 import { hasAnyRole } from "../_core/authorization";
@@ -13,10 +14,26 @@ const toIdMap = (items: Array<{ _id: unknown; totalHours?: number; totalCost?: n
     new Map(items.map((item) => [item._id?.toString(), item[key] ?? 0]));
 
 export const analyticsRouter = router({
-    getUtilization: roleProcedure(["admin", "manager", "pm"]).query(async ({ ctx }) => {
-        let userQuery: any = {};
-        if (!hasAnyRole(ctx.user as any, ["admin"]) && hasAnyRole(ctx.user as any, ["manager"]) && ctx.user.department) {
-            userQuery.department = ctx.user.department;
+    getUtilization: roleProcedure(["admin", "manager", "pm"])
+        .input(z.object({ department: z.string().optional(), userId: z.string().optional() }).optional())
+        .query(async ({ ctx, input }) => {
+        let userQuery: any = {
+            $or: [
+                { role: { $in: ["pm", "tech", "presales"] } },
+                { roles: { $in: ["pm", "tech", "presales"] } }
+            ]
+        };
+
+        if (input?.department) {
+            userQuery.department = input.department;
+        }
+        if (input?.userId) {
+            userQuery._id = input.userId;
+        }
+        
+        // If PM but not Manager/Admin, restrict to self
+        if (!hasAnyRole(ctx.user as any, ["admin", "manager"])) {
+            userQuery._id = ctx.user.id;
         }
 
         const users = await UserModel.find(userQuery, { _id: 1, name: 1, department: 1, role: 1 }).lean();
@@ -59,7 +76,7 @@ export const analyticsRouter = router({
     }),
 
     getSettlements: roleProcedure(["admin", "manager"])
-        .input(z.object({ month: z.string().optional() }))
+        .input(z.object({ month: z.string().optional(), department: z.string().optional(), userId: z.string().optional() }))
         .query(async ({ input, ctx }) => {
             const currentMonth = input.month || new Date().toISOString().slice(0, 7);
             const startDate = new Date(`${currentMonth}-01T00:00:00.000Z`);
@@ -70,14 +87,21 @@ export const analyticsRouter = router({
             let tsMatchProj: any = { type: "project", workDate: { $gte: startDate, $lte: endDate } };
             let tsMatchPre: any = { type: "presales", workDate: { $gte: startDate, $lte: endDate } };
 
-            if (!hasAnyRole(ctx.user as any, ["admin"]) && hasAnyRole(ctx.user as any, ["manager"]) && ctx.user.department) {
-                const deptUsers = await UserModel.find({ department: ctx.user.department }, { _id: 1 }).lean();
-                const deptUserIds = deptUsers.map(u => u._id);
-                if (deptUserIds.length > 0) {
-                    srQuery = { pmId: { $in: deptUserIds } };
-                    oppQuery = { ownerId: { $in: deptUserIds } };
-                    tsMatchProj.techId = { $in: deptUserIds };
-                    tsMatchPre.techId = { $in: deptUserIds };
+            let filteringUserIds: any[] = [];
+            
+            if (input.department || input.userId) {
+                let uq: any = {};
+                if (input.department) uq.department = input.department;
+                if (input.userId) uq._id = input.userId;
+                
+                const deptUsers = await UserModel.find(uq, { _id: 1 }).lean();
+                filteringUserIds = deptUsers.map(u => u._id);
+                
+                if (filteringUserIds.length > 0) {
+                    srQuery = { pmId: { $in: filteringUserIds } };
+                    oppQuery = { ownerId: { $in: filteringUserIds } };
+                    tsMatchProj.techId = { $in: filteringUserIds };
+                    tsMatchPre.techId = { $in: filteringUserIds };
                 } else {
                     srQuery = { _id: null };
                     oppQuery = { _id: null };
@@ -143,7 +167,12 @@ export const analyticsRouter = router({
         }),
 
     getKpiData: roleProcedure(["admin", "manager"])
-        .input(z.object({ startDate: z.string().optional(), endDate: z.string().optional() }).optional())
+        .input(z.object({ 
+            startDate: z.string().optional(), 
+            endDate: z.string().optional(),
+            department: z.string().optional(), 
+            userId: z.string().optional() 
+        }).optional())
         .query(async ({ ctx, input }) => {
         let srMatch: any = {};
         let oppMatch: any = {};
@@ -158,17 +187,21 @@ export const analyticsRouter = router({
             tsMatch.workDate = { $gte: minDate, $lte: maxDate };
         }
 
-        if (!hasAnyRole(ctx.user as any, ["admin"]) && hasAnyRole(ctx.user as any, ["manager"]) && ctx.user.department) {
-            const deptUsers = await UserModel.find({ department: ctx.user.department }, { _id: 1 }).lean();
+        if (input?.department || input?.userId) {
+            let uq: any = {};
+            if (input.department) uq.department = input.department;
+            if (input.userId) uq._id = input.userId;
+            
+            const deptUsers = await UserModel.find(uq, { _id: 1 }).lean();
             const deptUserIds = deptUsers.map(u => u._id);
             if (deptUserIds.length > 0) {
-                srMatch = { pmId: { $in: deptUserIds } };
-                oppMatch = { ownerId: { $in: deptUserIds } };
-                tsMatch = { type: "project", techId: { $in: deptUserIds } };
+                srMatch = { ...srMatch, pmId: { $in: deptUserIds } };
+                oppMatch = { ...oppMatch, ownerId: { $in: deptUserIds } };
+                tsMatch = { ...tsMatch, techId: { $in: deptUserIds } };
             } else {
-                srMatch = { pmId: null };
-                oppMatch = { ownerId: null };
-                tsMatch = { type: "project", techId: null };
+                srMatch = { ...srMatch, pmId: null };
+                oppMatch = { ...oppMatch, ownerId: null };
+                tsMatch = { ...tsMatch, techId: null };
             }
         }
 
@@ -240,10 +273,17 @@ export const analyticsRouter = router({
         };
     }),
 
-    getWinRateTrend: roleProcedure(["admin", "manager"]).query(async ({ ctx }) => {
+    getWinRateTrend: roleProcedure(["admin", "manager"])
+        .input(z.object({ department: z.string().optional(), userId: z.string().optional() }).optional())
+        .query(async ({ ctx, input }) => {
         let oppMatch: any = {};
-        if (!hasAnyRole(ctx.user as any, ["admin"]) && hasAnyRole(ctx.user as any, ["manager"]) && ctx.user.department) {
-            const deptUsers = await UserModel.find({ department: ctx.user.department }, { _id: 1 }).lean();
+        
+        if (input?.department || input?.userId) {
+            let uq: any = {};
+            if (input.department) uq.department = input.department;
+            if (input.userId) uq._id = input.userId;
+            
+            const deptUsers = await UserModel.find(uq, { _id: 1 }).lean();
             const deptUserIds = deptUsers.map(u => u._id);
             if (deptUserIds.length > 0) {
                 oppMatch = { ownerId: { $in: deptUserIds } };
@@ -277,10 +317,16 @@ export const analyticsRouter = router({
         }));
     }),
 
-    getCostVsRevenuePerPerson: roleProcedure(["admin", "manager"]).query(async ({ ctx }) => {
+    getCostVsRevenuePerPerson: roleProcedure(["admin", "manager"])
+        .input(z.object({ department: z.string().optional(), userId: z.string().optional() }).optional())
+        .query(async ({ ctx, input }) => {
         let userQuery: any = {};
-        if (!hasAnyRole(ctx.user as any, ["admin"]) && hasAnyRole(ctx.user as any, ["manager"]) && ctx.user.department) {
-            userQuery.department = ctx.user.department;
+        
+        if (input?.department) {
+            userQuery.department = input.department;
+        }
+        if (input?.userId) {
+            userQuery._id = input.userId;
         }
 
         const [users, costAgg, revenueAgg] = await Promise.all([
@@ -336,7 +382,7 @@ export const analyticsRouter = router({
 
     generateReport: roleProcedure(["admin", "manager"])
         .input(z.object({
-            reportType: z.enum(["utilization", "settlement", "timesheets"]),
+            reportType: z.enum(["utilization", "settlement", "timesheets", "project_profitability", "pm_ranking", "budget_variance", "sla_compliance", "renewal_rate"]),
             startDate: z.string(),
             endDate: z.string(),
             department: z.string().optional()
@@ -475,6 +521,184 @@ export const analyticsRouter = router({
                 });
 
                 return [...projectRows, ...oppRows];
+            } else if (input.reportType === "project_profitability") {
+                // Client/Project Profitability with Overhead
+                const settingsRecords = await SystemSettingModel.find({ key: { $in: ["pcOverheadRate", "pcTargetMargin"] } }).lean();
+                const settingsMap = new Map(settingsRecords.map((s: any) => [s.key, s.value]));
+                const overheadRate = Number(settingsMap.get("pcOverheadRate") || 15);
+                const targetMargin = Number(settingsMap.get("pcTargetMargin") || 30);
+
+                let srMatch: any = {};
+                if (input.department) {
+                    const deptUsers = await UserModel.find({ department: input.department }, { _id: 1 }).lean();
+                    srMatch.pmId = { $in: deptUsers.map(u => u._id) };
+                }
+
+                const srs = await ServiceRequestModel.find(srMatch).populate("pmId", "name department").populate("opportunityId", "title customerName").lean();
+                const costAgg = await TimesheetModel.aggregate([
+                    { $match: { type: "project", workDate: { $gte: start, $lte: end } } },
+                    { $group: { _id: "$srId", totalCost: { $sum: "$costAmount" } } }
+                ]);
+                const costMap = new Map(costAgg.map(i => [i._id?.toString(), i.totalCost]));
+
+                return srs.map((sr: any) => {
+                    const directCost = costMap.get(sr._id.toString()) || 0;
+                    const overhead = Math.round(directCost * (overheadRate / 100));
+                    const netProfit = (sr.contractAmount || 0) - directCost - overhead;
+                    const marginPct = sr.contractAmount > 0 ? Math.round((netProfit / sr.contractAmount) * 100) : 0;
+                    return {
+                        "\u5c08\u6848": sr.title,
+                        "\u5ba2\u6236": (sr.opportunityId as any)?.customerName || "-",
+                        "PM": (sr.pmId as any)?.name || "Unknown",
+                        "\u5408\u7d04\u91d1\u984d": sr.contractAmount || 0,
+                        "\u76f4\u63a5\u6210\u672c": directCost,
+                        "\u7ba1\u92b7\u5206\u6524": overhead,
+                        "\u6de8\u5229\u6f64": netProfit,
+                        "\u6bdb\u5229\u7387%": marginPct,
+                        "\u9054\u6a19": marginPct >= targetMargin ? "\u2705" : "\u26a0\ufe0f"
+                    };
+                });
+            } else if (input.reportType === "pm_ranking") {
+                // PM Ranking by Revenue & Margin
+                const users = await UserModel.find(
+                    input.department ? { department: input.department, role: { $in: ["pm"] } } : { role: { $in: ["pm"] } },
+                    { _id: 1, name: 1, department: 1 }
+                ).lean();
+
+                const [revenueAgg, costAgg] = await Promise.all([
+                    ServiceRequestModel.aggregate([
+                        { $group: { _id: "$pmId", totalRevenue: { $sum: "$contractAmount" }, count: { $sum: 1 } } }
+                    ]),
+                    TimesheetModel.aggregate([
+                        { $match: { type: "project", workDate: { $gte: start, $lte: end } } },
+                        { $group: { _id: "$techId", totalCost: { $sum: "$costAmount" } } }
+                    ])
+                ]);
+
+                const revMap = new Map(revenueAgg.map(i => [i._id?.toString(), { rev: i.totalRevenue, count: i.count }]));
+                const cMap = new Map(costAgg.map(i => [i._id?.toString(), i.totalCost]));
+
+                return users.map((u: any) => {
+                    const rev = revMap.get(u._id.toString())?.rev || 0;
+                    const cnt = revMap.get(u._id.toString())?.count || 0;
+                    const cost = cMap.get(u._id.toString()) || 0;
+                    const margin = rev - cost;
+                    return {
+                        "PM": u.name,
+                        "\u90e8\u9580": u.department || "-",
+                        "\u5c08\u6848\u6578": cnt,
+                        "\u7e3d\u71df\u6536": rev,
+                        "\u7e3d\u6210\u672c": cost,
+                        "\u7e3d\u6bdb\u5229": margin,
+                        "\u6bdb\u5229\u7387%": rev > 0 ? Math.round((margin / rev) * 100) : 0
+                    };
+                }).sort((a, b) => b["\u7e3d\u71df\u6536"] - a["\u7e3d\u71df\u6536"]);
+            } else if (input.reportType === "budget_variance") {
+                // Budget Variance Analysis
+                let srMatch: any = {};
+                if (input.department) {
+                    const deptUsers = await UserModel.find({ department: input.department }, { _id: 1 }).lean();
+                    srMatch.pmId = { $in: deptUsers.map(u => u._id) };
+                }
+                const srs = await ServiceRequestModel.find(srMatch).populate("pmId", "name").lean();
+                const costAgg = await TimesheetModel.aggregate([
+                    { $match: { type: "project", workDate: { $gte: start, $lte: end } } },
+                    { $group: { _id: "$srId", totalCost: { $sum: "$costAmount" }, totalHours: { $sum: "$hours" } } }
+                ]);
+                const costMap = new Map(costAgg.map(i => [i._id?.toString(), { cost: i.totalCost, hours: i.totalHours }]));
+
+                return srs.map((sr: any) => {
+                    const actual = costMap.get(sr._id.toString())?.cost || 0;
+                    const hours = costMap.get(sr._id.toString())?.hours || 0;
+                    const budget = sr.contractAmount || 0;
+                    const variance = budget - actual;
+                    const variancePct = budget > 0 ? Math.round((variance / budget) * 100) : 0;
+                    return {
+                        "\u5c08\u6848": sr.title,
+                        "PM": (sr.pmId as any)?.name || "Unknown",
+                        "\u9810\u7b97 (Budget)": budget,
+                        "\u5be6\u969b\u82b1\u8cbb": actual,
+                        "\u504f\u5dee": variance,
+                        "\u504f\u5dee%": variancePct,
+                        "\u5de5\u6642": hours,
+                        "\u72c0\u614b": variance >= 0 ? "\u9810\u7b97\u5167" : "\u8d85\u652f"
+                    };
+                });
+            } else if (input.reportType === "sla_compliance") {
+                // SLA Compliance - based on project on-time completion
+                let srMatch: any = {};
+                if (input.department) {
+                    const deptUsers = await UserModel.find({ department: input.department }, { _id: 1 }).lean();
+                    srMatch.pmId = { $in: deptUsers.map(u => u._id) };
+                }
+                const srs = await ServiceRequestModel.find(srMatch).populate("pmId", "name department").lean();
+
+                const settingsRecords = await SystemSettingModel.find({ key: "pcSlaTarget" }).lean();
+                const slaTarget = Number((settingsRecords[0] as any)?.value || 95);
+
+                let onTime = 0;
+                let total = 0;
+                const rows = srs.map((sr: any) => {
+                    const isComplete = sr.status === "completed";
+                    const planned = sr.endDate ? new Date(sr.endDate) : null;
+                    const isOnTime = isComplete && planned ? new Date() <= planned : isComplete;
+                    if (sr.status === "completed" || sr.status === "in_progress") {
+                        total++;
+                        if (isOnTime) onTime++;
+                    }
+                    return {
+                        "\u5c08\u6848": sr.title,
+                        "PM": (sr.pmId as any)?.name || "Unknown",
+                        "\u90e8\u9580": (sr.pmId as any)?.department || "-",
+                        "\u72c0\u614b": sr.status,
+                        "\u662f\u5426\u6e96\u6642": isOnTime ? "\u2705 \u662f" : "\u274c \u5426",
+                    };
+                });
+
+                const complianceRate = total > 0 ? Math.round((onTime / total) * 100) : 0;
+                // Prepend summary row
+                return [{
+                    "\u5c08\u6848": `\u2550\u2550\u2550 SLA \u7e3d\u7d50: ${complianceRate}% (\u76ee\u6a19 ${slaTarget}%) \u2550\u2550\u2550`,
+                    "PM": `${onTime}/${total} \u6e96\u6642`,
+                    "\u90e8\u9580": complianceRate >= slaTarget ? "\u2705 \u9054\u6a19" : "\u26a0\ufe0f \u672a\u9054\u6a19",
+                    "\u72c0\u614b": "",
+                    "\u662f\u5426\u6e96\u6642": "",
+                }, ...rows];
+            } else if (input.reportType === "renewal_rate") {
+                // Renewal/Win Rate by Customer
+                let oppMatch: any = {};
+                if (input.department) {
+                    const deptUsers = await UserModel.find({ department: input.department }, { _id: 1 }).lean();
+                    oppMatch.ownerId = { $in: deptUsers.map(u => u._id) };
+                }
+
+                const settingsRecords = await SystemSettingModel.find({ key: "pcRenewalTarget" }).lean();
+                const renewalTarget = Number((settingsRecords[0] as any)?.value || 85);
+
+                const opps = await OpportunityModel.find(oppMatch).populate("ownerId", "name department").lean();
+
+                // Group by customer
+                const byCustomer = new Map<string, { total: number; won: number; owner: string }>(); 
+                for (const opp of opps) {
+                    const key = (opp as any).customerName || "Unknown";
+                    if (!byCustomer.has(key)) byCustomer.set(key, { total: 0, won: 0, owner: ((opp as any).ownerId as any)?.name || "" });
+                    const entry = byCustomer.get(key)!;
+                    entry.total++;
+                    if ((opp as any).status === "won" || (opp as any).status === "converted") entry.won++;
+                }
+
+                return Array.from(byCustomer.entries()).map(([customer, data]) => {
+                    const rate = data.total > 0 ? Math.round((data.won / data.total) * 100) : 0;
+                    return {
+                        "\u5ba2\u6236": customer,
+                        "\u8ca0\u8cac\u4eba": data.owner,
+                        "\u5546\u6a5f\u7e3d\u6578": data.total,
+                        "\u6210\u4ea4\u6578": data.won,
+                        "\u7e8c\u7d04/\u52dd\u7387%": rate,
+                        "\u76ee\u6a19": renewalTarget + "%",
+                        "\u9054\u6a19": rate >= renewalTarget ? "\u2705" : "\u26a0\ufe0f"
+                    };
+                }).sort((a, b) => b["\u7e8c\u7d04/\u52dd\u7387%"] - a["\u7e8c\u7d04/\u52dd\u7387%"]);
             }
             
             return [];

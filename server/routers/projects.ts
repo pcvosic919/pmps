@@ -471,7 +471,12 @@ export const projectsRouter = router({
             items: z.array(z.object({
                 title: z.string(),
                 estimatedHours: z.number(),
-                assigneeId: z.string().optional()
+                assigneeId: z.string().optional(),
+                startDate: z.coerce.date().optional(),
+                endDate: z.coerce.date().optional(),
+                completionPercentage: z.number().optional(),
+                colorCode: z.string().optional(),
+                level: z.number().optional()
             }))
         }))
         .mutation(async ({ ctx, input }) => {
@@ -493,7 +498,12 @@ export const projectsRouter = router({
                 items: input.items.map(item => ({
                     title: item.title,
                     estimatedHours: item.estimatedHours,
-                    assigneeId: item.assigneeId ? new mongoose.Types.ObjectId(item.assigneeId) : undefined
+                    assigneeId: item.assigneeId ? new mongoose.Types.ObjectId(item.assigneeId) : undefined,
+                    startDate: item.startDate,
+                    endDate: item.endDate,
+                    completionPercentage: item.completionPercentage,
+                    colorCode: item.colorCode,
+                    level: item.level || 0
                 })),
                 auditLogs: [{
                     action: "submitted",
@@ -540,7 +550,7 @@ export const projectsRouter = router({
                 .map((changeRequest: any) => ({
                     id: changeRequest._id.toString(),
                     srId: sr._id.toString(),
-                    wbsItemId: changeRequest.wbsItemId?.toString(),
+                    wbsItemIds: changeRequest.wbsItemIds?.map((id: any) => id.toString()) || [],
                     requesterId: changeRequest.requesterId.toString(),
                     reason: changeRequest.reason,
                     hoursAdjustment: changeRequest.hoursAdjustment,
@@ -561,7 +571,7 @@ export const projectsRouter = router({
     createCr: roleProcedure(["admin", "pm", "tech", "presales"])
         .input(z.object({
             srId: z.string(),
-            wbsItemId: z.string().optional(),
+            wbsItemIds: z.array(z.string()).optional(),
             hoursAdjustment: z.number(),
             amountAdjustment: z.number(),
             reason: z.string()
@@ -579,7 +589,7 @@ export const projectsRouter = router({
             const crId = new mongoose.Types.ObjectId();
             sr.changeRequests.push({
                 _id: crId,
-                wbsItemId: input.wbsItemId ? new mongoose.Types.ObjectId(input.wbsItemId) : undefined,
+                wbsItemIds: input.wbsItemIds ? input.wbsItemIds.map(id => new mongoose.Types.ObjectId(id)) : [],
                 requesterId: toObjectId(ctx.user.id),
                 reason: input.reason,
                 hoursAdjustment: input.hoursAdjustment,
@@ -702,6 +712,34 @@ export const projectsRouter = router({
                         srTitle: sr.title
                     }));
             });
+        }),
+
+    updateWbsItemSchedule: protectedProcedure
+        .input(z.object({
+            srId: z.string(),
+            itemId: z.string(),
+            startDate: z.string().or(z.date()),
+            endDate: z.string().or(z.date())
+        }))
+        .mutation(async ({ ctx, input }) => {
+            const sr = await ServiceRequestModel.findById(input.srId);
+            if (!sr) throw new TRPCError({ code: "NOT_FOUND", message: "找不到專案" });
+            
+            const effectiveVersion = getEffectiveWbsVersion(sr);
+            if (!effectiveVersion) throw new TRPCError({ code: "BAD_REQUEST", message: "沒有生效的 WBS 版本" });
+            
+            const item = effectiveVersion.items.find((i: any) => i._id.toString() === input.itemId);
+            if (!item) throw new TRPCError({ code: "NOT_FOUND", message: "找不到任務項目" });
+            
+            if (item.assigneeId?.toString() !== ctx.user.id && !hasAnyRole(ctx.user, ["manager", "pm"])) {
+                throw new TRPCError({ code: "FORBIDDEN", message: "無權限修改此任務" });
+            }
+            
+            item.startDate = new Date(input.startDate);
+            item.endDate = new Date(input.endDate);
+            await sr.save();
+            
+            return { success: true };
         }),
 
     getMyProjectTimesheets: protectedProcedure

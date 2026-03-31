@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Settings, Save, Database, Shield, Layout, Bell, Activity } from "lucide-react";
+import { Settings, Save, Database, Shield, Layout, Bell, Activity, TrendingUp } from "lucide-react";
 import { toast } from "react-hot-toast";
 import { trpc } from "../lib/trpc";
 
@@ -19,6 +19,12 @@ const defaultSettings = {
     webhookEnabled: false,
     hrSyncUrl: "",
     hrSyncEnabled: false,
+    availableProducts: [] as string[],
+    pcOverheadRate: 15,
+    pcTargetMargin: 30,
+    pcSlaTarget: 95,
+    pcRenewalTarget: 85,
+    pcUtilizationTarget: 80,
 };
 
 export function SystemSettingsPage() {
@@ -78,6 +84,7 @@ export function SystemSettingsPage() {
                         { key: "security", icon: <Shield className="w-5 h-5" />, label: "安全與存取" },
                         { key: "notifications", icon: <Bell className="w-5 h-5" />, label: "通知與郵件" },
                         { key: "integrations", icon: <Database className="w-5 h-5" />, label: "整合與 API" },
+                        { key: "profitcenter", icon: <TrendingUp className="w-5 h-5" />, label: "利潤中心公式" },
                         { key: "jobs", icon: <Activity className="w-5 h-5" />, label: "背景作業排程" },
                     ].map(tab => (
                         <button
@@ -125,6 +132,17 @@ export function SystemSettingsPage() {
                                         onChange={e => setSettings(s => ({ ...s, systemEmail: e.target.value }))}
                                         className="w-full p-2.5 rounded-lg border border-input bg-background/50 focus:bg-background transition-colors"
                                     />
+                                </div>
+                                <div>
+                                    <label className="block text-sm font-bold mb-2">可選產品列表 (每行一個)</label>
+                                    <textarea
+                                        value={settings.availableProducts?.join("\n") || ""}
+                                        onChange={e => setSettings(s => ({ ...s, availableProducts: e.target.value.split("\n").filter(x => x.trim()) }))}
+                                        rows={5}
+                                        className="w-full p-2.5 rounded-lg border border-input bg-background/50 focus:bg-background transition-colors font-mono text-sm"
+                                        placeholder="例如：\n雲端服務\n資安健檢\n系統開發"
+                                    />
+                                    <p className="text-xs text-muted-foreground mt-1.5">商機管理中可供選擇的產品項目</p>
                                 </div>
                             </div>
                         </div>
@@ -349,6 +367,84 @@ export function SystemSettingsPage() {
                                         </button>
                                     </div>
                                 </div>
+                            </div>
+                        </div>
+                    )}
+
+                    {activeTab === "profitcenter" && (
+                        <div className="space-y-6">
+                            <h3 className="text-lg font-bold mb-4 border-b pb-2">利潤中心制公式設定 (Profit Center Formulas)</h3>
+                            <p className="text-sm text-muted-foreground -mt-2 mb-4">以下參數將套用至月度結算報表、KPI 儀表板、與自訂報表的利潤計算邏輯。</p>
+                            <div className="grid gap-6 max-w-2xl">
+                                <div>
+                                    <label className="block text-sm font-bold mb-2">管銷費用分攤率 (Overhead Rate %)</label>
+                                    <input
+                                        type="number"
+                                        min={0}
+                                        max={100}
+                                        value={settings.pcOverheadRate}
+                                        onChange={e => setSettings(s => ({ ...s, pcOverheadRate: Number(e.target.value) }))}
+                                        className="w-full p-2.5 rounded-lg border border-input bg-background/50 focus:bg-background transition-colors"
+                                    />
+                                    <p className="text-xs text-muted-foreground mt-1.5">月度結算時，直接成本 × 此比例 = 間接管銷費用。建議 10~20%。</p>
+                                </div>
+                                <div>
+                                    <label className="block text-sm font-bold mb-2">目標毛利率 (Target Margin %)</label>
+                                    <input
+                                        type="number"
+                                        min={0}
+                                        max={100}
+                                        value={settings.pcTargetMargin}
+                                        onChange={e => setSettings(s => ({ ...s, pcTargetMargin: Number(e.target.value) }))}
+                                        className="w-full p-2.5 rounded-lg border border-input bg-background/50 focus:bg-background transition-colors"
+                                    />
+                                    <p className="text-xs text-muted-foreground mt-1.5">報表中毛利率低於此目標值將以紅色警示標記。</p>
+                                </div>
+                                <div>
+                                    <label className="block text-sm font-bold mb-2">SLA 達標率目標 (SLA Target %)</label>
+                                    <input
+                                        type="number"
+                                        min={0}
+                                        max={100}
+                                        value={settings.pcSlaTarget}
+                                        onChange={e => setSettings(s => ({ ...s, pcSlaTarget: Number(e.target.value) }))}
+                                        className="w-full p-2.5 rounded-lg border border-input bg-background/50 focus:bg-background transition-colors"
+                                    />
+                                    <p className="text-xs text-muted-foreground mt-1.5">用於 SLA 達成率報表計算基準。</p>
+                                </div>
+                                <div>
+                                    <label className="block text-sm font-bold mb-2">續約率目標 (Renewal Target %)</label>
+                                    <input
+                                        type="number"
+                                        min={0}
+                                        max={100}
+                                        value={settings.pcRenewalTarget}
+                                        onChange={e => setSettings(s => ({ ...s, pcRenewalTarget: Number(e.target.value) }))}
+                                        className="w-full p-2.5 rounded-lg border border-input bg-background/50 focus:bg-background transition-colors"
+                                    />
+                                    <p className="text-xs text-muted-foreground mt-1.5">用於客戶續約率報表計算基準。</p>
+                                </div>
+                                <div>
+                                    <label className="block text-sm font-bold mb-2">稼動率目標 (Utilization Target %)</label>
+                                    <input
+                                        type="number"
+                                        min={0}
+                                        max={100}
+                                        value={settings.pcUtilizationTarget}
+                                        onChange={e => setSettings(s => ({ ...s, pcUtilizationTarget: Number(e.target.value) }))}
+                                        className="w-full p-2.5 rounded-lg border border-input bg-background/50 focus:bg-background transition-colors"
+                                    />
+                                    <p className="text-xs text-muted-foreground mt-1.5">人員稼動率報表的目標基準線。</p>
+                                </div>
+                            </div>
+                            <div className="mt-4 bg-muted/30 border border-border/50 rounded-lg p-4">
+                                <p className="text-sm font-semibold mb-2">💡 公式說明</p>
+                                <ul className="text-xs text-muted-foreground space-y-1">
+                                    <li>• <strong>專案毛利</strong> = 合約金額 − 直接人力成本 − (直接成本 × 管銷費用分攤率)</li>
+                                    <li>• <strong>達標判定</strong>：毛利率 ≥ 目標毛利率 → 綠色; &lt; 目標 → 紅色警示</li>
+                                    <li>• <strong>稼動率</strong> = (實際可計費時數 / 月標準工時) × 100%</li>
+                                    <li>• <strong>SLA 達成率</strong> = (準時完成工單數 / 總工單數) × 100%</li>
+                                </ul>
                             </div>
                         </div>
                     )}

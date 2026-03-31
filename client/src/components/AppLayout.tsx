@@ -132,6 +132,10 @@ export function AppLayout({ children }: AppLayoutProps) {
         { limit: 20 },
         { staleTime: 30_000, refetchOnWindowFocus: true }
     );
+    const { data: settings } = trpc.system.getSettings.useQuery(undefined, {
+        staleTime: 300_000,
+    });
+    const companyName = settings?.companyName || "PMP System";
     const unreadCount = notifications?.filter((item) => !item.isRead).length ?? 0;
 
     const hasRole = (role: string) =>
@@ -315,23 +319,19 @@ export function AppLayout({ children }: AppLayoutProps) {
                         </button>
 
                         <div className="flex flex-wrap items-center gap-2 md:gap-3">
-                            {topNavItems.map((item) => item.disabled || !item.href ? (
                                 <span
-                                    key={item.label}
-                                    className="inline-flex items-center gap-2 rounded-full border border-dashed border-border px-3 py-1 text-sm text-muted-foreground"
-                                    title={item.helper}
+                                    key="company-info"
+                                    className="inline-flex items-center gap-2 rounded-full border border-border bg-primary/5 px-3 py-1 text-sm font-semibold text-primary"
                                 >
-                                    <Info className="h-3.5 w-3.5" />
-                                    {item.label}（暫未提供）
+                                    <Building2 className="h-4 w-4" />
+                                    {companyName}
                                 </span>
-                            ) : (
-                                <Link key={item.href} href={item.href}>
+                            {topNavItems.filter(i => !i.disabled).map((item) => (
+                                <Link key={item.href} href={item.href!}>
                                     <a
                                         className={cn(
-                                            "rounded-full px-3 py-1 text-sm font-medium transition-colors",
-                                            location === item.href
-                                                ? "bg-primary text-primary-foreground"
-                                                : "text-muted-foreground hover:bg-muted hover:text-foreground"
+                                            "rounded-full px-3 py-1 text-sm font-medium transition-colors text-muted-foreground hover:bg-muted hover:text-foreground",
+                                            location === item.href && "bg-primary text-primary-foreground"
                                         )}
                                         title={item.helper}
                                     >
@@ -352,7 +352,7 @@ export function AppLayout({ children }: AppLayoutProps) {
                             className="inline-flex items-center gap-2 rounded-full border border-border px-3 py-1.5 text-sm text-muted-foreground hover:bg-muted font-medium"
                         >
                             <Globe className="h-4 w-4" />
-                            <span className="hidden sm:inline">{i18n.language === 'en' ? 'EN' : '中文'}</span>
+                            <span className="hidden sm:inline font-bold">{i18n.language.startsWith('en') ? 'EN' : '中文'}</span>
                         </button>
                         <button onClick={() => document.dispatchEvent(new KeyboardEvent('keydown', { key: 'k', metaKey: true }))} className="hidden sm:flex items-center gap-2 rounded-full border border-border px-3 py-1.5 text-sm text-muted-foreground hover:bg-muted font-medium bg-muted/30">
                             <Search className="h-4 w-4" />

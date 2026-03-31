@@ -32,7 +32,7 @@ export function GlobalSearch() {
         <Dialog.Root open={open} onOpenChange={setOpen}>
             <Dialog.Portal>
                 <Dialog.Overlay className="fixed inset-0 bg-black/60 backdrop-blur-sm z-[100] transition-opacity duration-300" />
-                <Dialog.Content className="fixed left-[50%] top-[15%] z-[110] w-full max-w-xl translate-x-[-50%] rounded-xl bg-card border border-border shadow-2xl focus:outline-none overflow-hidden animate-in fade-in zoom-in-95 duration-200">
+                <Dialog.Content className="fixed left-[50%] top-[15%] z-[110] w-[95vw] max-w-2xl translate-x-[-50%] rounded-xl bg-card border border-border shadow-2xl focus:outline-none overflow-hidden animate-in fade-in zoom-in-95 duration-200">
                     <div className="flex items-center border-b border-border/50 px-4 bg-muted/20">
                         <Search className="mr-3 h-5 w-5 shrink-0 text-primary opacity-60" />
                         <input 

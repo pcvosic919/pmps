@@ -143,18 +143,21 @@ export function DashboardPage() {
                 </div>
             </div>
 
-            <div className="grid gap-4 md:grid-cols-3">
+            <div className="grid gap-6 md:grid-cols-3">
                 {managementCards.map((card) => (
                     <Link key={card.label} href={card.href}>
-                        <a className="rounded-xl border border-border bg-card p-5 shadow-sm hover:border-primary/40 transition-colors">
-                            <div className="flex items-center justify-between">
+                        <a className="group relative overflow-hidden rounded-2xl border border-border bg-card p-6 shadow-sm transition-all duration-300 hover:shadow-md hover:border-primary/40 hover:-translate-y-1">
+                            <div className="relative z-10 flex items-center justify-between">
                                 <div>
-                                    <div className="text-sm font-medium text-muted-foreground">{card.label}</div>
-                                    <div className="mt-2 text-2xl font-bold">{card.value}</div>
+                                    <div className="text-sm font-semibold text-muted-foreground uppercase tracking-wider">{card.label}</div>
+                                    <div className="mt-3 text-4xl font-black tracking-tight">{card.value}</div>
                                 </div>
-                                <card.icon className={`h-5 w-5 ${card.tone}`} />
+                                <div className={cn("rounded-2xl p-3 bg-muted/50", card.tone.replace('text-', 'bg-').replace('600', '100').replace('500', '100'))}>
+                                    <card.icon className={cn("h-6 w-6", card.tone)} />
+                                </div>
                             </div>
-                            <p className="mt-2 text-xs text-muted-foreground">{card.helper}</p>
+                            <p className="mt-4 text-xs text-muted-foreground leading-relaxed">{card.helper}</p>
+                            <div className={cn("absolute bottom-0 left-0 h-1.5 w-0 bg-primary transition-all duration-500 group-hover:w-full", card.tone.replace('text-', 'bg-'))} />
                         </a>
                     </Link>
                 ))}

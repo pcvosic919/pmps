@@ -128,6 +128,17 @@ export interface OpportunityMember {
     memberRole: MemberRole;
 }
 
+export interface OpportunityInput {
+    title: string;
+    customerName: string;
+    estimatedValue: number;
+    status: OpportunityStatus;
+    expectedCloseDate?: Date;
+    productNames?: string[];
+    description?: string;
+    customFields?: CustomFieldValue[];
+}
+
 export interface PresalesAssignment {
     techId: string;
     estimatedHours: number;
@@ -155,6 +166,7 @@ export interface WbsItemInput {
     assigneeId?: string;
     completionPercentage?: number;
     colorCode?: string;
+    level?: number;
 }
 
 export interface WbsVersionInput {
@@ -169,7 +181,7 @@ export interface WbsVersionInput {
 }
 
 export interface ChangeRequestInput {
-    wbsItemId?: string;
+    wbsItemIds?: string[];
     requesterId: string;
     reason: string;
     hoursAdjustment: number;

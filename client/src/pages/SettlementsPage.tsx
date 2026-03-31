@@ -6,8 +6,24 @@ export function SettlementsPage() {
     const [currentMonth, setCurrentMonth] = useState(new Date().toISOString().slice(0, 7));
     const [activeTab, setActiveTab] = useState<"project" | "presales">("project");
     const [searchTerm, setSearchTerm] = useState("");
+    const [filterDept, setFilterDept] = useState<string>("");
+    const [filterUser, setFilterUser] = useState<string>("");
 
-    const { data: settlements, isLoading, refetch } = trpc.analytics.getSettlements.useQuery({ month: currentMonth });
+    const filterInput = {
+        month: currentMonth,
+        department: filterDept || undefined,
+        userId: filterUser || undefined
+    };
+
+    const { data: usersData } = trpc.users.list.useQuery({ limit: 500 });
+    const allUsers = usersData?.items || [];
+    const departments = Array.from(new Set(allUsers.map((u: any) => u.department).filter(Boolean))) as string[];
+
+    const { data: systemSettings } = trpc.system.getSettings.useQuery();
+    const overheadRate = (systemSettings as any)?.pcOverheadRate ?? 15;
+    const targetMargin = (systemSettings as any)?.pcTargetMargin ?? 30;
+
+    const { data: settlements, isLoading, refetch } = trpc.analytics.getSettlements.useQuery(filterInput);
 
     const lockSettlement = trpc.analytics.lockSettlement.useMutation({
         onSuccess: () => refetch()
@@ -29,11 +45,13 @@ export function SettlementsPage() {
 
     const currentData = activeTab === "project" ? filteredProjects : filteredPresales;
 
-    // Totals for projects
+    // Profit Center Calculations
     const totalRevenue = projects.reduce((acc: number, s: any) => acc + (s.contractAmount || 0), 0);
-    const totalCost = projects.reduce((acc: number, s: any) => acc + (s.totalCost || 0), 0);
-    const totalMargin = totalRevenue - totalCost;
-    const overallMarginPercent = totalRevenue > 0 ? Math.round((totalMargin / totalRevenue) * 100) : 0;
+    const totalDirectCost = projects.reduce((acc: number, s: any) => acc + (s.totalCost || 0), 0);
+    const totalOverhead = Math.round(totalDirectCost * (overheadRate / 100));
+    const totalNetProfit = totalRevenue - totalDirectCost - totalOverhead;
+    const overallMarginPercent = totalRevenue > 0 ? Math.round((totalNetProfit / totalRevenue) * 100) : 0;
+    const isAboveTarget = overallMarginPercent >= targetMargin;
 
     const getStatusColor = (status: string) => {
         switch (status) {
@@ -92,10 +110,10 @@ export function SettlementsPage() {
         <div className="space-y-6">
             <div className="flex flex-col md:flex-row justify-between items-start md:items-center bg-card p-6 rounded-xl shadow-sm border border-border/50 gap-4">
                 <div>
-                    <h2 className="text-3xl font-bold tracking-tight bg-clip-text text-transparent bg-gradient-to-r from-primary to-primary/60">月度結算 (Settlements)</h2>
-                    <p className="text-muted-foreground mt-1">匯整工時與成本計支。目前檢視月份：<span className="font-semibold text-foreground">{currentMonth}</span></p>
+                    <h2 className="text-3xl font-bold tracking-tight bg-clip-text text-transparent bg-gradient-to-r from-primary to-primary/60">月度結算 (Profit Center)</h2>
+                    <p className="text-muted-foreground mt-1">利潤中心架構結算，內含管銷分攤 ({overheadRate}%)。目標毛利率: {targetMargin}%</p>
                 </div>
-                <div className="flex gap-4 items-center w-full md:w-auto">
+                <div className="flex gap-3 items-center w-full md:w-auto flex-wrap">
                     <div className="flex items-center gap-2 border bg-background px-3 py-1.5 rounded-lg text-sm">
                         <CalendarDays className="w-4 h-4 text-muted-foreground" />
                         <input 
@@ -105,16 +123,58 @@ export function SettlementsPage() {
                             onChange={(e) => setCurrentMonth(e.target.value)}
                         />
                     </div>
-                    {activeTab === "project" && (
-                        <div className="bg-primary/5 p-3 rounded-lg border border-primary/10 text-right min-w-[150px]">
-                            <div className="text-xs font-medium text-muted-foreground mb-0.5">專案整體估計毛利</div>
-                            <div className={`text-xl font-bold ${overallMarginPercent >= 30 ? 'text-emerald-600' : 'text-amber-600'}`}>
-                                {overallMarginPercent}%
-                            </div>
-                        </div>
-                    )}
+                    <select
+                        value={filterDept}
+                        onChange={(e) => { setFilterDept(e.target.value); setFilterUser(""); }}
+                        className="text-sm rounded-md border border-input bg-background px-3 py-1.5 outline-none"
+                    >
+                        <option value="">全部部門</option>
+                        {departments.map(d => <option key={d} value={d}>{d}</option>)}
+                    </select>
+                    <select
+                        value={filterUser}
+                        onChange={(e) => setFilterUser(e.target.value)}
+                        className="text-sm rounded-md border border-input bg-background px-3 py-1.5 outline-none"
+                    >
+                        <option value="">全部人員</option>
+                        {allUsers
+                            .filter((u: any) => !filterDept || u.department === filterDept)
+                            .map((u: any) => <option key={u.id} value={u.id}>{u.name}</option>)
+                        }
+                    </select>
                 </div>
             </div>
+
+            {/* Profit Center Summary Cards */}
+            {activeTab === "project" && (
+                <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
+                    <div className="bg-card border border-border rounded-xl p-4 shadow-sm">
+                        <div className="text-xs text-muted-foreground font-medium">合約營收</div>
+                        <div className="text-xl font-bold mt-1">${totalRevenue.toLocaleString()}</div>
+                    </div>
+                    <div className="bg-card border border-border rounded-xl p-4 shadow-sm">
+                        <div className="text-xs text-muted-foreground font-medium">直接人力成本</div>
+                        <div className="text-xl font-bold mt-1 text-rose-600">${totalDirectCost.toLocaleString()}</div>
+                    </div>
+                    <div className="bg-card border border-border rounded-xl p-4 shadow-sm">
+                        <div className="text-xs text-muted-foreground font-medium">管銷分攤 ({overheadRate}%)</div>
+                        <div className="text-xl font-bold mt-1 text-orange-600">${totalOverhead.toLocaleString()}</div>
+                    </div>
+                    <div className="bg-card border border-border rounded-xl p-4 shadow-sm">
+                        <div className="text-xs text-muted-foreground font-medium">淨利潤</div>
+                        <div className={`text-xl font-bold mt-1 ${totalNetProfit >= 0 ? 'text-emerald-600' : 'text-rose-600'}`}>
+                            ${totalNetProfit.toLocaleString()}
+                        </div>
+                    </div>
+                    <div className={`border rounded-xl p-4 shadow-sm ${isAboveTarget ? 'bg-emerald-50 border-emerald-200 dark:bg-emerald-950/30 dark:border-emerald-800' : 'bg-rose-50 border-rose-200 dark:bg-rose-950/30 dark:border-rose-800'}`}>
+                        <div className="text-xs text-muted-foreground font-medium">毛利率 vs 目標 ({targetMargin}%)</div>
+                        <div className={`text-2xl font-bold mt-1 ${isAboveTarget ? 'text-emerald-600' : 'text-rose-600'}`}>
+                            {overallMarginPercent}%
+                            <span className="text-xs ml-1">{isAboveTarget ? '✅ 達標' : '⚠️ 未達標'}</span>
+                        </div>
+                    </div>
+                </div>
+            )}
 
             {/* Tabs & Trigger bar */}
             <div className="flex justify-between items-center border-b border-border/50">

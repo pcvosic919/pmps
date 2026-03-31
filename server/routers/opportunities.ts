@@ -100,7 +100,7 @@ export const opportunitiesRouter = router({
             });
 
             const items = await OpportunityModel.find(query)
-                .select("title customerName estimatedValue status expectedCloseDate ownerId createdAt members presalesAssignments")
+                .select("title customerName estimatedValue status expectedCloseDate ownerId createdAt members presalesAssignments productNames description")
                 .sort({ [sortBy]: direction })
                 .limit(limit + 1)
                 .lean();
@@ -118,7 +118,9 @@ export const opportunitiesRouter = router({
                     status: opp.status,
                     expectedCloseDate: opp.expectedCloseDate,
                     ownerId: opp.ownerId.toString(),
-                    createdAt: opp.createdAt
+                    createdAt: opp.createdAt,
+                    productNames: opp.productNames || [],
+                    description: opp.description || ""
                 })),
                 nextCursor: hasMore && lastItem
                     ? encodeCursor(lastItem._id, ((lastItem as Record<string, string | number | Date | null>)[sortBy] ?? null) instanceof Date
@@ -153,7 +155,9 @@ export const opportunitiesRouter = router({
             customFields: z.array(z.object({
                 fieldId: z.string(),
                 value: z.string()
-            })).optional()
+            })).optional(),
+            productNames: z.array(z.string()).optional(),
+            description: z.string().optional()
         }))
         .mutation(async ({ input, ctx }) => {
             const ownerId = ctx.user.id;

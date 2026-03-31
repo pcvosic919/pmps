@@ -16,7 +16,9 @@ const oppSchema = z.object({
     title: z.string().min(1, "商機名稱不可為空"),
     customerName: z.string().min(1, "客戶名稱不可為空"),
     estimatedValue: z.number().min(0, "金額不能為負數"),
-    status: z.enum(["new", "qualified", "presales_active", "won", "converted", "lost"])
+    status: z.enum(["new", "qualified", "presales_active", "won", "converted", "lost"]),
+    productNames: z.array(z.string()).optional(),
+    description: z.string().optional()
 });
 
 
@@ -47,6 +49,8 @@ export function OpportunitiesPage() {
     // 自訂欄位數值暫存
     const [customFieldsValues, setCustomFieldsValues] = useState<Record<string, string>>({});
     const { data: customFieldDefs } = trpc.system.getCustomFields.useQuery();
+    const { data: settings } = trpc.system.getSettings.useQuery();
+    const availableProducts = settings?.availableProducts || [];
     const oppFields = customFieldDefs?.filter((f: any) => f.entityType === "opportunity") || [];
 
     const observerRef = useRef<HTMLDivElement>(null);
@@ -65,7 +69,7 @@ export function OpportunitiesPage() {
 
     const form = useForm<any>({
         resolver: zodResolver(oppSchema) as any,
-        defaultValues: { title: "", customerName: "", estimatedValue: 0, status: "new" }
+        defaultValues: { title: "", customerName: "", estimatedValue: 0, status: "new", productNames: [], description: "" }
     });
 
     const createOpp = trpc.opportunities.create.useMutation({
@@ -88,6 +92,8 @@ export function OpportunitiesPage() {
             customerName: values.customerName,
             estimatedValue: values.estimatedValue,
             status: values.status,
+            productNames: values.productNames,
+            description: values.description,
             customFields: customFields.length > 0 ? customFields : undefined
         });
     };
@@ -271,21 +277,57 @@ export function OpportunitiesPage() {
                                 render={({ field }: any) => (
                                     <FormItem>
                                         <FormLabel>狀態 (Status)</FormLabel>
-                                        <Select onValueChange={field.onChange} defaultValue={field.value}>
-                                            <FormControl>
-                                                <SelectTrigger>
-                                                    <SelectValue />
-                                                </SelectTrigger>
-                                            </FormControl>
-                                            <SelectContent>
-                                                <SelectItem value="new">待處理 (New)</SelectItem>
-                                                <SelectItem value="qualified">已確認 (Qualified)</SelectItem>
-                                                <SelectItem value="presales_active">協銷中 (Presales Active)</SelectItem>
-                                                <SelectItem value="won">已成交 (Won)</SelectItem>
-                                                <SelectItem value="converted">已轉案 (Converted)</SelectItem>
-                                                <SelectItem value="lost">已失敗 (Lost)</SelectItem>
-                                            </SelectContent>
-                                        </Select>
+                                        <FormMessage />
+                                    </FormItem>
+                                )}
+                            />
+
+                            <FormField
+                                control={form.control}
+                                name="productNames"
+                                render={({ field }: any) => (
+                                    <FormItem>
+                                        <FormLabel>產品名稱 (可複選)</FormLabel>
+                                        <div className="grid grid-cols-2 gap-2 mt-2 p-3 border rounded-lg bg-muted/20">
+                                            {availableProducts.map((p: string) => (
+                                                <label key={p} className="flex items-center space-x-2 text-sm cursor-pointer hover:bg-muted/50 p-1 rounded transition-colors">
+                                                    <input
+                                                        type="checkbox"
+                                                        value={p}
+                                                        checked={field.value?.includes(p)}
+                                                        onChange={(e) => {
+                                                            const val = e.target.checked
+                                                                ? [...(field.value || []), p]
+                                                                : field.value?.filter((v: string) => v !== p);
+                                                            field.onChange(val);
+                                                        }}
+                                                        className="w-4 h-4 rounded border-gray-300 text-primary focus:ring-primary"
+                                                    />
+                                                    <span>{p}</span>
+                                                </label>
+                                            ))}
+                                            {availableProducts.length === 0 && (
+                                                <span className="col-span-2 text-xs text-muted-foreground italic">請至「系統設定」維護產品清單</span>
+                                            )}
+                                        </div>
+                                        <FormMessage />
+                                    </FormItem>
+                                )}
+                            />
+
+                            <FormField
+                                control={form.control}
+                                name="description"
+                                render={({ field }: any) => (
+                                    <FormItem>
+                                        <FormLabel>商機描述 (Remark)</FormLabel>
+                                        <FormControl>
+                                            <textarea
+                                                {...field}
+                                                className="w-full min-h-[100px] p-2.5 rounded-lg border border-input bg-background/50 focus:bg-background transition-colors text-sm"
+                                                placeholder="請輸入更多詳細資訊..."
+                                            />
+                                        </FormControl>
                                         <FormMessage />
                                     </FormItem>
                                 )}

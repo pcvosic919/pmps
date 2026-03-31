@@ -13,7 +13,7 @@ export function WbsManagementPage() {
     const { hasRole, user } = useCurrentUser();
 
     const [isBuildingVersion, setIsBuildingVersion] = useState(false);
-    const [draftItems, setDraftItems] = useState<{ title: string, estimatedHours: number, assigneeId: string | undefined, startDate?: Date, endDate?: Date, completionPercentage?: number, colorCode?: string }[]>([]);
+    const [draftItems, setDraftItems] = useState<{ title: string, estimatedHours: number, assigneeId: string | undefined, startDate?: Date, endDate?: Date, completionPercentage?: number, colorCode?: string, level?: number }[]>([]);
 
     // View settings
     const [isDaysMode, setIsDaysMode] = useState(false);
@@ -123,7 +123,23 @@ export function WbsManagementPage() {
         }
     };
 
-    const handleAddDraftItem = () => setDraftItems([...draftItems, { title: "", estimatedHours: 4, assigneeId: undefined }]);
+    const computeItemNumbers = (items: any[]) => {
+        const counts = [0, 0, 0, 0, 0];
+        return items.map(item => {
+            const level = item.level || 0;
+            counts[level]++;
+            for (let i = level + 1; i < counts.length; i++) counts[i] = 0;
+            return counts.slice(0, level + 1).join('.');
+        });
+    };
+
+    const handleAddDraftItem = () => setDraftItems([...draftItems, { title: "", estimatedHours: 4, assigneeId: undefined, level: 0 }]);
+    const handleAddSubTask = (parentIndex: number) => {
+        const parentLevel = draftItems[parentIndex].level || 0;
+        const newItems = [...draftItems];
+        newItems.splice(parentIndex + 1, 0, { title: "", estimatedHours: 4, assigneeId: undefined, level: parentLevel + 1 });
+        setDraftItems(newItems);
+    };
     const handleUpdateDraftItem = (index: number, field: string, value: any) => {
         const newItems = [...draftItems];
         newItems[index] = { ...newItems[index], [field]: value };
@@ -139,7 +155,8 @@ export function WbsManagementPage() {
                 startDate: item.startDate ? new Date(item.startDate) : undefined,
                 endDate: item.endDate ? new Date(item.endDate) : undefined,
                 completionPercentage: item.completionPercentage || 0,
-                colorCode: item.colorCode || "#E2E8F0"
+                colorCode: item.colorCode || "#E2E8F0",
+                level: item.level || 0
             })));
         } else {
             setDraftItems([]);
@@ -483,7 +500,7 @@ export function WbsManagementPage() {
 
                                             {version.items && version.items.length > 0 && (
                                                 <div className="bg-muted/30 rounded-lg p-3 space-y-2 mt-2">
-                                                    {version.items.map((item: any) => {
+                                                    {version.items.map((item: any, idx: number) => {
                                                         const compareWithVer = comparison?.compareWithVer ?? null;
                                                         const compareItem = compareWithVer?.items.find((i: any) => i.title === item.title);
                                                         const hourDiff = compareItem ? item.estimatedHours - compareItem.estimatedHours : null;
@@ -494,12 +511,15 @@ export function WbsManagementPage() {
                                                             <div key={item.id} className={`
                                                                 text-sm flex justify-between items-center border p-2 rounded hover:shadow-sm transition-shadow relative overflow-hidden
                                                                 ${isAdded ? "border-emerald-300 bg-emerald-50/60" : "border-border bg-background"}
-                                                            `}>
+                                                            `} style={{ marginLeft: `${(item.level || 0) * 1.5}rem` }}>
                                                                 {item.colorCode && (
                                                                     <div className="absolute left-0 top-0 bottom-0 w-1.5" style={{ backgroundColor: item.colorCode }} />
                                                                 )}
-                                                                <div className="pl-2">
+                                                                <div className="pl-2 flex-1">
                                                                     <div className="font-medium flex items-center gap-2">
+                                                                        <span className="font-mono text-xs font-bold text-primary bg-primary/10 px-1.5 py-0.5 rounded">
+                                                                            {computeItemNumbers(version.items)[idx]}
+                                                                        </span>
                                                                         {item.title}
                                                                         {isAdded && <span className="rounded bg-emerald-100 px-1.5 py-0.5 text-[10px] font-semibold text-emerald-700">新增</span>}
                                                                         {assigneeChanged && <span className="rounded bg-blue-100 px-1.5 py-0.5 text-[10px] font-semibold text-blue-700">改派</span>}
@@ -578,27 +598,22 @@ export function WbsManagementPage() {
                                 ) : (
                                     <div className="space-y-3">
                                         {draftItems.map((item, idx) => (
-                                            <div key={idx} className="flex gap-2 items-start bg-background p-3 rounded-lg border border-border group hover:border-primary/40 transition-colors">
+                                            <div key={idx} className="flex gap-2 items-start bg-background p-3 rounded-lg border border-border group hover:border-primary/40 transition-colors" style={{ marginLeft: `${(item.level || 0) * 1.5}rem` }}>
                                                 <div className="flex-1 space-y-2">
-                                                    <input type="text" placeholder="任務標題 (必填)" value={item.title}
-                                                        onChange={(e) => handleUpdateDraftItem(idx, 'title', e.target.value)}
-                                                        className="w-full text-sm font-medium bg-transparent border-0 border-b border-transparent hover:border-border focus:border-primary focus:ring-0 px-1 py-1 transition-colors outline-none"
-                                                    />
-                                                    <div className="flex gap-4 items-center">
+                                                    <div className="flex items-center gap-2">
+                                                        <span className="font-mono text-xs font-bold text-primary bg-primary/10 px-1.5 py-0.5 rounded">{computeItemNumbers(draftItems)[idx]}</span>
+                                                        <input type="text" placeholder="任務標題 (必填)" value={item.title}
+                                                            onChange={(e) => handleUpdateDraftItem(idx, 'title', e.target.value)}
+                                                            className="flex-1 text-sm font-medium bg-transparent border-0 border-b border-transparent hover:border-border focus:border-primary focus:ring-0 px-1 py-1 transition-colors outline-none"
+                                                        />
+                                                    </div>
+                                                    <div className="flex gap-4 items-center lg:pl-8 flex-wrap">
                                                         <div className="flex items-center text-xs text-muted-foreground">
                                                             <span className="mr-2">色標:</span>
                                                             <input type="color" value={item.colorCode || "#E2E8F0"}
                                                                 onChange={(e) => handleUpdateDraftItem(idx, 'colorCode', e.target.value)}
                                                                 className="w-12 h-6 p-0 border-0 rounded cursor-pointer ring-1 ring-border"
                                                             />
-                                                        </div>
-                                                        <div className="flex items-center text-xs text-muted-foreground w-32">
-                                                            <span className="mr-2">進度:</span>
-                                                            <input type="range" min="0" max="100" step="5" value={item.completionPercentage || 0}
-                                                                onChange={(e) => handleUpdateDraftItem(idx, 'completionPercentage', Number(e.target.value))}
-                                                                className="flex-1 accent-primary"
-                                                            />
-                                                            <span className="ml-2 min-w-8 font-mono">{item.completionPercentage || 0}%</span>
                                                         </div>
                                                         <div className="flex items-center text-xs text-muted-foreground">
                                                             <span className="mr-2">預估工量(H):</span>
@@ -607,17 +622,17 @@ export function WbsManagementPage() {
                                                                 className="w-16 px-2 py-1 bg-muted rounded border border-transparent focus:bg-background focus:border-primary outline-none"
                                                             />
                                                         </div>
-                                                        <div className="flex items-center text-xs text-muted-foreground flex-1">
+                                                        <div className="flex items-center text-xs text-muted-foreground flex-1 min-w-[150px]">
                                                             <span className="mr-2">指派給:</span>
                                                             <select value={item.assigneeId || ""}
                                                                 onChange={(e) => handleUpdateDraftItem(idx, 'assigneeId', e.target.value ? e.target.value : undefined)}
-                                                                className="flex-1 px-2 py-1 bg-muted rounded border border-transparent focus:bg-background focus:border-primary outline-none min-w-0">
+                                                                className="flex-1 px-2 py-1 bg-muted rounded border border-transparent focus:bg-background focus:border-primary outline-none">
                                                                 <option value="">-- 未指派 --</option>
                                                                 {techs?.map(tech => <option key={tech.id} value={tech.id}>{tech.name}</option>)}
                                                             </select>
                                                         </div>
                                                         <div className="flex items-center text-xs text-muted-foreground">
-                                                            <span className="mr-1">排程起訖:</span>
+                                                            <span className="mr-1">排程:</span>
                                                             <input type="date" value={item.startDate ? typeof item.startDate === "string" ? item.startDate : new Date(item.startDate).toISOString().slice(0, 10) : ""}
                                                                 onChange={(e) => handleUpdateDraftItem(idx, 'startDate', e.target.value)}
                                                                 className="w-28 text-[10px] px-1 py-1 bg-muted rounded border border-transparent focus:bg-background focus:border-primary outline-none"
@@ -630,10 +645,16 @@ export function WbsManagementPage() {
                                                         </div>
                                                     </div>
                                                 </div>
-                                                <button onClick={() => handleRemoveDraftItem(idx)}
-                                                    className="p-1.5 text-muted-foreground hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-950/30 rounded" title="移除此項">
-                                                    <Trash2 className="w-4 h-4" />
-                                                </button>
+                                                <div className="flex flex-col gap-1">
+                                                    <button onClick={() => handleAddSubTask(idx)}
+                                                        className="p-1.5 text-muted-foreground hover:text-primary hover:bg-primary/10 rounded" title="新增子任務">
+                                                        <Plus className="w-4 h-4" />
+                                                    </button>
+                                                    <button onClick={() => handleRemoveDraftItem(idx)}
+                                                        className="p-1.5 text-muted-foreground hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-950/30 rounded" title="移除此項">
+                                                        <Trash2 className="w-4 h-4" />
+                                                    </button>
+                                                </div>
                                             </div>
                                         ))}
                                         <button onClick={handleAddDraftItem}

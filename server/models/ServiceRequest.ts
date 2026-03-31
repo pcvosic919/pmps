@@ -15,9 +15,9 @@ export interface IWbsVersion extends Omit<WbsVersionInput, "submittedBy" | "revi
     auditLogs?: { action: string; userId: mongoose.Types.ObjectId; timestamp: Date; reason?: string }[];
 }
 
-export interface IChangeRequest extends Omit<ChangeRequestInput, "wbsItemId" | "requesterId" | "auditLogs"> {
+export interface IChangeRequest extends Omit<ChangeRequestInput, "wbsItemIds" | "requesterId" | "auditLogs"> {
     _id: mongoose.Types.ObjectId;
-    wbsItemId?: mongoose.Types.ObjectId;
+    wbsItemIds?: mongoose.Types.ObjectId[];
     requesterId: mongoose.Types.ObjectId;
     status: ChangeRequestStatus;
     auditLogs?: { action: string; userId: mongoose.Types.ObjectId; timestamp: Date; reason?: string }[];
@@ -57,7 +57,8 @@ const WbsItemSchema = new Schema<IWbsItem>({
     endDate: { type: Date },
     assigneeId: { type: Schema.Types.ObjectId, ref: "User" },
     completionPercentage: { type: Number, default: 0, min: 0, max: 100 },
-    colorCode: { type: String, default: "#E2E8F0" }
+    colorCode: { type: String, default: "#E2E8F0" },
+    level: { type: Number, default: 0 }
 });
 
 const AuditLogSchema = new Schema({
@@ -79,7 +80,7 @@ const WbsVersionSchema = new Schema<IWbsVersion>({
 });
 
 const ChangeRequestSchema = new Schema<IChangeRequest>({
-    wbsItemId: { type: Schema.Types.ObjectId },
+    wbsItemIds: [{ type: Schema.Types.ObjectId }],
     requesterId: { type: Schema.Types.ObjectId, ref: "User", required: true },
     reason: { type: String, required: true },
     hoursAdjustment: { type: Number, default: 0 },

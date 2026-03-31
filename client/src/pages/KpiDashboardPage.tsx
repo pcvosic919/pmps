@@ -4,10 +4,22 @@ import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip as RechartsTooltip, B
 import { TrendingUp, Users, AlertTriangle, CheckCircle, PieChart as PieChartIcon, Download } from "lucide-react";
 
 export function KpiDashboardPage() {
-    const { data: kpiData, isLoading: kpiLoading } = trpc.analytics.getKpiData.useQuery();
-    const { data: utData, isLoading: utLoading } = trpc.analytics.getUtilization.useQuery();
-    const { data: trendData, isLoading: trendLoading } = trpc.analytics.getWinRateTrend.useQuery();
-    const { data: costRevData, isLoading: costRevLoading } = trpc.analytics.getCostVsRevenuePerPerson.useQuery();
+    const [filterDept, setFilterDept] = useState<string>("");
+    const [filterUser, setFilterUser] = useState<string>("");
+
+    const filterInput = {
+        department: filterDept || undefined,
+        userId: filterUser || undefined
+    };
+
+    const { data: usersData } = trpc.users.list.useQuery({ limit: 500 });
+    const allUsers = usersData?.items || [];
+    const departments = Array.from(new Set(allUsers.map((u: any) => u.department).filter(Boolean))) as string[];
+
+    const { data: kpiData, isLoading: kpiLoading } = trpc.analytics.getKpiData.useQuery(filterInput);
+    const { data: utData, isLoading: utLoading } = trpc.analytics.getUtilization.useQuery(filterInput);
+    const { data: trendData, isLoading: trendLoading } = trpc.analytics.getWinRateTrend.useQuery(filterInput);
+    const { data: costRevData, isLoading: costRevLoading } = trpc.analytics.getCostVsRevenuePerPerson.useQuery(filterInput);
     const [visibleCharts, setVisibleCharts] = useState({
         opportunityMix: true,
         utilization: true,
@@ -75,27 +87,57 @@ export function KpiDashboardPage() {
                 </button>
             </div>
 
-            <div className="bg-card border border-border rounded-xl p-4 shadow-sm">
-                <div className="text-sm font-semibold">顯示模組</div>
-                <div className="mt-3 flex flex-wrap gap-2">
-                    {[
-                        { key: "opportunityMix", label: "商機狀態" },
-                        { key: "utilization", label: "稼動率" },
-                        { key: "winRateTrend", label: "勝率趨勢" },
-                        { key: "costVsRevenue", label: "成本 vs 營收" }
-                    ].map((option) => {
-                        const enabled = visibleCharts[option.key as keyof typeof visibleCharts];
-                        return (
-                            <button
-                                key={option.key}
-                                type="button"
-                                onClick={() => setVisibleCharts((current) => ({ ...current, [option.key]: !enabled }))}
-                                className={`rounded-full px-3 py-1.5 text-sm font-medium border transition-colors ${enabled ? "border-primary bg-primary/10 text-primary" : "border-border text-muted-foreground hover:bg-muted"}`}
-                            >
-                                {enabled ? "顯示中" : "已隱藏"} · {option.label}
-                            </button>
-                        );
-                    })}
+            <div className="bg-card border border-border rounded-xl p-4 shadow-sm flex flex-col md:flex-row gap-4 items-start md:items-center justify-between">
+                <div>
+                    <div className="text-sm font-semibold mb-2">資料篩選 (Data Filters)</div>
+                    <div className="flex flex-wrap gap-3">
+                        <select
+                            value={filterDept}
+                            onChange={(e) => {
+                                setFilterDept(e.target.value);
+                                setFilterUser(""); // Reset user when department changes
+                            }}
+                            className="text-sm rounded-md border border-input bg-background px-3 py-1.5 focus:ring-1 focus:ring-primary outline-none min-w-[140px]"
+                        >
+                            <option value="">全部部門</option>
+                            {departments.map(d => <option key={d} value={d}>{d}</option>)}
+                        </select>
+                        <select
+                            value={filterUser}
+                            onChange={(e) => setFilterUser(e.target.value)}
+                            className="text-sm rounded-md border border-input bg-background px-3 py-1.5 focus:ring-1 focus:ring-primary outline-none min-w-[140px]"
+                        >
+                            <option value="">全部人員</option>
+                            {allUsers
+                                .filter((u: any) => !filterDept || u.department === filterDept)
+                                .map((u: any) => <option key={u.id} value={u.id}>{u.name} ({u.role})</option>)
+                            }
+                        </select>
+                    </div>
+                </div>
+                
+                <div>
+                    <div className="text-sm font-semibold mb-2">顯示模組 (Visible Layout)</div>
+                    <div className="flex flex-wrap gap-2">
+                        {[
+                            { key: "opportunityMix", label: "商機狀態" },
+                            { key: "utilization", label: "稼動率" },
+                            { key: "winRateTrend", label: "勝率趨勢" },
+                            { key: "costVsRevenue", label: "成本 vs 營收" }
+                        ].map((option) => {
+                            const enabled = visibleCharts[option.key as keyof typeof visibleCharts];
+                            return (
+                                <button
+                                    key={option.key}
+                                    type="button"
+                                    onClick={() => setVisibleCharts((current) => ({ ...current, [option.key]: !enabled }))}
+                                    className={`rounded-full px-3 py-1 text-xs font-medium border transition-colors ${enabled ? "border-primary bg-primary/10 text-primary" : "border-border text-muted-foreground hover:bg-muted"}`}
+                                >
+                                    {enabled ? "顯示" : "隱藏"} · {option.label}
+                                </button>
+                            );
+                        })}
+                    </div>
                 </div>
             </div>
 

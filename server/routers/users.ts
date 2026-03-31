@@ -191,7 +191,13 @@ export const usersRouter = router({
         }),
 
     getCostRates: roleProcedure(["admin", "manager", "pm"]).query(async () => {
-        const users = await UserModel.find({}, { _id: 1, name: 1, email: 1, department: 1, role: 1, costRate: 1, costRateHistory: 1 }).lean();
+        const query = {
+            $or: [
+                { role: { $in: ["pm", "tech", "presales"] } },
+                { roles: { $in: ["pm", "tech", "presales"] } }
+            ]
+        };
+        const users = await UserModel.find(query, { _id: 1, name: 1, email: 1, department: 1, role: 1, costRate: 1, costRateHistory: 1 }).lean();
 
         return users.map(u => ({
             id: u._id.toString(),

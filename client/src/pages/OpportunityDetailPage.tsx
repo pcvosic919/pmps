@@ -294,6 +294,31 @@ export function OpportunityDetailPage() {
                     </div>
                 </div>
 
+                {(opp.productNames?.length > 0 || opp.description) && (
+                    <div className="mt-6 pt-6 border-t border-border/50 grid grid-cols-1 md:grid-cols-2 gap-6">
+                        {opp.productNames?.length > 0 && (
+                            <div className="space-y-2">
+                                <span className="text-sm font-medium text-muted-foreground">產品名稱</span>
+                                <div className="flex flex-wrap gap-2">
+                                    {opp.productNames.map((p: string) => (
+                                        <span key={p} className="px-2 py-1 bg-primary/10 text-primary text-xs font-bold rounded-md border border-primary/20">
+                                            {p}
+                                        </span>
+                                    ))}
+                                </div>
+                            </div>
+                        )}
+                        {opp.description && (
+                            <div className="space-y-2 md:col-span-2">
+                                <span className="text-sm font-medium text-muted-foreground">商機描述</span>
+                                <div className="bg-muted/30 p-4 rounded-xl border border-border/50 text-sm leading-relaxed whitespace-pre-wrap">
+                                    {opp.description}
+                                </div>
+                            </div>
+                        )}
+                    </div>
+                )}
+
                 {/* 自訂欄位表格展示 */}
                 <div className="flex justify-between items-center pt-6 mt-6 border-t border-border/50">
                     <h3 className="font-semibold text-lg flex items-center">

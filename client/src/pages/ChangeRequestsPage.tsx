@@ -16,7 +16,7 @@ const crSchema = z.object({
     reason: z.string().min(1, "理由不可為空"),
     hoursAdjustment: z.number().default(0),
     amountAdjustment: z.number().default(0),
-    wbsItemId: z.string().optional()
+    wbsItemIds: z.array(z.string()).default([])
 });
 
 
@@ -51,7 +51,7 @@ export function ChangeRequestsPage() {
 
     const form = useForm<any>({
         resolver: zodResolver(crSchema) as any,
-        defaultValues: { srId: "", reason: "", hoursAdjustment: 0, amountAdjustment: 0, wbsItemId: "" }
+        defaultValues: { srId: "", reason: "", hoursAdjustment: 0, amountAdjustment: 0, wbsItemIds: [] }
     });
 
     const getWbsItemTitle = (srId: string, itemId?: string) => {
@@ -205,11 +205,13 @@ export function ChangeRequestsPage() {
                                                 <td className="px-6 py-4">
                                                     <div className="font-medium">SR-#{cr.srId.slice(-6)}</div>
                                                     <div className="text-muted-foreground text-xs mt-0.5 line-clamp-1 truncate max-w-[150px]">{cr.srTitle}</div>
-                                                    {cr.wbsItemId && (
-                                                        <div className="mt-1">
-                                                            <span className="inline-flex items-center px-2 py-0.5 rounded bg-blue-50 text-blue-700 border border-blue-100 text-xs font-medium">
-                                                                📌 {getWbsItemTitle(cr.srId, cr.wbsItemId) || "連結 WBS Item"}
-                                                            </span>
+                                                    {cr.wbsItemIds && cr.wbsItemIds.length > 0 && (
+                                                        <div className="mt-1 flex flex-wrap gap-1">
+                                                            {cr.wbsItemIds.map((id: string) => (
+                                                                <span key={id} className="inline-flex items-center px-2 py-0.5 rounded bg-blue-50 text-blue-700 border border-blue-100 text-[10px] font-semibold">
+                                                                    📌 {getWbsItemTitle(cr.srId, id) || "連結 WBS Item"}
+                                                                </span>
+                                                            ))}
                                                         </div>
                                                     )}
                                                 </td>
@@ -313,24 +315,42 @@ export function ChangeRequestsPage() {
                             {wbsItems.length > 0 && (
                                 <FormField
                                     control={form.control}
-                                    name="wbsItemId"
-                                    render={({ field }: any) => (
+                                    name="wbsItemIds"
+                                    render={() => (
                                         <FormItem>
-                                            <FormLabel>調整 工作項目 (WBS Item)</FormLabel>
-                                            <Select onValueChange={field.onChange} defaultValue={field.value}>
-                                                <FormControl>
-                                                    <SelectTrigger>
-                                                        <SelectValue placeholder="選擇針對的 WBS (選填)" />
-                                                    </SelectTrigger>
-                                                </FormControl>
-                                                <SelectContent>
-                                                    {wbsItems.map((item: any) => (
-                                                        <SelectItem key={item._id?.toString() || item.id} value={item._id?.toString() || item.id}>
-                                                            {item.title} ({item.estimatedHours}h)
-                                                        </SelectItem>
-                                                    ))}
-                                                </SelectContent>
-                                            </Select>
+                                            <div className="mb-1">
+                                                <FormLabel>關聯工作項目 (WBS Items) <span className="text-muted-foreground font-normal text-xs ml-2">可複選</span></FormLabel>
+                                            </div>
+                                            <div className="space-y-1 max-h-40 overflow-y-auto border border-border/50 p-2 rounded-lg bg-muted/10 shadow-inner">
+                                                {wbsItems.map((item: any) => (
+                                                    <FormField
+                                                        key={item._id?.toString() || item.id}
+                                                        control={form.control}
+                                                        name="wbsItemIds"
+                                                        render={({ field }) => {
+                                                            return (
+                                                                <FormItem key={item._id?.toString() || item.id} className="flex flex-row items-center space-x-3 space-y-0 hover:bg-muted/50 p-1.5 rounded transition-colors group">
+                                                                    <FormControl>
+                                                                        <input type="checkbox"
+                                                                            className="rounded border-input text-primary focus:ring-primary w-4 h-4 cursor-pointer"
+                                                                            checked={field.value?.includes(item._id?.toString() || item.id)}
+                                                                            onChange={(e) => {
+                                                                                const idStr = item._id?.toString() || item.id;
+                                                                                return e.target.checked
+                                                                                    ? field.onChange([...(field.value || []), idStr])
+                                                                                    : field.onChange(field.value?.filter((value: string) => value !== idStr))
+                                                                            }}
+                                                                        />
+                                                                    </FormControl>
+                                                                    <FormLabel className="font-medium text-sm cursor-pointer w-full group-hover:text-primary transition-colors">
+                                                                        {item.title} <span className="ml-1 text-muted-foreground font-normal text-xs">({item.estimatedHours}h)</span>
+                                                                    </FormLabel>
+                                                                </FormItem>
+                                                            )
+                                                        }}
+                                                    />
+                                                ))}
+                                            </div>
                                             <FormMessage />
                                         </FormItem>
                                     )}

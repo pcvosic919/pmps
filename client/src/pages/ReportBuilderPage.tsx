@@ -5,7 +5,7 @@ import toast from "react-hot-toast";
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from "recharts";
 
 export function ReportBuilderPage() {
-    const [reportType, setReportType] = useState<"timesheets" | "utilization" | "settlement">("timesheets");
+    const [reportType, setReportType] = useState<"timesheets" | "utilization" | "settlement" | "project_profitability" | "pm_ranking" | "budget_variance" | "sla_compliance" | "renewal_rate">("timesheets");
     
     // Default to current month
     const today = new Date();
@@ -77,6 +77,12 @@ export function ReportBuilderPage() {
                             <option value="timesheets">工時清單報表 (Timesheets)</option>
                             <option value="utilization">人力稼動率報表 (Utilization)</option>
                             <option value="settlement">部門利潤結算報表 (Settlement)</option>
+                            <option disabled>--- 利潤中心報表 ---</option>
+                            <option value="project_profitability">客戶/專案毛利報表 (Profitability)</option>
+                            <option value="pm_ranking">PM 排行榜 (營收與毛利)</option>
+                            <option value="budget_variance">預算偏差分析 (Budget Variance)</option>
+                            <option value="sla_compliance">SLA 達成率報表 (SLA Compliance)</option>
+                            <option value="renewal_rate">客戶續約/勝率報表 (Renewal Rate)</option>
                         </select>
                     </div>
 

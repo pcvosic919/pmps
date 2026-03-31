@@ -19,6 +19,8 @@ export interface IOpportunity extends Document {
     estimatedValue: number;
     status: OpportunityStatus;
     expectedCloseDate?: Date;
+    productNames?: string[];
+    description?: string;
     ownerId: mongoose.Types.ObjectId;
     members: IOpportunityMember[];
     presalesAssignments: IPresalesAssignment[];
@@ -34,6 +36,8 @@ const OpportunitySchema = new Schema<IOpportunity>({
     estimatedValue: { type: Number, required: true, default: 0 },
     status: { type: String, enum: opportunityStatuses, default: "new", required: true },
     expectedCloseDate: { type: Date },
+    productNames: [{ type: String }],
+    description: { type: String },
     ownerId: { type: Schema.Types.ObjectId, ref: "User", required: true },
     members: [{
         userId: { type: Schema.Types.ObjectId, ref: "User", required: true },
