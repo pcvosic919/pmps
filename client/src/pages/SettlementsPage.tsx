@@ -87,7 +87,7 @@ export function SettlementsPage() {
                 csvContent += `SR-${r.id.slice(-6)},${r.title.replace(/,/g, ' ')},${r.contractAmount},${r.totalCost},${r.margin},${getStatusLabel(r.status)}\n`;
             });
         } else {
-            csvContent += "商機單號,名稱,客戶,累積成本,狀態\n";
+            csvContent += "商機單號,名稱,客戶,本月協銷營收,狀態\n";
             currentData.forEach((r: any) => {
                 csvContent += `OPP-${r.id.slice(-6)},${r.title.replace(/,/g, ' ')},${r.customerName.replace(/,/g, ' ')},${r.totalCost},${getStatusLabel(r.status)}\n`;
             });
@@ -253,7 +253,7 @@ export function SettlementsPage() {
                                 <tr>
                                     <th className="px-6 py-3 font-medium">商機單號 / 名稱</th>
                                     <th className="px-6 py-3 font-medium">客戶名稱</th>
-                                    <th className="px-6 py-3 font-medium text-right">本月協銷成本 (Cost)</th>
+                                    <th className="px-6 py-3 font-medium text-right">本月協銷營收</th>
                                     <th className="px-6 py-3 font-medium text-center">狀態</th>
                                 </tr>
                             )}
@@ -303,7 +303,7 @@ export function SettlementsPage() {
                                                 <div className="text-muted-foreground mt-1 truncate max-w-xs">{opp.title}</div>
                                             </td>
                                             <td className="px-6 py-4">{opp.customerName}</td>
-                                            <td className="px-6 py-4 text-right text-rose-600 font-medium">${opp.totalCost?.toLocaleString() || "0"}</td>
+                                            <td className="px-6 py-4 text-right text-emerald-600 font-medium">${opp.totalCost?.toLocaleString() || "0"}</td>
                                             <td className="px-6 py-4 text-center">
                                                 <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-semibold border ${getStatusColor(opp.status)}`}>
                                                     {getStatusLabel(opp.status)}

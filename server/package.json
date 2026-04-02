@@ -3,10 +3,12 @@
   "version": "1.0.0",
   "scripts": {
     "dev": "tsx watch index.ts",
+    "dev:local": "tsx watch index.ts",
     "build": "tsc",
     "start": "node dist/index.js",
     "typecheck": "tsc --noEmit",
-    "test": "pnpm exec vitest run --passWithNoTests"
+    "test": "pnpm exec vitest run --passWithNoTests",
+    "test:local": "cross-env NODE_ENV=test vitest run --passWithNoTests"
   },
   "dependencies": {
     "@dispatch/shared": "workspace:*",

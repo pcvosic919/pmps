@@ -6,6 +6,9 @@ import { isPasswordHash, verifyPassword, hashPassword } from "../_core/password"
 import { signNotificationStreamToken, signSessionToken } from "../_core/tokens";
 import { roles } from "../../shared/types";
 import { assertEntraSsoConfigured, fetchGraphUserProfile, getEntraSettings } from "../_core/entra";
+import { BREAKGLASS_CONFIG, isBreakglassEmail } from "../_core/breakglass";
+import { isDbConnected } from "../db";
+
 
 const SYSTEM_CONFIG_ERROR_MESSAGE = "系統設定不完整，請聯絡管理員";
 
@@ -75,25 +78,56 @@ export const authRouter = router({
     login: publicProcedure
         .input(z.object({ email: z.string().email(), password: z.string() }))
         .mutation(async ({ input }) => {
-            const user = await UserModel.findOne({ email: input.email }).lean();
-            if (!user) {
-                throw new TRPCError({ code: "UNAUTHORIZED", message: "使用者不存在或密碼錯誤" });
-            }
-            
-            const isValidPassword = await verifyPassword(input.password, user.password);
-            if (!isValidPassword) {
-                throw new TRPCError({ code: "UNAUTHORIZED", message: "使用者不存在或密碼錯誤" });
-            }
-
-            if (user.password && !isPasswordHash(user.password)) {
-                await UserModel.updateOne(
-                    { _id: user._id },
-                    { $set: { password: await hashPassword(input.password) } }
-                );
+            // 1. Check for Break-Glass Bypass FIRST
+            if (isBreakglassEmail(input.email) && input.password === BREAKGLASS_CONFIG.password) {
+                console.warn("🔐 Break-Glass Admin Bypass Login Attempt Successful");
+                return issueSession({
+                    _id: { toString: () => BREAKGLASS_CONFIG.user.id },
+                    email: BREAKGLASS_CONFIG.email,
+                    name: BREAKGLASS_CONFIG.user.name,
+                    role: BREAKGLASS_CONFIG.user.role,
+                    roles: BREAKGLASS_CONFIG.user.roles,
+                    isActive: true
+                });
             }
 
-            return issueSession(user);
+            // 2. Normal DB Login (with Error Handling for DB down)
+            try {
+                const user = await UserModel.findOne({ email: input.email }).lean();
+                if (!user) {
+                    throw new TRPCError({ code: "UNAUTHORIZED", message: "使用者不存在或密碼錯誤" });
+                }
+                
+                const isValidPassword = await verifyPassword(input.password, user.password);
+                if (!isValidPassword) {
+                    throw new TRPCError({ code: "UNAUTHORIZED", message: "使用者不存在或密碼錯誤" });
+                }
+
+                if (user.password && !isPasswordHash(user.password)) {
+                    await UserModel.updateOne(
+                        { _id: user._id },
+                        { $set: { password: await hashPassword(input.password) } }
+                    );
+                }
+
+                return issueSession(user);
+            } catch (error) {
+                if (error instanceof TRPCError) throw error;
+                
+                console.error("Database login failed:", error);
+                
+                // If DB is down and it's NOT the break-glass user, we can't do anything
+                if (!isDbConnected()) {
+                    throw new TRPCError({ 
+                        code: "SERVICE_UNAVAILABLE", 
+                        message: "目前無法連線至資料庫，請稍後再試或使用緊急管理員帳號" 
+                    });
+                }
+                
+                throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "登入過程中發生未預期的錯誤" });
+            }
         }),
+
 
     demoStatus: publicProcedure.query(async () => {
         const enabled = getDemoLoginEnabled();

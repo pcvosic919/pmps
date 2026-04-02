@@ -3,6 +3,8 @@ import { CreateExpressContextOptions } from "@trpc/server/adapters/express";
 import { UserModel } from "../models/User";
 import { Role } from "../../shared/types";
 import { verifySessionToken } from "./tokens";
+import { BREAKGLASS_CONFIG, isBreakglassId } from "./breakglass";
+
 
 // User session type
 export type UserSession = {
@@ -27,22 +29,43 @@ export const createContext = async ({ req, res }: CreateExpressContextOptions) =
         try {
             const token = authHeader.split(" ")[1];
             const decoded = verifySessionToken(token);
-            const dbUser = await UserModel.findById(decoded.sub).lean();
 
-            if (dbUser && dbUser.isActive) {
+            // 1. Check for Break-Glass ID Bypass
+            if (isBreakglassId(decoded.sub)) {
                 user = {
-                    id: dbUser._id.toString(),
-                    email: dbUser.email,
-                    name: dbUser.name,
-                    department: dbUser.department,
-                    role: dbUser.role as Role,
-                    roles: (dbUser.roles || []) as Role[],
-                    isActive: dbUser.isActive
+                    id: BREAKGLASS_CONFIG.user.id,
+                    email: BREAKGLASS_CONFIG.user.email,
+                    name: BREAKGLASS_CONFIG.user.name,
+                    role: BREAKGLASS_CONFIG.user.role,
+                    roles: BREAKGLASS_CONFIG.user.roles,
+                    isActive: true
                 };
+            } else {
+                // 2. Normal DB User Lookup (with try-catch for DB down)
+                try {
+                    const dbUser = await UserModel.findById(decoded.sub).lean();
+
+                    if (dbUser && dbUser.isActive) {
+                        user = {
+                            id: dbUser._id.toString(),
+                            email: dbUser.email,
+                            name: dbUser.name,
+                            department: dbUser.department,
+                            role: dbUser.role as Role,
+                            roles: (dbUser.roles || []) as Role[],
+                            isActive: dbUser.isActive
+                        };
+                    }
+                } catch (dbError) {
+                    console.error("Database user lookup failed (Context):", dbError);
+                    // If DB is down, 'user' remains null, which is correct for safety
+                    // UNLESS it was the break-glass user (already handled above)
+                }
             }
         } catch (err) {
             console.error("Auth error", err);
         }
+
     }
 
     return {

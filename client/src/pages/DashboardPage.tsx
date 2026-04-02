@@ -64,49 +64,51 @@ export function DashboardPage() {
                     <p className="text-muted-foreground mt-1">依您的帳號權限顯示個人可存取的商機、專案與工時入口</p>
                 </div>
 
-                <div className="grid gap-4 md:grid-cols-3">
+                <div className="grid gap-4 grid-cols-1 md:grid-cols-3">
                     <Link href="/opportunities">
-                        <a className="p-6 bg-card border border-border shadow-sm rounded-xl hover:border-primary/50 transition-colors">
+                        <a className="block p-6 bg-card border border-border shadow-sm rounded-xl hover:border-primary/50 transition-colors h-full">
                             <h3 className="font-medium text-sm text-muted-foreground mb-2 flex items-center">
-                                <TrendingUp className="w-4 h-4 mr-1 text-primary" />
+                                <TrendingUp className="w-4 h-4 mr-2 text-primary flex-shrink-0" />
                                 我的商機 / 協作商機
                             </h3>
-                            <div className="text-lg font-bold">查看商機管理</div>
+                            <div className="text-lg font-bold mt-1">查看商機管理</div>
                             <p className="text-xs text-muted-foreground mt-2">追蹤自己可存取的商機與協銷進度</p>
                         </a>
                     </Link>
                     <Link href="/projects">
-                        <a className="p-6 bg-card border border-border shadow-sm rounded-xl hover:border-primary/50 transition-colors">
+                        <a className="block p-6 bg-card border border-border shadow-sm rounded-xl hover:border-primary/50 transition-colors h-full">
                             <h3 className="font-medium text-sm text-muted-foreground mb-2 flex items-center">
-                                <FolderKanban className="w-4 h-4 mr-1 text-primary" />
+                                <FolderKanban className="w-4 h-4 mr-2 text-primary flex-shrink-0" />
                                 我的專案
                             </h3>
-                            <div className="text-lg font-bold">查看專案管理</div>
+                            <div className="text-lg font-bold mt-1">查看專案管理</div>
                             <p className="text-xs text-muted-foreground mt-2">依您的帳號顯示可查看與可填報的專案</p>
                         </a>
                     </Link>
                     <Link href={hasRole("presales") || hasRole("tech") ? "/project-timesheets" : "/notifications"}>
-                        <a className="p-6 bg-card border border-border shadow-sm rounded-xl hover:border-primary/50 transition-colors">
+                        <a className="block p-6 bg-card border border-border shadow-sm rounded-xl hover:border-primary/50 transition-colors h-full">
                             <h3 className="font-medium text-sm text-muted-foreground mb-2 flex items-center">
-                                <Clock3 className="w-4 h-4 mr-1 text-primary" />
+                                <Clock3 className="w-4 h-4 mr-2 text-primary flex-shrink-0" />
                                 我的待辦
                             </h3>
-                            <div className="text-lg font-bold">前往常用入口</div>
+                            <div className="text-lg font-bold mt-1">前往常用入口</div>
                             <p className="text-xs text-muted-foreground mt-2">快速進入工時填報、通知與專案作業</p>
                         </a>
                     </Link>
                 </div>
 
-                <div className="grid gap-4 md:grid-cols-3">
+                <div className="grid gap-4 grid-cols-1 md:grid-cols-3">
                     {managementCards.map((card) => (
                         <Link key={card.label} href={card.href}>
-                            <a className="rounded-xl border border-border bg-card p-5 shadow-sm hover:border-primary/40 transition-colors">
+                            <a className="block rounded-xl border border-border bg-card p-5 shadow-sm hover:border-primary/40 transition-colors h-full">
                                 <div className="flex items-center justify-between">
                                     <div>
                                         <div className="text-sm font-medium text-muted-foreground">{card.label}</div>
                                         <div className="mt-2 text-2xl font-bold">{card.value}</div>
                                     </div>
-                                    <card.icon className={`h-5 w-5 ${card.tone}`} />
+                                    <div className="rounded-xl p-2.5 bg-muted/50 flex-shrink-0">
+                                        <card.icon className={`h-5 w-5 ${card.tone}`} />
+                                    </div>
                                 </div>
                                 <p className="mt-2 text-xs text-muted-foreground">{card.helper}</p>
                             </a>
@@ -124,11 +126,11 @@ export function DashboardPage() {
                 <p className="text-muted-foreground mt-1">系統全局概覽與使用者狀態</p>
             </div>
 
-            <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+            <div className="grid gap-4 grid-cols-1 sm:grid-cols-2 lg:grid-cols-5">
                 <div className="p-6 bg-card border border-border shadow-sm rounded-xl">
                     <h3 className="font-medium text-sm text-muted-foreground flex items-center justify-between">
                         待關注商機
-                        <TrendingUp className="h-4 w-4 text-blue-500" />
+                        <TrendingUp className="h-4 w-4 text-blue-500 flex-shrink-0" />
                     </h3>
                     <div className="text-2xl font-bold mt-2">{activeOpps?.count ?? 0} <span className="text-sm font-normal text-muted-foreground">筆</span></div>
                     <p className="text-xs text-muted-foreground mt-1 text-blue-500">請前往商機管理進行排序與篩選</p>
@@ -136,20 +138,20 @@ export function DashboardPage() {
                 <div className="p-6 bg-card border border-border shadow-sm rounded-xl">
                     <h3 className="font-medium text-sm text-muted-foreground flex items-center justify-between">
                         執行中專案
-                        <Users className="h-4 w-4 text-green-500" />
+                        <Users className="h-4 w-4 text-green-500 flex-shrink-0" />
                     </h3>
                     <div className="text-2xl font-bold mt-2">{activeProjects?.count ?? 0} <span className="text-sm font-normal text-muted-foreground">個</span></div>
                     <p className="text-xs text-muted-foreground mt-1 text-green-500">專案列表已依帳號權限過濾</p>
                 </div>
                 {managementCards.map((card) => (
                     <Link key={card.label} href={card.href}>
-                        <a className="group relative overflow-hidden rounded-xl border border-border bg-card p-6 shadow-sm transition-all duration-300 hover:shadow-md hover:border-primary/40 hover:-translate-y-1 block">
+                        <a className="group relative overflow-hidden rounded-xl border border-border bg-card p-6 shadow-sm transition-all duration-300 hover:shadow-md hover:border-primary/40 hover:-translate-y-1 block h-full">
                             <div className="relative z-10 flex items-center justify-between">
                                 <div>
                                     <div className="text-sm font-semibold text-muted-foreground">{card.label}</div>
-                                    <div className="mt-2 text-3xl font-black tracking-tight">{card.value}</div>
+                                    <div className="mt-2 text-2xl font-black tracking-tight">{card.value}</div>
                                 </div>
-                                <div className={cn("rounded-xl p-3 bg-muted/50")}>
+                                <div className={cn("rounded-xl p-3 bg-muted/50 flex-shrink-0")}>
                                     <card.icon className={cn("h-5 w-5", card.tone)} />
                                 </div>
                             </div>

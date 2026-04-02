@@ -34,6 +34,7 @@ const ReportBuilderPage = lazy(() => import("./pages/ReportBuilderPage").then((m
 const ResourcesPage = lazy(() => import("./pages/ResourcesPage").then((module) => ({ default: module.ResourcesPage })));
 const OpportunityDetailPage = lazy(() => import("./pages/OpportunityDetailPage").then((module) => ({ default: module.OpportunityDetailPage })));
 const ProjectManagementPage = lazy(() => import("./pages/ProjectManagementPage").then((module) => ({ default: module.ProjectManagementPage })));
+const ProfitCenterFormulaPage = lazy(() => import("./pages/ProfitCenterFormulaPage"));
 
 type ActiveRouteDefinition = {
   path: string;
@@ -111,6 +112,7 @@ const activeRoutes: ActiveRouteDefinition[] = [
   { path: "/project-timesheets", component: ProjectTimesheetsPage, pageFile: "ProjectTimesheetsPage.tsx", lifecycle: "保留 / 上線", notes: "專案工時填報。" },
   { path: "/kpi", component: KpiDashboardPage, pageFile: "KpiDashboardPage.tsx", lifecycle: "保留 / 上線", notes: "KPI 儀表板。" },
   { path: "/reports", component: ReportBuilderPage, pageFile: "ReportBuilderPage.tsx", lifecycle: "保留 / 上線", notes: "自訂報表產生與匯出。" },
+  { path: "/formula/profit-center", component: ProfitCenterFormulaPage, pageFile: "ProfitCenterFormulaPage.tsx", lifecycle: "保留 / 上線", notes: "利潤中心公式專用頁面。" },
 ];
 
 // `client/src/App.tsx` is the source of truth for routed pages; README and navigation

@@ -6,6 +6,10 @@ export function getMongoUri() {
     return process.env.MONGODB_URI || DEFAULT_MONGODB_URI;
 }
 
+export function isDbConnected() {
+    return mongoose.connection.readyState >= 1;
+}
+
 export async function connectDB() {
     if (mongoose.connection.readyState >= 1) {
         return;
@@ -14,21 +18,25 @@ export async function connectDB() {
     const mongoUri = getMongoUri();
     const usingFallbackUri = !process.env.MONGODB_URI;
 
-    if (usingFallbackUri) {
-        console.warn(`⚠️ MONGODB_URI 未設定，改用本機預設資料庫：${mongoUri}`);
-    }
-
+    // Mask URI for logging (only hide password part)
     const maskedUri = mongoUri.replace(/\/\/.*@/, "//***:***@");
-    console.log(`正在連線至 MongoDB (網址: ${maskedUri}) ...`);
+
+    if (usingFallbackUri) {
+        console.warn(`⚠️  MONGODB_URI 未從環境變數讀取，自動切換至預設位址: ${maskedUri}`);
+    } else {
+        console.log(`📡  偵測到環境變數 MONGODB_URI，正在連線至: ${maskedUri}`);
+    }
 
     try {
-        await mongoose.connect(mongoUri);
-        console.log("✅ 連線成功：Connected to MongoDB successfully");
+        await mongoose.connect(mongoUri, {
+            serverSelectionTimeoutMS: 5000 // 5 seconds timeout
+        });
+        console.log("✅  資料庫連線成功：MongoDB Connected");
     } catch (error) {
-        console.error("❌ 連線失敗：Failed to connect to MongoDB:", error);
-        throw error;
+        console.error("❌  資料庫連線失敗：Failed to connect to MongoDB:", error);
     }
 }
+
 
 export async function disconnectDB() {
     if (mongoose.connection.readyState === 0) {

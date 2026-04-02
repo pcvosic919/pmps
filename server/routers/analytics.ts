@@ -487,16 +487,46 @@ export const analyticsRouter = router({
                     const deptUsers = await UserModel.find({ department: input.department }, { _id: 1 }).lean();
                     tsMatch.techId = { $in: deptUsers.map(u => u._id) };
                 }
-                const data = await TimesheetModel.find(tsMatch).populate("techId", "name department").populate("srId", "title").populate("opportunityId", "title").lean();
-                return data.map((d: any) => ({
-                    Date: new Date(d.workDate).toLocaleDateString(),
-                    User: d.techId?.name || "Unknown",
-                    Department: d.techId?.department || "N/A",
-                    Type: d.type === "project" ? "Project" : "Presales",
-                    Target: d.srId?.title || d.opportunityId?.title || "-",
-                    Hours: d.hours,
-                    Description: d.description
-                }));
+                const data = await TimesheetModel.find(tsMatch)
+                    .populate("techId", "name department")
+                    .populate({
+                        path: "srId",
+                        select: "title opportunityId",
+                        populate: {
+                            path: "opportunityId",
+                            select: "ownerId",
+                            populate: {
+                                path: "ownerId",
+                                select: "name department"
+                            }
+                        }
+                    })
+                    .populate({
+                        path: "opportunityId",
+                        select: "title ownerId",
+                        populate: {
+                            path: "ownerId",
+                            select: "name department"
+                        }
+                    })
+                    .lean();
+
+                return data.map((d: any) => {
+                    const opportunity = d.type === "project" ? d.srId?.opportunityId : d.opportunityId;
+                    const oppOwner = opportunity?.ownerId;
+
+                    return {
+                        Date: new Date(d.workDate).toLocaleDateString(),
+                        User: d.techId?.name || "Unknown",
+                        Department: d.techId?.department || "N/A",
+                        Type: d.type === "project" ? "Project" : "Presales",
+                        Target: d.srId?.title || d.opportunityId?.title || "-",
+                        "新增商機帳號": oppOwner?.name || "-",
+                        "新增商機部門": oppOwner?.department || "-",
+                        Hours: d.hours,
+                        Description: d.description
+                    };
+                });
             } else if (input.reportType === "utilization") {
                 let userMatch: any = {};
                 if (!hasAnyRole(ctx.user as any, ["admin"]) && hasAnyRole(ctx.user as any, ["manager"]) && ctx.user.department) {

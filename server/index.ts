@@ -14,7 +14,19 @@ import { verifyNotificationStreamToken } from "./_core/tokens";
 import { encryptPayload, decryptPayload } from "../shared/crypto";
 import { startBackgroundJobs } from "./_core/jobs";
 
-dotenv.config();
+const env = process.env.NODE_ENV || "development";
+const envFile = env === "test" ? ".env.test" : ".env.local";
+
+// Try to load from current directory, then from root
+const pathsToTry = [
+    path.resolve(process.cwd(), envFile),
+    path.resolve(process.cwd(), "..", envFile),
+];
+
+for (const envPath of pathsToTry) {
+    dotenv.config({ path: envPath, override: true });
+}
+dotenv.config(); // Final fallback
 
 const app = express();
 app.use(cors());

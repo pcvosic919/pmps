@@ -103,7 +103,7 @@ const navGroups: NavGroup[] = [
         items: [
             { icon: CreditCard, label: "費率設定", href: "/cost-rates", roles: ["admin", "manager"] },
             { icon: Settings2, label: "自訂欄位", href: "/custom-fields", roles: ["admin", "manager"] },
-            { icon: TrendingUp, label: "利潤中心公式", href: "/system-settings", roles: ["admin", "manager"] },
+            { icon: TrendingUp, label: "利潤中心公式", href: "/formula/profit-center", roles: ["admin", "manager"] },
         ],
     },
     {

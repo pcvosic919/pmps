@@ -1,11 +1,25 @@
 import dotenv from "dotenv";
+import path from "path";
 import { connectDB, disconnectDB, getMongoUri } from "../server/db";
 import { UserModel } from "../server/models/User";
 import { OpportunityModel } from "../server/models/Opportunity";
+import { SystemSettingModel } from "../server/models/Settings";
 import { roles, type Role } from "../shared/types";
 import { hashPassword } from "../server/_core/password";
 
 dotenv.config();
+
+// Try to load correctly for both package context and workspace root context
+const envFile = process.env.NODE_ENV === "test" ? ".env.test" : ".env.local";
+const pathsToTry = [
+    path.resolve(process.cwd(), envFile),
+    path.resolve(process.cwd(), "..", envFile),
+];
+
+for (const envPath of pathsToTry) {
+    dotenv.config({ path: envPath, override: true });
+}
+dotenv.config(); // Final fallback
 
 type DemoUserSeed = {
     email: string;
@@ -15,6 +29,7 @@ type DemoUserSeed = {
 };
 
 const demoUsers: DemoUserSeed[] = [
+    { email: "demo@demo.com", name: "Local Demo", role: "admin", roles: ["admin"] },
     { email: "demo_admin@demo.com", name: "Demo Admin", role: "admin", roles: ["admin"] },
     { email: "demo_manager@demo.com", name: "Demo Manager", role: "manager", roles: ["manager"] },
     { email: "demo_business@demo.com", name: "Demo Business", role: "business", roles: ["business"] },
@@ -22,6 +37,21 @@ const demoUsers: DemoUserSeed[] = [
     { email: "demo_pm@demo.com", name: "Demo PM", role: "pm", roles: ["pm"] },
     { email: "demo_tech@demo.com", name: "Demo Tech", role: "tech", roles: ["tech"] },
     { email: "demo_presales2@demo.com", name: "Demo Presales 2", role: "presales", roles: ["presales", "tech"] },
+];
+
+const demoSystemSettings = [
+    { key: "companyName", value: "PMP 專案管理系統", category: "general", valueType: "string", description: "Company Name" },
+    { key: "entraEnabled", value: "false", category: "auth", valueType: "boolean", description: "Enable Microsoft Entra ID SSO" },
+    { key: "entraClientId", value: "none", category: "auth", valueType: "string", description: "Entra ID Client ID" },
+    { key: "entraTenantId", value: "none", category: "auth", valueType: "string", description: "Entra ID Tenant ID" },
+    { key: "entraClientSecret", value: "none", category: "auth", valueType: "string", description: "Entra ID Client Secret" },
+    // Profit Center Settings
+    { key: "pcOverheadRate", value: "15", category: "general", valueType: "number", description: "Overhead Rate %" },
+    { key: "pcTargetMargin", value: "30", category: "general", valueType: "number", description: "Target Margin %" },
+    // KPI Target Settings (Moved to System Management)
+    { key: "pcSlaTarget", value: "95", category: "general", valueType: "number", description: "SLA Target %" },
+    { key: "pcRenewalTarget", value: "85", category: "general", valueType: "number", description: "Renewal Target %" },
+    { key: "pcUtilizationTarget", value: "80", category: "general", valueType: "number", description: "Utilization Target %" },
 ];
 
 const demoOpportunities = [
@@ -42,8 +72,9 @@ async function seed() {
         await Promise.all([
             UserModel.deleteMany({}),
             OpportunityModel.deleteMany({}),
+            SystemSettingModel.deleteMany({}),
         ]);
-        console.log("Cleared existing Users and Opportunities.");
+        console.log("Cleared existing Users, Opportunities, and SystemSettings.");
 
         const supportedRoles = new Set<string>(roles);
         for (const user of demoUsers) {
@@ -63,7 +94,10 @@ async function seed() {
         );
         console.log("Users seeded successfully.");
 
-        const adminUser = createdUsers.find((user) => user.email === "demo_admin@demo.com");
+        await SystemSettingModel.insertMany(demoSystemSettings);
+        console.log("System settings seeded successfully.");
+
+        const adminUser = createdUsers.find((user) => user.email === "demo@demo.com") || createdUsers[0];
         if (!adminUser) {
             throw new Error("Demo admin user was not created.");
         }

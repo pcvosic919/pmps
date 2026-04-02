@@ -7,16 +7,20 @@
   },
   "scripts": {
     "dev": "pnpm -r --parallel dev",
+    "dev:local": "pnpm -r --parallel dev:local",
     "build": "pnpm -r build",
     "start": "node server/dist/server/index.js",
     "typecheck": "pnpm -r typecheck",
     "test": "pnpm -r test",
-    "seed:demo": "pnpm --filter @dispatch/server exec tsx ../scripts/seed-demo.ts",
+    "test:local": "pnpm -r --parallel test:local",
+    "seed:demo": "tsx scripts/seed-demo.ts",
+    "seed:local": "tsx scripts/seed-demo.ts",
     "lint": "pnpm -r lint"
   },
   "devDependencies": {
     "@types/node": "^22.8.4",
     "dotenv": "^16.6.1",
+    "tsx": "^4.19.2",
     "typescript": "^5.6.3",
     "vitest": "^2.1.3"
   }
