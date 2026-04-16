@@ -24,7 +24,6 @@ export function OpportunityDetailPage() {
     const id = match ? (params.id as string) : "";
 
     const { user } = useCurrentUser();
-    const isPMOnly = user?.role === "pm" && !user?.roles?.includes("presales") && !user?.roles?.includes("tech") && !user?.roles?.includes("admin");
     const hasRole = (role: string) => user?.role === role || (user?.roles || []).includes(role as any);
 
     // ------ Modal states ------

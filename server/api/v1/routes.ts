@@ -3,7 +3,6 @@ import { ServiceRequestModel } from "../../models/ServiceRequest";
 import { OpportunityModel } from "../../models/Opportunity";
 import { IssueModel } from "../../models/Issue";
 import { TimesheetModel } from "../../models/Timesheet";
-import { UserModel } from "../../models/User";
 import { SystemSettingModel } from "../../models/Settings";
 
 export const copilotApiRouter = Router();

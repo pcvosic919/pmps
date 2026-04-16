@@ -58,7 +58,7 @@ export function SharePointFilesSection({ category, sharePointFolderUrl, title = 
                 console.error(err);
               }
             }}
-            disabled={ensureFolderMutation.isLoading}
+            disabled={ensureFolderMutation.isPending}
             className="flex items-center gap-1.5 px-3 py-1.5 bg-primary/10 hover:bg-primary/20 text-primary rounded-lg text-xs font-semibold transition-all border border-primary/20 disabled:opacity-50 disabled:cursor-not-allowed"
           >
             <ExternalLink className="w-3.5 h-3.5" />
