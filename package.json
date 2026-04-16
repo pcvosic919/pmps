@@ -9,7 +9,7 @@
     "dev": "pnpm -r --parallel dev",
     "dev:local": "pnpm -r --parallel dev:local",
     "build": "pnpm -r build",
-    "start": "node server/dist/server/index.js",
+    "start": "node server/dist/index.js",
     "typecheck": "pnpm -r typecheck",
     "test": "pnpm -r test",
     "test:local": "pnpm -r --parallel test:local",
