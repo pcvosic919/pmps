@@ -26,6 +26,9 @@ export interface IOpportunity extends Document {
     presalesAssignments: IPresalesAssignment[];
     customFields?: IOpportunityCustomField[];
     attachments: { fileName: string; fileUrl: string; sharePointDriveId?: string; sharePointItemId?: string; uploadedById: mongoose.Types.ObjectId; uploadedAt: Date }[];
+    approvedM365?: boolean;
+    approvedAzure?: boolean;
+    approvedSecurity?: boolean;
     sharePointFolderUrl?: string;
     createdAt: Date;
     updatedAt: Date;

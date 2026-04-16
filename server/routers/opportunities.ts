@@ -16,6 +16,7 @@ import {
     canManageOpportunity,
     canManageTimesheet,
     hasAnyRole,
+    isOpportunityBusinessOwner,
 } from "../_core/authorization";
 import { decodeCursor, encodeCursor, toObjectId } from "../_core/cursor";
 import { createNotification } from "../_core/notifications";
