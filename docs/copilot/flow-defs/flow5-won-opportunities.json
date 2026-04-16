@@ -1,0 +1,124 @@
+{
+  "name": "e7a8b9c0-1234-5678-abcd-ef0123456705",
+  "id": "/providers/Microsoft.ProcessSimple/flows/e7a8b9c0-1234-5678-abcd-ef0123456705",
+  "type": "Microsoft.ProcessSimple/flows",
+  "properties": {
+    "apiId": "/providers/Microsoft.PowerApps/apis/shared_logicflows",
+    "displayName": "PMPS - 查詢成交商機",
+    "definition": {
+      "$schema": "https://schema.management.azure.com/providers/Microsoft.Logic/schemas/2016-06-01/workflowdefinition.json#",
+      "contentVersion": "1.0.0.0",
+      "parameters": {
+        "PMPS_BASE_URL": { "type": "string", "defaultValue": "PMPS_BASE_URL_PLACEHOLDER" },
+        "PMPS_API_KEY":  { "type": "string", "defaultValue": "PMPS_API_KEY_PLACEHOLDER" }
+      },
+      "triggers": {
+        "manual": {
+          "type": "Request",
+          "kind": "PowerVirtualAgents",
+          "inputs": { "schema": { "type": "object", "properties": {} } }
+        }
+      },
+      "actions": {
+        "Get_Won_Opps": {
+          "type": "Http",
+          "inputs": {
+            "method": "GET",
+            "uri": "@{parameters('PMPS_BASE_URL')}/opportunities/won?limit=5",
+            "headers": { "X-API-KEY": "@{parameters('PMPS_API_KEY')}" }
+          },
+          "runAfter": {}
+        },
+        "Parse_Response": {
+          "type": "ParseJson",
+          "inputs": {
+            "content": "@body('Get_Won_Opps')",
+            "schema": {
+              "type": "object",
+              "properties": {
+                "count": { "type": "integer" },
+                "data": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "opportunityName": { "type": "string" },
+                      "customerName": { "type": "string" },
+                      "dealValue": { "type": "number" },
+                      "owner": { "type": "string" }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "runAfter": { "Get_Won_Opps": ["Succeeded"] }
+        },
+        "Check_Results": {
+          "type": "If",
+          "expression": { "equals": ["@body('Parse_Response')?['count']", 0] },
+          "actions": {
+            "Respond_None": {
+              "type": "Response",
+              "kind": "PowerVirtualAgents",
+              "inputs": {
+                "statusCode": 200,
+                "body": { "count": 0, "message": "目前尚無成交的商機記錄。" },
+                "responseSchema": {
+                  "type": "object",
+                  "properties": {
+                    "count": { "type": "integer" },
+                    "message": { "type": "string" }
+                  }
+                }
+              },
+              "runAfter": {}
+            }
+          },
+          "else": {
+            "actions": {
+              "Select_Lines": {
+                "type": "Select",
+                "inputs": {
+                  "from": "@body('Parse_Response')?['data']",
+                  "select": "• @{item()?['opportunityName']}（@{item()?['customerName']}）NT$ @{item()?['dealValue']}"
+                },
+                "runAfter": {}
+              },
+              "Join_Lines": {
+                "type": "Join",
+                "inputs": { "from": "@body('Select_Lines')", "joinWith": "\n" },
+                "runAfter": { "Select_Lines": ["Succeeded"] }
+              },
+              "Respond_Opps": {
+                "type": "Response",
+                "kind": "PowerVirtualAgents",
+                "inputs": {
+                  "statusCode": 200,
+                  "body": {
+                    "count":   "@{body('Parse_Response')?['count']}",
+                    "list":    "@{body('Join_Lines')}",
+                    "message": "最近成交的商機：\n@{body('Join_Lines')}"
+                  },
+                  "responseSchema": {
+                    "type": "object",
+                    "properties": {
+                      "count": { "type": "integer" },
+                      "list": { "type": "string" },
+                      "message": { "type": "string" }
+                    }
+                  }
+                },
+                "runAfter": { "Join_Lines": ["Succeeded"] }
+              }
+            }
+          },
+          "runAfter": { "Parse_Response": ["Succeeded"] }
+        }
+      },
+      "outputs": {}
+    },
+    "state": "Started",
+    "connectionReferences": {}
+  }
+}

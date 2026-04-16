@@ -57,16 +57,33 @@ export const getAccessibleOpportunityQuery = async (ctxUser: OpportunityListUser
     if (hasAnyRole(ctxUser as any, ["manager"]) && ctxUser.department) {
         const deptUsers = await UserModel.find({ department: ctxUser.department }, { _id: 1 }).lean();
         const deptUserIds = deptUsers.map(u => u._id);
+        const departmentApprovalMap: Record<string, Record<string, boolean>> = {
+            IE0C00: { approvedSecurity: true },
+            IE0C30: { approvedM365: true },
+            IE0C50: { approvedAzure: true }
+        };
+
+        const approvalClause = departmentApprovalMap[ctxUser.department];
+
+        const accessOrClauses: Record<string, unknown>[] = [
+            ...baseAccess
+        ];
+
         if (deptUserIds.length > 0) {
-            return {
-                $or: [
-                    ...baseAccess,
-                    { ownerId: { $in: deptUserIds } },
-                    { "members.userId": { $in: deptUserIds } },
-                    { "presalesAssignments.techId": { $in: deptUserIds } }
-                ]
-            };
+            accessOrClauses.push(
+                { ownerId: { $in: deptUserIds } },
+                { "members.userId": { $in: deptUserIds } },
+                { "presalesAssignments.techId": { $in: deptUserIds } }
+            );
         }
+
+        if (approvalClause) {
+            accessOrClauses.push(approvalClause);
+        }
+
+        return {
+            $or: accessOrClauses
+        };
     }
 
     return { $or: baseAccess };

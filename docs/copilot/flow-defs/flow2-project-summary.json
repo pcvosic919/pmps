@@ -1,0 +1,79 @@
+{
+  "name": "e7a8b9c0-1234-5678-abcd-ef0123456702",
+  "id": "/providers/Microsoft.ProcessSimple/flows/e7a8b9c0-1234-5678-abcd-ef0123456702",
+  "type": "Microsoft.ProcessSimple/flows",
+  "properties": {
+    "apiId": "/providers/Microsoft.PowerApps/apis/shared_logicflows",
+    "displayName": "PMPS - 取得專案概況",
+    "definition": {
+      "$schema": "https://schema.management.azure.com/providers/Microsoft.Logic/schemas/2016-06-01/workflowdefinition.json#",
+      "contentVersion": "1.0.0.0",
+      "parameters": {
+        "PMPS_BASE_URL": { "type": "string", "defaultValue": "PMPS_BASE_URL_PLACEHOLDER" },
+        "PMPS_API_KEY":  { "type": "string", "defaultValue": "PMPS_API_KEY_PLACEHOLDER" }
+      },
+      "triggers": {
+        "manual": {
+          "type": "Request",
+          "kind": "PowerVirtualAgents",
+          "inputs": { "schema": { "type": "object", "properties": {} } }
+        }
+      },
+      "actions": {
+        "Get_Summary": {
+          "type": "Http",
+          "inputs": {
+            "method": "GET",
+            "uri": "@{parameters('PMPS_BASE_URL')}/projects/summary",
+            "headers": { "X-API-KEY": "@{parameters('PMPS_API_KEY')}" }
+          },
+          "runAfter": {}
+        },
+        "Parse_Response": {
+          "type": "ParseJson",
+          "inputs": {
+            "content": "@body('Get_Summary')",
+            "schema": {
+              "type": "object",
+              "properties": {
+                "totalProjects": { "type": "integer" },
+                "totalContractValue": { "type": "number" },
+                "projectsAtMarginRisk": { "type": "integer" },
+                "openCriticalIssues": { "type": "integer" }
+              }
+            }
+          },
+          "runAfter": { "Get_Summary": ["Succeeded"] }
+        },
+        "Respond_to_Copilot": {
+          "type": "Response",
+          "kind": "PowerVirtualAgents",
+          "inputs": {
+            "statusCode": 200,
+            "body": {
+              "totalProjects":      "@{body('Parse_Response')?['totalProjects']}",
+              "atRiskCount":        "@{body('Parse_Response')?['projectsAtMarginRisk']}",
+              "criticalIssues":     "@{body('Parse_Response')?['openCriticalIssues']}",
+              "totalContractValue": "@{body('Parse_Response')?['totalContractValue']}",
+              "message": "目前共有 @{body('Parse_Response')?['totalProjects']} 個專案，總合約金額 @{body('Parse_Response')?['totalContractValue']}。其中 @{body('Parse_Response')?['projectsAtMarginRisk']} 個有利潤風險，@{body('Parse_Response')?['openCriticalIssues']} 個嚴重議題待處理。"
+            },
+            "responseSchema": {
+              "type": "object",
+              "properties": {
+                "totalProjects": { "type": "integer" },
+                "atRiskCount": { "type": "integer" },
+                "criticalIssues": { "type": "integer" },
+                "totalContractValue": { "type": "number" },
+                "message": { "type": "string" }
+              }
+            }
+          },
+          "runAfter": { "Parse_Response": ["Succeeded"] }
+        }
+      },
+      "outputs": {}
+    },
+    "state": "Started",
+    "connectionReferences": {}
+  }
+}

@@ -158,7 +158,10 @@ export const opportunitiesRouter = router({
                 value: z.string()
             })).optional(),
             productNames: z.array(z.string()).optional(),
-            description: z.string().optional()
+            description: z.string().optional(),
+            approvedM365: z.boolean().default(false),
+            approvedAzure: z.boolean().default(false),
+            approvedSecurity: z.boolean().default(false)
         }))
         .mutation(async ({ input, ctx }) => {
             const ownerId = ctx.user.id;
@@ -555,6 +558,31 @@ export const opportunitiesRouter = router({
             await OpportunityModel.updateOne(
                 { _id: input.id },
                 { $set: { customFields: input.customFields.map((cf) => ({ fieldId: toObjectId(cf.fieldId), value: cf.value })) } }
+            );
+            return { success: true };
+        }),
+
+    updateDescription: protectedProcedure
+        .input(z.object({
+            id: z.string(),
+            description: z.string().optional()
+        }))
+        .mutation(async ({ input, ctx }) => {
+            const opportunity = assertFound(
+                await OpportunityModel.findById(input.id)
+                    .select("ownerId members status")
+                    .lean(),
+                "找不到該商機"
+            );
+
+            const isBusinessOwner = isOpportunityBusinessOwner(ctx.user, opportunity);
+            const canUpdate = hasAnyRole(ctx.user, ["admin", "manager"]) || isBusinessOwner;
+            assertAuthorized(canUpdate, "您沒有權限更新商機描述");
+            assertOpportunityNotConverted(opportunity);
+
+            await OpportunityModel.updateOne(
+                { _id: input.id },
+                { $set: { description: input.description || "" } }
             );
             return { success: true };
         }),

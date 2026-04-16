@@ -1,0 +1,114 @@
+﻿{
+  "properties": {
+    "connectionReferences": {},
+    "definition": {
+      "$schema": "https://schema.management.azure.com/providers/Microsoft.Logic/schemas/2016-06-01/workflowdefinition.json#",
+      "contentVersion": "1.0.0.0",
+      "parameters": {
+        "PMPS_BASE_URL": { "type": "string", "defaultValue": "https://cl5kqbhd-5000.asse.devtunnels.ms/api/v1" },
+        "PMPS_API_KEY":  { "type": "string", "defaultValue": "pmp_r9xby7l6guh" }
+      },
+      "triggers": {
+        "manual": {
+          "type": "Request",
+          "kind": "PowerVirtualAgents",
+          "inputs": {
+            "schema": {
+              "type": "object",
+              "properties": {
+                "month": {
+                  "type": "string",
+                  "x-ms-dynamically-added": true,
+                  "description": "月份（YYYY-MM，留空表示當月）",
+                  "x-ms-content-hint": "TEXT"
+                }
+              }
+            }
+          }
+        }
+      },
+      "actions": {
+        "Resolve_Month": {
+          "type": "InitializeVariable",
+          "inputs": {
+            "variables": [
+              {
+                "name": "resolvedMonth",
+                "type": "string",
+                "value": "@{if(empty(triggerBody()?['month']), formatDateTime(utcNow(), 'yyyy-MM'), triggerBody()?['month'])}"
+              }
+            ]
+          },
+          "runAfter": {}
+        },
+        "Get_Timesheet_Summary": {
+          "type": "Http",
+          "inputs": {
+            "method": "GET",
+            "uri": "@{parameters('PMPS_BASE_URL')}/timesheets/summary",
+            "headers": { "X-API-KEY": "@{parameters('PMPS_API_KEY')}" },
+            "queries": { "month": "@{variables('resolvedMonth')}" }
+          },
+          "runAfter": { "Resolve_Month": ["Succeeded"] }
+        },
+        "Parse_Response": {
+          "type": "ParseJson",
+          "inputs": {
+            "content": "@body('Get_Timesheet_Summary')",
+            "schema": {
+              "type": "object",
+              "properties": {
+                "month":          { "type": "string" },
+                "presalesHours":  { "type": "number" },
+                "projectHours":   { "type": "number" },
+                "totalHours":     { "type": "number" },
+                "topContributors": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "name":  { "type": "string" },
+                      "hours": { "type": "number" }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "runAfter": { "Get_Timesheet_Summary": ["Succeeded"] }
+        },
+        "Respond_to_Copilot": {
+          "type": "Response",
+          "kind": "PowerVirtualAgents",
+          "inputs": {
+            "statusCode": 200,
+            "body": {
+              "month":         "@{body('Parse_Response')?['month']}",
+              "totalHours":    "@{body('Parse_Response')?['totalHours']}",
+              "presalesHours": "@{body('Parse_Response')?['presalesHours']}",
+              "projectHours":  "@{body('Parse_Response')?['projectHours']}",
+              "message":       "@{body('Parse_Response')?['month']} 月共記錄 @{body('Parse_Response')?['totalHours']} 小時\n協銷工時：@{body('Parse_Response')?['presalesHours']} 小時\n專案工時：@{body('Parse_Response')?['projectHours']} 小時"
+            },
+            "responseSchema": {
+              "type": "object",
+              "properties": {
+                "month":         { "type": "string" },
+                "totalHours":    { "type": "number" },
+                "presalesHours": { "type": "number" },
+                "projectHours":  { "type": "number" },
+                "message":       { "type": "string" }
+              }
+            }
+          },
+          "runAfter": { "Parse_Response": ["Succeeded"] }
+        }
+      },
+      "outputs": {}
+    },
+    "displayName": "PMPS - 查詢工時概況",
+    "description": "取得指定月份的工時統計，供 Copilot Studio 呼叫。"
+  }
+}
+
+
+

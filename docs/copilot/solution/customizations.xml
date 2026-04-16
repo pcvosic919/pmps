@@ -1,0 +1,82 @@
+<?xml version="1.0" encoding="utf-8"?>
+<ImportExportXml version="9.2.24.10338" SolutionPackageVersion="9.2" languagecode="1028" generatedBy="CrmLive" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+  <Workflows>
+    <Workflow WorkflowId="{A1000001-0000-0000-0000-000000000001}" Name="PMPS - 查詢專案狀態">
+      <JsonFileName>/Workflows/pmps_QueryProjectStatus.json</JsonFileName>
+      <Type>1</Type>
+      <Subprocess>0</Subprocess>
+      <Category>5</Category>
+      <Mode>0</Mode>
+      <Scope>4</Scope>
+      <OnDemand>1</OnDemand>
+      <TriggerOnCreate>0</TriggerOnCreate>
+      <TriggerOnDelete>0</TriggerOnDelete>
+      <AsyncAutodelete>0</AsyncAutodelete>
+      <SyncWorkflowLogOnFailure>0</SyncWorkflowLogOnFailure>
+      <StateCode>1</StateCode>
+      <StatusCode>2</StatusCode>
+      <RunAs>1</RunAs>
+      <IsTransacted>1</IsTransacted>
+      <IntroducedVersion>1.0.0.0</IntroducedVersion>
+      <IsCustomizable>1</IsCustomizable>
+      <BusinessProcessType>0</BusinessProcessType>
+      <IsCustomProcessingStepAllowedForOtherPublishers>1</IsCustomProcessingStepAllowedForOtherPublishers>
+      <PrimaryEntity>none</PrimaryEntity>
+      <LocalizedNames>
+        <LocalizedName languagecode="1028" description="PMPS - 查詢專案狀態" />
+      </LocalizedNames>
+    </Workflow>
+    <Workflow WorkflowId="{A1000001-0000-0000-0000-000000000002}" Name="PMPS - 取得專案概況">
+      <JsonFileName>/Workflows/pmps_GetProjectsSummary.json</JsonFileName>
+      <Type>1</Type><Subprocess>0</Subprocess><Category>5</Category><Mode>0</Mode>
+      <Scope>4</Scope><OnDemand>1</OnDemand><TriggerOnCreate>0</TriggerOnCreate>
+      <TriggerOnDelete>0</TriggerOnDelete><AsyncAutodelete>0</AsyncAutodelete>
+      <SyncWorkflowLogOnFailure>0</SyncWorkflowLogOnFailure><StateCode>1</StateCode>
+      <StatusCode>2</StatusCode><RunAs>1</RunAs><IsTransacted>1</IsTransacted>
+      <IntroducedVersion>1.0.0.0</IntroducedVersion><IsCustomizable>1</IsCustomizable>
+      <BusinessProcessType>0</BusinessProcessType>
+      <IsCustomProcessingStepAllowedForOtherPublishers>1</IsCustomProcessingStepAllowedForOtherPublishers>
+      <PrimaryEntity>none</PrimaryEntity>
+      <LocalizedNames><LocalizedName languagecode="1028" description="PMPS - 取得專案概況" /></LocalizedNames>
+    </Workflow>
+    <Workflow WorkflowId="{A1000001-0000-0000-0000-000000000003}" Name="PMPS - 查詢高風險議題">
+      <JsonFileName>/Workflows/pmps_GetCriticalIssues.json</JsonFileName>
+      <Type>1</Type><Subprocess>0</Subprocess><Category>5</Category><Mode>0</Mode>
+      <Scope>4</Scope><OnDemand>1</OnDemand><TriggerOnCreate>0</TriggerOnCreate>
+      <TriggerOnDelete>0</TriggerOnDelete><AsyncAutodelete>0</AsyncAutodelete>
+      <SyncWorkflowLogOnFailure>0</SyncWorkflowLogOnFailure><StateCode>1</StateCode>
+      <StatusCode>2</StatusCode><RunAs>1</RunAs><IsTransacted>1</IsTransacted>
+      <IntroducedVersion>1.0.0.0</IntroducedVersion><IsCustomizable>1</IsCustomizable>
+      <BusinessProcessType>0</BusinessProcessType>
+      <IsCustomProcessingStepAllowedForOtherPublishers>1</IsCustomProcessingStepAllowedForOtherPublishers>
+      <PrimaryEntity>none</PrimaryEntity>
+      <LocalizedNames><LocalizedName languagecode="1028" description="PMPS - 查詢高風險議題" /></LocalizedNames>
+    </Workflow>
+    <Workflow WorkflowId="{A1000001-0000-0000-0000-000000000004}" Name="PMPS - 查詢工時概況">
+      <JsonFileName>/Workflows/pmps_GetTimesheetSummary.json</JsonFileName>
+      <Type>1</Type><Subprocess>0</Subprocess><Category>5</Category><Mode>0</Mode>
+      <Scope>4</Scope><OnDemand>1</OnDemand><TriggerOnCreate>0</TriggerOnCreate>
+      <TriggerOnDelete>0</TriggerOnDelete><AsyncAutodelete>0</AsyncAutodelete>
+      <SyncWorkflowLogOnFailure>0</SyncWorkflowLogOnFailure><StateCode>1</StateCode>
+      <StatusCode>2</StatusCode><RunAs>1</RunAs><IsTransacted>1</IsTransacted>
+      <IntroducedVersion>1.0.0.0</IntroducedVersion><IsCustomizable>1</IsCustomizable>
+      <BusinessProcessType>0</BusinessProcessType>
+      <IsCustomProcessingStepAllowedForOtherPublishers>1</IsCustomProcessingStepAllowedForOtherPublishers>
+      <PrimaryEntity>none</PrimaryEntity>
+      <LocalizedNames><LocalizedName languagecode="1028" description="PMPS - 查詢工時概況" /></LocalizedNames>
+    </Workflow>
+    <Workflow WorkflowId="{A1000001-0000-0000-0000-000000000005}" Name="PMPS - 查詢成交商機">
+      <JsonFileName>/Workflows/pmps_GetWonOpportunities.json</JsonFileName>
+      <Type>1</Type><Subprocess>0</Subprocess><Category>5</Category><Mode>0</Mode>
+      <Scope>4</Scope><OnDemand>1</OnDemand><TriggerOnCreate>0</TriggerOnCreate>
+      <TriggerOnDelete>0</TriggerOnDelete><AsyncAutodelete>0</AsyncAutodelete>
+      <SyncWorkflowLogOnFailure>0</SyncWorkflowLogOnFailure><StateCode>1</StateCode>
+      <StatusCode>2</StatusCode><RunAs>1</RunAs><IsTransacted>1</IsTransacted>
+      <IntroducedVersion>1.0.0.0</IntroducedVersion><IsCustomizable>1</IsCustomizable>
+      <BusinessProcessType>0</BusinessProcessType>
+      <IsCustomProcessingStepAllowedForOtherPublishers>1</IsCustomProcessingStepAllowedForOtherPublishers>
+      <PrimaryEntity>none</PrimaryEntity>
+      <LocalizedNames><LocalizedName languagecode="1028" description="PMPS - 查詢成交商機" /></LocalizedNames>
+    </Workflow>
+  </Workflows>
+</ImportExportXml>

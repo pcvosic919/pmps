@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="utf-8"?>
+<ImportExportXml version="9.2.24.10338" SolutionPackageVersion="9.2" languagecode="1028" generatedBy="CrmLive" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+  <SolutionManifest>
+    <UniqueName>PmpsCopilotIntegration</UniqueName>
+    <LocalizedNames>
+      <LocalizedName description="PMPS Copilot Integration" languagecode="1028" />
+    </LocalizedNames>
+    <Descriptions>
+      <Description description="PMPS Bot API flows for Copilot Studio integration" languagecode="1028" />
+    </Descriptions>
+    <Version>1.0.0.0</Version>
+    <Managed>0</Managed>
+    <Publisher>
+      <UniqueName>pmps_publisher</UniqueName>
+      <LocalizedNames>
+        <LocalizedName description="PMPS Publisher" languagecode="1028" />
+      </LocalizedNames>
+      <Descriptions />
+      <EMailAddress />
+      <SupportingWebsiteUrl />
+      <CustomizationPrefix>pmps</CustomizationPrefix>
+      <CustomizationOptionValuePrefix>10000</CustomizationOptionValuePrefix>
+    </Publisher>
+    <RootComponents>
+      <RootComponent type="29" id="{A1000001-0000-0000-0000-000000000001}" behavior="0" />
+      <RootComponent type="29" id="{A1000001-0000-0000-0000-000000000002}" behavior="0" />
+      <RootComponent type="29" id="{A1000001-0000-0000-0000-000000000003}" behavior="0" />
+      <RootComponent type="29" id="{A1000001-0000-0000-0000-000000000004}" behavior="0" />
+      <RootComponent type="29" id="{A1000001-0000-0000-0000-000000000005}" behavior="0" />
+    </RootComponents>
+    <MissingDependencies />
+  </SolutionManifest>
+</ImportExportXml>

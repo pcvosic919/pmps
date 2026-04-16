@@ -2,10 +2,12 @@ import { useState, useEffect } from "react";
 import * as Dialog from "@radix-ui/react-dialog";
 import { Search, FileText, Building2, FolderKanban, Users, Activity, Settings } from "lucide-react";
 import { useLocation } from "wouter";
+import { useCurrentUser } from "../lib/useCurrentUser";
 
 export function GlobalSearch() {
     const [open, setOpen] = useState(false);
     const [, setLocation] = useLocation();
+    const { hasRole } = useCurrentUser();
     
     useEffect(() => {
         const down = (e: KeyboardEvent) => {
@@ -28,6 +30,10 @@ export function GlobalSearch() {
         { href: "/system-settings", icon: Settings, label: "系統與背景設定 (Settings)" }
     ];
 
+    const visibleRoutes = routes.filter(
+        (route) => route.href !== "/system-settings" || hasRole("admin")
+    );
+
     return (
         <Dialog.Root open={open} onOpenChange={setOpen}>
             <Dialog.Portal>
@@ -44,7 +50,7 @@ export function GlobalSearch() {
                     </div>
                     <div className="max-h-[350px] overflow-y-auto p-2">
                         <div className="px-3 py-2 text-xs font-semibold text-muted-foreground tracking-wider mb-1">快速導覽 Shortcuts</div>
-                        {routes.map((r, i) => (
+                        {visibleRoutes.map((r, i) => (
                             <button
                                 key={i}
                                 onClick={() => { setLocation(r.href); setOpen(false); }}

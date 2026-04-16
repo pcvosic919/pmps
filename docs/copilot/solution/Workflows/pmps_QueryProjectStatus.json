@@ -1,0 +1,148 @@
+﻿{
+  "properties": {
+    "connectionReferences": {},
+    "definition": {
+      "$schema": "https://schema.management.azure.com/providers/Microsoft.Logic/schemas/2016-06-01/workflowdefinition.json#",
+      "contentVersion": "1.0.0.0",
+      "parameters": {
+        "PMPS_BASE_URL": { "type": "string", "defaultValue": "https://cl5kqbhd-5000.asse.devtunnels.ms/api/v1" },
+        "PMPS_API_KEY":  { "type": "string", "defaultValue": "pmp_r9xby7l6guh" }
+      },
+      "triggers": {
+        "manual": {
+          "type": "Request",
+          "kind": "PowerVirtualAgents",
+          "inputs": {
+            "schema": {
+              "type": "object",
+              "properties": {
+                "keyword": {
+                  "type": "string",
+                  "x-ms-dynamically-added": true,
+                  "description": "專案名稱關鍵字",
+                  "x-ms-content-hint": "TEXT"
+                }
+              },
+              "required": ["keyword"]
+            }
+          }
+        }
+      },
+      "actions": {
+        "Search_Projects": {
+          "type": "Http",
+          "inputs": {
+            "method": "GET",
+            "uri": "@{parameters('PMPS_BASE_URL')}/projects/search",
+            "headers": { "X-API-KEY": "@{parameters('PMPS_API_KEY')}" },
+            "queries": { "q": "@{triggerBody()?['keyword']}" }
+          },
+          "runAfter": {}
+        },
+        "Parse_Response": {
+          "type": "ParseJson",
+          "inputs": {
+            "content": "@body('Search_Projects')",
+            "schema": {
+              "type": "object",
+              "properties": {
+                "count": { "type": "integer" },
+                "message": { "type": "string" },
+                "data": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "id":             { "type": "string" },
+                      "projectName":    { "type": "string" },
+                      "status":         { "type": "string" },
+                      "pm":             { "type": "string" },
+                      "contractAmount": { "type": "number" },
+                      "marginEstimate": { "type": "number" },
+                      "isMarginAtRisk": { "type": "boolean" },
+                      "wbs": {
+                        "type": "object",
+                        "properties": {
+                          "progressPercent":    { "type": "integer" },
+                          "wbsStatus":          { "type": "string" },
+                          "totalEstimatedHours":{ "type": "number" },
+                          "totalActualHours":   { "type": "number" }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "runAfter": { "Search_Projects": ["Succeeded"] }
+        },
+        "Check_Results": {
+          "type": "If",
+          "expression": { "equals": ["@body('Parse_Response')?['count']", 0] },
+          "actions": {
+            "Respond_NotFound": {
+              "type": "Response",
+              "kind": "PowerVirtualAgents",
+              "inputs": {
+                "statusCode": 200,
+                "body": {
+                  "found": false,
+                  "message": "找不到包含「@{triggerBody()?['keyword']}」的專案，請確認名稱後再試。"
+                },
+                "responseSchema": {
+                  "type": "object",
+                  "properties": {
+                    "found":    { "type": "boolean" },
+                    "message":  { "type": "string" }
+                  }
+                }
+              },
+              "runAfter": {}
+            }
+          },
+          "else": {
+            "actions": {
+              "Respond_Found": {
+                "type": "Response",
+                "kind": "PowerVirtualAgents",
+                "inputs": {
+                  "statusCode": 200,
+                  "body": {
+                    "found":            true,
+                    "projectName":      "@{body('Parse_Response')?['data'][0]?['projectName']}",
+                    "status":           "@{body('Parse_Response')?['data'][0]?['status']}",
+                    "pm":               "@{body('Parse_Response')?['data'][0]?['pm']}",
+                    "progressPercent":  "@{body('Parse_Response')?['data'][0]?['wbs']?['progressPercent']}",
+                    "isMarginAtRisk":   "@{body('Parse_Response')?['data'][0]?['isMarginAtRisk']}",
+                    "message":          "專案「@{body('Parse_Response')?['data'][0]?['projectName']}」\n狀態：@{body('Parse_Response')?['data'][0]?['status']}\nWBS 進度：@{body('Parse_Response')?['data'][0]?['wbs']?['progressPercent']}%\nPM：@{body('Parse_Response')?['data'][0]?['pm']}\n利潤風險：@{if(body('Parse_Response')?['data'][0]?['isMarginAtRisk'], '⚠️ 是', '正常')}"
+                  },
+                  "responseSchema": {
+                    "type": "object",
+                    "properties": {
+                      "found":           { "type": "boolean" },
+                      "projectName":     { "type": "string" },
+                      "status":          { "type": "string" },
+                      "pm":              { "type": "string" },
+                      "progressPercent": { "type": "integer" },
+                      "isMarginAtRisk":  { "type": "boolean" },
+                      "message":         { "type": "string" }
+                    }
+                  }
+                },
+                "runAfter": {}
+              }
+            }
+          },
+          "runAfter": { "Parse_Response": ["Succeeded"] }
+        }
+      },
+      "outputs": {}
+    },
+    "displayName": "PMPS - 查詢專案狀態",
+    "description": "依關鍵字搜尋專案，回傳狀態、WBS 進度與 PM 資訊，供 Copilot Studio 呼叫。"
+  }
+}
+
+
+

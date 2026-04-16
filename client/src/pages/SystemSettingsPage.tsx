@@ -14,6 +14,7 @@ const defaultSettings = {
     entraClientSecret: "",
     entraTenantId: "",
     entraEnabled: false,
+    graphApiSecret: "",
     apiToken: "",
     webhookUrl: "",
     webhookEnabled: false,
@@ -252,6 +253,40 @@ export function SystemSettingsPage() {
                                             className="w-full p-2.5 rounded-lg border border-input bg-background/50 focus:bg-background font-mono text-sm"
                                         />
                                         <p className="text-xs text-muted-foreground mt-1">設定後用戶可透過 Microsoft 帳號 SSO 登入</p>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div>
+                                <div className="flex items-center justify-between mb-4 border-b pb-2">
+                                    <h3 className="text-lg font-bold">Microsoft Graph API & SharePoint 整合</h3>
+                                </div>
+                                <div className="grid gap-4 max-w-2xl">
+                                    <div className="rounded-lg border border-dashed border-border bg-muted/30 p-3 text-xs text-muted-foreground">
+                                        用於自動建立 SharePoint 資料夾。需要 Microsoft Graph API 的 
+                                        <span className="font-semibold text-foreground"> Sites.Manage.All、Files.ReadWrite.All</span>
+                                        應用程式權限。
+                                    </div>
+                                    <div>
+                                        <label className="block text-sm font-medium mb-1">SharePoint 站台 URL</label>
+                                        <input
+                                            type="url"
+                                            value={settings.sharePointSiteUrl}
+                                            placeholder="https://yourcompany.sharepoint.com/sites/PMP"
+                                            onChange={e => setSettings(s => ({ ...s, sharePointSiteUrl: e.target.value }))}
+                                            className="w-full p-2.5 rounded-lg border border-input bg-background/50 focus:bg-background font-mono text-sm"
+                                        />
+                                    </div>
+                                    <div>
+                                        <label className="block text-sm font-medium mb-1">Graph API Client Secret</label>
+                                        <input
+                                            type="password"
+                                            value={settings.graphApiSecret}
+                                            placeholder="••••••••••••••••"
+                                            onChange={e => setSettings(s => ({ ...s, graphApiSecret: e.target.value }))}
+                                            className="w-full p-2.5 rounded-lg border border-input bg-background/50 focus:bg-background font-mono text-sm"
+                                        />
+                                        <p className="text-xs text-muted-foreground mt-1">來自 Azure App Registration 的 Client Secret</p>
                                     </div>
                                 </div>
                             </div>

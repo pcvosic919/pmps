@@ -1,0 +1,124 @@
+{
+  "name": "e7a8b9c0-1234-5678-abcd-ef0123456703",
+  "id": "/providers/Microsoft.ProcessSimple/flows/e7a8b9c0-1234-5678-abcd-ef0123456703",
+  "type": "Microsoft.ProcessSimple/flows",
+  "properties": {
+    "apiId": "/providers/Microsoft.PowerApps/apis/shared_logicflows",
+    "displayName": "PMPS - 查詢高風險議題",
+    "definition": {
+      "$schema": "https://schema.management.azure.com/providers/Microsoft.Logic/schemas/2016-06-01/workflowdefinition.json#",
+      "contentVersion": "1.0.0.0",
+      "parameters": {
+        "PMPS_BASE_URL": { "type": "string", "defaultValue": "PMPS_BASE_URL_PLACEHOLDER" },
+        "PMPS_API_KEY":  { "type": "string", "defaultValue": "PMPS_API_KEY_PLACEHOLDER" }
+      },
+      "triggers": {
+        "manual": {
+          "type": "Request",
+          "kind": "PowerVirtualAgents",
+          "inputs": { "schema": { "type": "object", "properties": {} } }
+        }
+      },
+      "actions": {
+        "Get_Issues": {
+          "type": "Http",
+          "inputs": {
+            "method": "GET",
+            "uri": "@{parameters('PMPS_BASE_URL')}/issues/critical?limit=10",
+            "headers": { "X-API-KEY": "@{parameters('PMPS_API_KEY')}" }
+          },
+          "runAfter": {}
+        },
+        "Parse_Response": {
+          "type": "ParseJson",
+          "inputs": {
+            "content": "@body('Get_Issues')",
+            "schema": {
+              "type": "object",
+              "properties": {
+                "count": { "type": "integer" },
+                "data": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "issueTitle": { "type": "string" },
+                      "severity": { "type": "string" },
+                      "affectedProjectName": { "type": "string" },
+                      "currentStatus": { "type": "string" }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "runAfter": { "Get_Issues": ["Succeeded"] }
+        },
+        "Check_Issues": {
+          "type": "If",
+          "expression": { "equals": ["@body('Parse_Response')?['count']", 0] },
+          "actions": {
+            "Respond_NoIssues": {
+              "type": "Response",
+              "kind": "PowerVirtualAgents",
+              "inputs": {
+                "statusCode": 200,
+                "body": { "issueCount": 0, "message": "目前沒有嚴重議題，所有專案運作正常。" },
+                "responseSchema": {
+                  "type": "object",
+                  "properties": {
+                    "issueCount": { "type": "integer" },
+                    "message": { "type": "string" }
+                  }
+                }
+              },
+              "runAfter": {}
+            }
+          },
+          "else": {
+            "actions": {
+              "Select_Lines": {
+                "type": "Select",
+                "inputs": {
+                  "from": "@body('Parse_Response')?['data']",
+                  "select": "• @{item()?['affectedProjectName']}：@{item()?['issueTitle']} [@{item()?['severity']}]"
+                },
+                "runAfter": {}
+              },
+              "Join_Lines": {
+                "type": "Join",
+                "inputs": { "from": "@body('Select_Lines')", "joinWith": "\n" },
+                "runAfter": { "Select_Lines": ["Succeeded"] }
+              },
+              "Respond_Issues": {
+                "type": "Response",
+                "kind": "PowerVirtualAgents",
+                "inputs": {
+                  "statusCode": 200,
+                  "body": {
+                    "issueCount": "@{body('Parse_Response')?['count']}",
+                    "issueList":  "@{body('Join_Lines')}",
+                    "message":    "目前有 @{body('Parse_Response')?['count']} 個嚴重議題：\n@{body('Join_Lines')}"
+                  },
+                  "responseSchema": {
+                    "type": "object",
+                    "properties": {
+                      "issueCount": { "type": "integer" },
+                      "issueList": { "type": "string" },
+                      "message": { "type": "string" }
+                    }
+                  }
+                },
+                "runAfter": { "Join_Lines": ["Succeeded"] }
+              }
+            }
+          },
+          "runAfter": { "Parse_Response": ["Succeeded"] }
+        }
+      },
+      "outputs": {}
+    },
+    "state": "Started",
+    "connectionReferences": {}
+  }
+}

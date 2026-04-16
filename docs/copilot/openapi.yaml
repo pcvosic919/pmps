@@ -1,0 +1,449 @@
+openapi: 3.0.1
+info:
+  title: PMPS Bot API
+  description: >
+    Project Management & Presales System — REST API for Copilot Studio integration.
+    All endpoints require the `X-API-KEY` header.
+  version: "1.0.0"
+  contact:
+    name: PMPS Admin
+
+servers:
+  - url: https://{host}/api/v1
+    variables:
+      host:
+        default: your-pmps-domain.com
+        description: Your PMPS server hostname
+
+security:
+  - ApiKeyAuth: []
+
+components:
+  securitySchemes:
+    ApiKeyAuth:
+      type: apiKey
+      in: header
+      name: X-API-KEY
+
+  schemas:
+    ErrorResponse:
+      type: object
+      properties:
+        error:
+          type: string
+
+    ProjectSummaryItem:
+      type: object
+      properties:
+        id:
+          type: string
+        projectName:
+          type: string
+        status:
+          type: string
+          enum: [new, in_progress, on_hold, completed, cancelled]
+        pm:
+          type: string
+        contractAmount:
+          type: number
+        marginEstimate:
+          type: number
+        isMarginAtRisk:
+          type: boolean
+        startDate:
+          type: string
+          format: date-time
+
+    ProjectDetail:
+      type: object
+      properties:
+        id:
+          type: string
+        projectName:
+          type: string
+        status:
+          type: string
+        pm:
+          type: string
+        contractAmount:
+          type: number
+        financials:
+          type: object
+          properties:
+            marginEstimate:
+              type: number
+            isMarginAtRisk:
+              type: boolean
+        wbs:
+          type: object
+          nullable: true
+          properties:
+            version:
+              type: integer
+            wbsStatus:
+              type: string
+            totalEstimatedHours:
+              type: number
+            totalActualHours:
+              type: number
+            progressPercent:
+              type: integer
+            taskCount:
+              type: integer
+        issues:
+          type: object
+          properties:
+            openCount:
+              type: integer
+            criticalCount:
+              type: integer
+        pendingChangeRequests:
+          type: array
+          items:
+            type: object
+            properties:
+              reason:
+                type: string
+              hoursAdjustment:
+                type: number
+              amountAdjustment:
+                type: number
+              status:
+                type: string
+        startDate:
+          type: string
+          format: date-time
+
+    ProjectStats:
+      type: object
+      properties:
+        totalProjects:
+          type: integer
+        byStatus:
+          type: object
+          additionalProperties:
+            type: integer
+        totalContractValue:
+          type: number
+        projectsAtMarginRisk:
+          type: integer
+        openCriticalIssues:
+          type: integer
+
+    OpportunityItem:
+      type: object
+      properties:
+        id:
+          type: string
+        opportunityName:
+          type: string
+        customerName:
+          type: string
+        estimatedValue:
+          type: number
+        status:
+          type: string
+          enum: [new, qualified, presales_active, won, lost, converted]
+        owner:
+          type: string
+        expectedCloseDate:
+          type: string
+          format: date-time
+          nullable: true
+        products:
+          type: array
+          items:
+            type: string
+
+    IssueItem:
+      type: object
+      properties:
+        id:
+          type: string
+        issueTitle:
+          type: string
+        description:
+          type: string
+        severity:
+          type: string
+          enum: [low, medium, high, critical]
+        currentStatus:
+          type: string
+          enum: [open, in_progress, resolved, closed]
+        affectedProjectName:
+          type: string
+        projectId:
+          type: string
+        reportedAt:
+          type: string
+          format: date-time
+
+    TimesheetSummary:
+      type: object
+      properties:
+        month:
+          type: string
+          example: "2025-04"
+        presalesHours:
+          type: number
+        projectHours:
+          type: number
+        totalHours:
+          type: number
+        topContributors:
+          type: array
+          items:
+            type: object
+            properties:
+              name:
+                type: string
+              hours:
+                type: number
+
+paths:
+  /ping:
+    get:
+      operationId: ping
+      summary: 確認 API 連線狀態
+      description: Copilot Studio 可用來測試連線是否正常。
+      responses:
+        "200":
+          description: 連線正常
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: ok
+                  timestamp:
+                    type: string
+                    format: date-time
+
+  /projects/active:
+    get:
+      operationId: getActiveProjects
+      summary: 取得所有進行中的專案
+      description: 回傳所有非「已完成」或「已取消」的專案列表，最多 30 筆。
+      responses:
+        "200":
+          description: 成功
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  count:
+                    type: integer
+                  data:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/ProjectSummaryItem"
+
+  /projects/summary:
+    get:
+      operationId: getProjectsSummary
+      summary: 取得專案整體統計
+      description: 回傳各狀態的專案數量、總合約金額、風險專案數與嚴重議題數。
+      responses:
+        "200":
+          description: 成功
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProjectStats"
+
+  /projects/search:
+    get:
+      operationId: searchProjects
+      summary: 依關鍵字搜尋專案
+      description: 使用全文搜尋，依名稱搜尋專案，回傳含 WBS 進度的摘要。
+      parameters:
+        - name: q
+          in: query
+          required: true
+          description: 搜尋關鍵字（專案名稱）
+          schema:
+            type: string
+      responses:
+        "200":
+          description: 搜尋結果
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  count:
+                    type: integer
+                  data:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/ProjectSummaryItem"
+                  message:
+                    type: string
+                    description: 找不到結果時的說明訊息
+        "400":
+          description: 缺少查詢參數
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /projects/{id}:
+    get:
+      operationId: getProjectById
+      summary: 取得單一專案的完整摘要
+      description: 回傳指定專案的詳細資訊，包含 WBS 進度、議題數量與待審變更請求。
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: 專案 ID（MongoDB ObjectId）
+          schema:
+            type: string
+      responses:
+        "200":
+          description: 成功
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProjectDetail"
+        "404":
+          description: 找不到該專案
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /opportunities/active:
+    get:
+      operationId: getActiveOpportunities
+      summary: 取得所有進行中的商機
+      description: 回傳所有非「已成交」、「未成交」或「已轉案」的商機，依預計結案日排序。
+      responses:
+        "200":
+          description: 成功
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  count:
+                    type: integer
+                  data:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/OpportunityItem"
+
+  /opportunities/won:
+    get:
+      operationId: getWonOpportunities
+      summary: 取得最近成交的商機
+      description: 回傳已成交或已轉案的商機，依結案日倒序排列。
+      parameters:
+        - name: limit
+          in: query
+          required: false
+          description: 回傳筆數上限（預設 10）
+          schema:
+            type: integer
+            default: 10
+      responses:
+        "200":
+          description: 成功
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  count:
+                    type: integer
+                  data:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/OpportunityItem"
+
+  /opportunities/search:
+    get:
+      operationId: searchOpportunities
+      summary: 依關鍵字搜尋商機
+      description: 使用全文搜尋，依商機名稱或客戶名稱搜尋。
+      parameters:
+        - name: q
+          in: query
+          required: true
+          description: 搜尋關鍵字（商機名稱或客戶名稱）
+          schema:
+            type: string
+      responses:
+        "200":
+          description: 搜尋結果
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  count:
+                    type: integer
+                  data:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/OpportunityItem"
+                  message:
+                    type: string
+        "400":
+          description: 缺少查詢參數
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /issues/critical:
+    get:
+      operationId: getCriticalIssues
+      summary: 取得高風險議題
+      description: 回傳所有優先度為 high 或 critical 且尚未解決的議題。
+      parameters:
+        - name: limit
+          in: query
+          required: false
+          description: 回傳筆數上限（預設 15）
+          schema:
+            type: integer
+            default: 15
+      responses:
+        "200":
+          description: 成功
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  count:
+                    type: integer
+                  data:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/IssueItem"
+
+  /timesheets/summary:
+    get:
+      operationId: getTimesheetSummary
+      summary: 取得指定月份的工時統計
+      description: 回傳該月份的協銷工時、專案工時總計，以及貢獻最多的前 5 位人員。
+      parameters:
+        - name: month
+          in: query
+          required: false
+          description: 月份格式 YYYY-MM（預設為當月）
+          schema:
+            type: string
+            example: "2025-04"
+      responses:
+        "200":
+          description: 成功
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TimesheetSummary"

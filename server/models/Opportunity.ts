@@ -39,6 +39,9 @@ const OpportunitySchema = new Schema<IOpportunity>({
     expectedCloseDate: { type: Date },
     productNames: [{ type: String }],
     description: { type: String },
+    approvedM365: { type: Boolean, default: false },
+    approvedAzure: { type: Boolean, default: false },
+    approvedSecurity: { type: Boolean, default: false },
     ownerId: { type: Schema.Types.ObjectId, ref: "User", required: true },
     members: [{
         userId: { type: Schema.Types.ObjectId, ref: "User", required: true },

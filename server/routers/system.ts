@@ -1,4 +1,5 @@
 import { router, roleProcedure, protectedProcedure } from "../_core/trpc";
+import { TRPCError } from "@trpc/server";
 import { CustomFieldModel } from "../models/CustomField";
 import { SystemSettingModel } from "../models/Settings";
 import { sharePointService } from "../services/SharePointService";
@@ -15,6 +16,7 @@ const settingsPayloadSchema = z.object({
     entraClientSecret: z.string().trim(),
     entraTenantId: z.string().trim(),
     entraEnabled: z.boolean(),
+    graphApiSecret: z.string().trim(),
     apiToken: z.string().trim(),
     webhookUrl: z.string().trim(),
     webhookEnabled: z.boolean(),
@@ -41,6 +43,7 @@ const defaultSettings = {
     entraClientSecret: "",
     entraTenantId: "",
     entraEnabled: false,
+    graphApiSecret: "",
     apiToken: "",
     webhookUrl: "",
     webhookEnabled: false,
@@ -73,6 +76,7 @@ const settingDefinitions: Record<SettingsKey, SettingDefinition> = {
     entraClientSecret: { category: "integrations", valueType: "string" },
     entraTenantId: { category: "integrations", valueType: "string" },
     entraEnabled: { category: "integrations", valueType: "boolean" },
+    graphApiSecret: { category: "integrations", valueType: "string" },
     apiToken: { category: "integrations", valueType: "string" },
     webhookUrl: { category: "integrations", valueType: "string" },
     webhookEnabled: { category: "integrations", valueType: "boolean" },
@@ -218,5 +222,31 @@ export const systemRouter = router({
             folderName = decodeURIComponent(folderName);
             
             return sharePointService.listFolderFiles(setting.value, input.category, folderName);
+        }),
+
+    ensureSharePointFolder: protectedProcedure
+        .input(z.object({ category: z.enum(["商機", "專案"]), sharePointFolderUrl: z.string() }))
+        .mutation(async ({ input }) => {
+            const setting = await SystemSettingModel.findOne({ key: "sharePointSiteUrl" }).lean();
+            if (!setting?.value) {
+                throw new TRPCError({ code: "BAD_REQUEST", message: "尚未設定 SharePoint 站台 URL" });
+            }
+
+            const parts = input.sharePointFolderUrl.split("/");
+            let folderName = parts[parts.length - 1];
+            if (!folderName && parts.length > 1) {
+                folderName = parts[parts.length - 2];
+            }
+            folderName = decodeURIComponent(folderName || "");
+            if (!folderName) {
+                throw new TRPCError({ code: "BAD_REQUEST", message: "無法解析 SharePoint 資料夾路徑" });
+            }
+
+            const result = await sharePointService.createProjectFolder(setting.value, input.category, folderName);
+            if (!result.folderUrl) {
+                throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "無法建立或驗證 SharePoint 資料夾" });
+            }
+
+            return { folderUrl: result.folderUrl };
         }),
 });

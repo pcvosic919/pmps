@@ -15,6 +15,7 @@ export function SharePointFilesSection({ category, sharePointFolderUrl, title = 
       retry: 1
     }
   );
+  const ensureFolderMutation = trpc.system.ensureSharePointFolder.useMutation();
 
   if (!sharePointFolderUrl) {
     return (
@@ -44,15 +45,25 @@ export function SharePointFilesSection({ category, sharePointFolderUrl, title = 
           >
             <RefreshCw className={`w-4 h-4 ${isLoading ? 'animate-spin' : ''}`} />
           </button>
-          <a 
-            href={sharePointFolderUrl} 
-            target="_blank" 
-            rel="noopener noreferrer"
-            className="flex items-center gap-1.5 px-3 py-1.5 bg-primary/10 hover:bg-primary/20 text-primary rounded-lg text-xs font-semibold transition-all border border-primary/20"
+          <button
+            onClick={async () => {
+              const popup = window.open("about:blank", "_blank");
+              if (!popup) return;
+
+              try {
+                const result = await ensureFolderMutation.mutateAsync({ category, sharePointFolderUrl: sharePointFolderUrl || "" });
+                popup.location.href = result.folderUrl;
+              } catch (err) {
+                popup.close();
+                console.error(err);
+              }
+            }}
+            disabled={ensureFolderMutation.isLoading}
+            className="flex items-center gap-1.5 px-3 py-1.5 bg-primary/10 hover:bg-primary/20 text-primary rounded-lg text-xs font-semibold transition-all border border-primary/20 disabled:opacity-50 disabled:cursor-not-allowed"
           >
             <ExternalLink className="w-3.5 h-3.5" />
             在 SharePoint 開啟
-          </a>
+          </button>
         </div>
       </div>
 

@@ -155,6 +155,10 @@ export function AppLayout({ children }: AppLayoutProps) {
         }))
         .filter((group) => group.items.length > 0);
 
+    const visibleTopNavItems = topNavItems.filter(
+        (item) => item.href !== "/system-settings" || hasRole("admin")
+    );
+
     const [expandedGroups, setExpandedGroups] = useState<Record<string, boolean>>(() =>
         Object.fromEntries(navGroups.map((group) => [group.key, true]))
     );
@@ -333,7 +337,7 @@ export function AppLayout({ children }: AppLayoutProps) {
                                     <Building2 className="h-4 w-4" />
                                     {companyName}
                                 </span>
-                            {topNavItems.filter(i => !i.disabled).map((item) => (
+                            {visibleTopNavItems.filter(i => !i.disabled).map((item) => (
                                 <Link key={item.href} href={item.href!}>
                                     <a
                                         className={cn(
@@ -401,12 +405,14 @@ export function AppLayout({ children }: AppLayoutProps) {
                                         <div className="mt-2 text-[11px] text-muted-foreground">目前角色：{user?.role || "—"}</div>
                                     </div>
                                     <div className="mt-2 space-y-1">
-                                        <Link href="/system-settings">
-                                            <a className="flex items-center rounded-lg px-3 py-2 text-sm text-muted-foreground hover:bg-muted hover:text-foreground">
-                                                <Settings className="mr-2 h-4 w-4" />
-                                                系統設定
-                                            </a>
-                                        </Link>
+                                        {hasRole("admin") && (
+                                            <Link href="/system-settings">
+                                                <a className="flex items-center rounded-lg px-3 py-2 text-sm text-muted-foreground hover:bg-muted hover:text-foreground">
+                                                    <Settings className="mr-2 h-4 w-4" />
+                                                    系統設定
+                                                </a>
+                                            </Link>
+                                        )}
                                         <Link href="/notifications">
                                             <a className="flex items-center rounded-lg px-3 py-2 text-sm text-muted-foreground hover:bg-muted hover:text-foreground">
                                                 <Bell className="mr-2 h-4 w-4" />

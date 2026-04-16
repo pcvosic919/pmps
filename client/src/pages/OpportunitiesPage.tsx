@@ -18,7 +18,10 @@ const oppSchema = z.object({
     estimatedValue: z.number().min(0, "金額不能為負數"),
     status: z.enum(["new", "qualified", "presales_active", "won", "converted", "lost"]),
     productNames: z.array(z.string()).optional(),
-    description: z.string().optional()
+    description: z.string().optional(),
+    approvedM365: z.boolean().default(false),
+    approvedAzure: z.boolean().default(false),
+    approvedSecurity: z.boolean().default(false)
 });
 
 
@@ -69,7 +72,17 @@ export function OpportunitiesPage() {
 
     const form = useForm<any>({
         resolver: zodResolver(oppSchema) as any,
-        defaultValues: { title: "", customerName: "", estimatedValue: 0, status: "new", productNames: [], description: "" }
+        defaultValues: {
+            title: "",
+            customerName: "",
+            estimatedValue: 0,
+            status: "new",
+            productNames: [],
+            description: "",
+            approvedM365: false,
+            approvedAzure: false,
+            approvedSecurity: false
+        }
     });
 
     const createOpp = trpc.opportunities.create.useMutation({
@@ -94,6 +107,9 @@ export function OpportunitiesPage() {
             status: values.status,
             productNames: values.productNames,
             description: values.description,
+            approvedM365: values.approvedM365,
+            approvedAzure: values.approvedAzure,
+            approvedSecurity: values.approvedSecurity,
             customFields: customFields.length > 0 ? customFields : undefined
         });
     };
@@ -315,6 +331,57 @@ export function OpportunitiesPage() {
                                 )}
                             />
 
+                            <FormField
+                                control={form.control}
+                                name="approvedM365"
+                                render={({ field }: any) => (
+                                    <FormItem className="flex items-center gap-3">
+                                        <FormControl>
+                                            <input
+                                                type="checkbox"
+                                                checked={field.value}
+                                                onChange={(e) => field.onChange(e.target.checked)}
+                                                className="h-4 w-4 rounded border-gray-300 text-primary focus:ring-primary"
+                                            />
+                                        </FormControl>
+                                        <FormLabel className="mb-0">M365</FormLabel>
+                                    </FormItem>
+                                )}
+                            />
+                            <FormField
+                                control={form.control}
+                                name="approvedAzure"
+                                render={({ field }: any) => (
+                                    <FormItem className="flex items-center gap-3">
+                                        <FormControl>
+                                            <input
+                                                type="checkbox"
+                                                checked={field.value}
+                                                onChange={(e) => field.onChange(e.target.checked)}
+                                                className="h-4 w-4 rounded border-gray-300 text-primary focus:ring-primary"
+                                            />
+                                        </FormControl>
+                                        <FormLabel className="mb-0">Azure</FormLabel>
+                                    </FormItem>
+                                )}
+                            />
+                            <FormField
+                                control={form.control}
+                                name="approvedSecurity"
+                                render={({ field }: any) => (
+                                    <FormItem className="flex items-center gap-3">
+                                        <FormControl>
+                                            <input
+                                                type="checkbox"
+                                                checked={field.value}
+                                                onChange={(e) => field.onChange(e.target.checked)}
+                                                className="h-4 w-4 rounded border-gray-300 text-primary focus:ring-primary"
+                                            />
+                                        </FormControl>
+                                        <FormLabel className="mb-0">資安</FormLabel>
+                                    </FormItem>
+                                )}
+                            />
                             <FormField
                                 control={form.control}
                                 name="description"

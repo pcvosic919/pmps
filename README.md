@@ -40,7 +40,7 @@ PMPsystem/
 | lucide-react | latest | 圖示系統 |
 | i18next | latest | 多語系支援 (zh-TW/en) |
 | wouter | 3.x | SPA 路由 |
-| react-hot-toast | latest | 通知提示 |
+| react-hot-toast | latest | 通知提示 | 
 
 ### 後端技術棧
 | 套件 | 版本 | 用途 |

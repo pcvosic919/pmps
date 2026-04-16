@@ -59,6 +59,9 @@ export function OpportunityDetailPage() {
 
     const [showCustomFieldsModal, setShowCustomFieldsModal] = useState(false);
     const [editingCustomFields, setEditingCustomFields] = useState<{fieldId: string, value: string}[]>([]);
+    const [showEditDescriptionModal, setShowEditDescriptionModal] = useState(false);
+    const [editedDescription, setEditedDescription] = useState("");
+    const [descriptionError, setDescriptionError] = useState("");
 
     // ------ Queries ------
     const { data: opp, isLoading: isOppLoading, refetch: refetchOpp } = trpc.opportunities.getById.useQuery({ id }, { enabled: !!id });
@@ -102,6 +105,15 @@ export function OpportunityDetailPage() {
 
     const updateCustomFieldsMutation = trpc.opportunities.updateCustomFields.useMutation({
         onSuccess: () => { refetchOpp(); setShowCustomFieldsModal(false); }
+    });
+
+    const updateDescriptionMutation = trpc.opportunities.updateDescription.useMutation({
+        onSuccess: () => {
+            refetchOpp();
+            setShowEditDescriptionModal(false);
+            setDescriptionError("");
+        },
+        onError: (err) => setDescriptionError(err.message || "更新描述失敗")
     });
 
     const createSRMutation = trpc.opportunities.createSR.useMutation({
@@ -148,6 +160,10 @@ export function OpportunityDetailPage() {
         });
     };
 
+    const handleUpdateDescription = () => {
+        updateDescriptionMutation.mutate({ id, description: editedDescription });
+    };
+
     if (isOppLoading || isMembersLoading || isAssignmentsLoading || isTimesheetsLoading) {
         return <div className="p-8 text-center animate-pulse">載入中...</div>;
     }
@@ -155,6 +171,8 @@ export function OpportunityDetailPage() {
 
     const currentStatus = OPP_STATUSES.find(s => s.value === opp.status) ?? OPP_STATUSES[0];
     const isConverted = opp.status === "converted";
+    const isBusinessOwner = hasRole("business") && opp.ownerId === user?.id;
+    const canReportTime = hasRole("admin") || hasRole("manager") || hasRole("pm") || hasRole("presales") || hasRole("tech");
 
     const getTechName = (techId: string) => {
         const found = presalesList?.find((u: any) => u.id === techId);
@@ -240,26 +258,32 @@ export function OpportunityDetailPage() {
                             <h2 className="text-2xl font-bold">{opp.title}</h2>
                             {/* Status badge with dropdown */}
                             <div className="relative">
-                                <button
-                                    onClick={() => !isConverted && setShowStatusDropdown(!showStatusDropdown)}
-                                    disabled={isConverted}
-                                    className={`px-3 py-1 rounded-full text-xs font-semibold border flex items-center gap-1 hover:opacity-80 transition-opacity ${currentStatus.color}`}
-                                >
-                                    {currentStatus.label}
-                                    <ChevronDown className="w-3 h-3" />
-                                </button>
-                                {showStatusDropdown && !isConverted && (
-                                    <div className="absolute top-full mt-1 left-0 bg-card border border-border rounded-lg shadow-lg z-10 min-w-[140px] py-1">
-                                        {OPP_STATUSES.filter(s => s.value !== opp.status).map(s => (
-                                            <button
-                                                key={s.value}
-                                                onClick={() => updateStatusMutation.mutate({ id, status: s.value })}
-                                                className={`w-full text-left px-3 py-1.5 text-xs font-medium hover:bg-muted transition-colors ${s.color.replace('border-', '')} rounded-none first:rounded-t-md last:rounded-b-md`}
-                                            >
-                                                {s.label}
-                                            </button>
-                                        ))}
-                                    </div>
+                                {!hasRole("business") ? (
+                                    <>
+                                        <button
+                                            onClick={() => !isConverted && setShowStatusDropdown(!showStatusDropdown)}
+                                            disabled={isConverted}
+                                            className={`px-3 py-1 rounded-full text-xs font-semibold border flex items-center gap-1 hover:opacity-80 transition-opacity ${currentStatus.color}`}
+                                        >
+                                            {currentStatus.label}
+                                            <ChevronDown className="w-3 h-3" />
+                                        </button>
+                                        {showStatusDropdown && !isConverted && (
+                                            <div className="absolute top-full mt-1 left-0 bg-card border border-border rounded-lg shadow-lg z-10 min-w-[140px] py-1">
+                                                {OPP_STATUSES.filter(s => s.value !== opp.status).map(s => (
+                                                    <button
+                                                        key={s.value}
+                                                        onClick={() => updateStatusMutation.mutate({ id, status: s.value })}
+                                                        className={`w-full text-left px-3 py-1.5 text-xs font-medium hover:bg-muted transition-colors ${s.color.replace('border-', '')} rounded-none first:rounded-t-md last:rounded-b-md`}
+                                                    >
+                                                        {s.label}
+                                                    </button>
+                                                ))}
+                                            </div>
+                                        )}
+                                    </>
+                                ) : (
+                                    <span className={`px-3 py-1 rounded-full text-xs font-semibold border ${currentStatus.color}`}>{currentStatus.label}</span>
                                 )}
                             </div>
                         </div>
@@ -295,7 +319,7 @@ export function OpportunityDetailPage() {
                     </div>
                 </div>
 
-                {(opp.productNames?.length > 0 || opp.description) && (
+                {(opp.productNames?.length > 0 || opp.description || isBusinessOwner) && (
                     <div className="mt-6 pt-6 border-t border-border/50 grid grid-cols-1 md:grid-cols-2 gap-6">
                         {opp.productNames?.length > 0 && (
                             <div className="space-y-2">
@@ -309,14 +333,26 @@ export function OpportunityDetailPage() {
                                 </div>
                             </div>
                         )}
-                        {opp.description && (
-                            <div className="space-y-2 md:col-span-2">
+                        <div className="space-y-2 md:col-span-2">
+                            <div className="flex items-center justify-between gap-3">
                                 <span className="text-sm font-medium text-muted-foreground">商機描述</span>
-                                <div className="bg-muted/30 p-4 rounded-xl border border-border/50 text-sm leading-relaxed whitespace-pre-wrap">
-                                    {opp.description}
-                                </div>
+                                {isBusinessOwner && !isConverted && (
+                                    <button
+                                        onClick={() => {
+                                            setEditedDescription(opp.description || "");
+                                            setDescriptionError("");
+                                            setShowEditDescriptionModal(true);
+                                        }}
+                                        className="text-xs font-medium text-primary hover:text-primary/80 transition-colors"
+                                    >
+                                        編輯描述
+                                    </button>
+                                )}
                             </div>
-                        )}
+                            <div className="bg-muted/30 p-4 rounded-xl border border-border/50 text-sm leading-relaxed whitespace-pre-wrap min-h-[120px]">
+                                {opp.description ? opp.description : <span className="text-muted-foreground italic">尚未填寫商機描述</span>}
+                            </div>
+                        </div>
                     </div>
                 )}
 
@@ -325,7 +361,7 @@ export function OpportunityDetailPage() {
                     <h3 className="font-semibold text-lg flex items-center">
                         <FileText className="w-5 h-5 mr-2 text-primary" /> 商機自訂欄位
                     </h3>
-                    {!isConverted && (hasRole("admin") || hasRole("manager") || hasRole("business") || user?.id === opp.ownerId) && (
+                    {!isConverted && (hasRole("admin") || hasRole("manager") || user?.id === opp.ownerId) && !hasRole("business") && (
                         <button 
                             onClick={() => { 
                                 setShowCustomFieldsModal(true); 
@@ -363,11 +399,13 @@ export function OpportunityDetailPage() {
                 <div className="bg-card border border-border/50 rounded-xl shadow-sm overflow-hidden flex flex-col">
                     <div className="p-4 border-b border-border/50 bg-muted/30 flex justify-between items-center">
                         <h3 className="font-bold flex items-center"><Briefcase className="w-5 h-5 mr-2 text-primary" />協銷指派</h3>
-                        <button onClick={() => { if (!isConverted) { setShowAssignModal(true); setAssignError(""); } }}
-                            disabled={isConverted}
-                            className="text-xs font-medium text-primary hover:text-primary/80 flex items-center px-2 py-1 rounded hover:bg-primary/10 transition-colors disabled:opacity-50">
-                            <Plus className="w-3 h-3 mr-1" /> 新增指派
-                        </button>
+                        {!hasRole("business") && (
+                            <button onClick={() => { if (!isConverted) { setShowAssignModal(true); setAssignError(""); } }}
+                                disabled={isConverted}
+                                className="text-xs font-medium text-primary hover:text-primary/80 flex items-center px-2 py-1 rounded hover:bg-primary/10 transition-colors disabled:opacity-50">
+                                <Plus className="w-3 h-3 mr-1" /> 新增指派
+                            </button>
+                        )}
                     </div>
                     <div className="p-4 flex-1">
                         {assignments && assignments.length > 0 ? (
@@ -394,11 +432,13 @@ export function OpportunityDetailPage() {
                 <div className="bg-card border border-border/50 rounded-xl shadow-sm overflow-hidden flex flex-col">
                     <div className="p-4 border-b border-border/50 bg-muted/30 flex justify-between items-center">
                         <h3 className="font-bold flex items-center"><Users className="w-5 h-5 mr-2 text-primary" />商機成員</h3>
-                        <button onClick={() => { if (!isConverted) { setShowMemberModal(true); setMemberError(""); } }}
-                            disabled={isConverted}
-                            className="text-xs font-medium text-primary hover:text-primary/80 flex items-center px-2 py-1 rounded hover:bg-primary/10 transition-colors disabled:opacity-50">
-                            <UserPlus className="w-3 h-3 mr-1" /> 新增成員
-                        </button>
+                        {!hasRole("business") && (
+                            <button onClick={() => { if (!isConverted) { setShowMemberModal(true); setMemberError(""); } }}
+                                disabled={isConverted}
+                                className="text-xs font-medium text-primary hover:text-primary/80 flex items-center px-2 py-1 rounded hover:bg-primary/10 transition-colors disabled:opacity-50">
+                                <UserPlus className="w-3 h-3 mr-1" /> 新增成員
+                            </button>
+                        )}
                     </div>
                     <div className="p-4 flex-1">
                         {members && members.length > 0 ? (
@@ -442,7 +482,7 @@ export function OpportunityDetailPage() {
                 <div className="bg-card border border-border/50 rounded-xl shadow-sm overflow-hidden lg:col-span-2 flex flex-col">
                     <div className="p-4 border-b border-border/50 bg-muted/30 flex justify-between items-center">
                         <h3 className="font-bold flex items-center"><Clock className="w-5 h-5 mr-2 text-primary" />協銷工時紀錄</h3>
-                        {!isPMOnly && (
+                        {canReportTime && (
                             <button onClick={() => { if (!isConverted) { setShowTimesheetModal(true); setTsError(""); } }}
                                 disabled={isConverted}
                                 className="text-xs font-medium text-primary hover:text-primary/80 flex items-center px-2 py-1 rounded hover:bg-primary/10 transition-colors disabled:opacity-50">
@@ -480,7 +520,7 @@ export function OpportunityDetailPage() {
                             <div className="flex flex-col items-center justify-center text-muted-foreground py-12 border-2 border-dashed border-border/50 rounded-xl">
                                 <Clock className="w-8 h-8 opacity-20 mb-2" />
                                 <p className="text-sm">尚無工時紀錄</p>
-                                {!isPMOnly && (
+                                {canReportTime && (
                                     <button onClick={() => { if (!isConverted) { setShowTimesheetModal(true); setTsError(""); } }}
                                         disabled={isConverted}
                                         className="mt-3 text-xs text-primary hover:underline flex items-center disabled:opacity-50 disabled:hover:no-underline">
@@ -637,6 +677,40 @@ export function OpportunityDetailPage() {
                             <button onClick={handleAddMember} disabled={addMemberMutation.isPending}
                                 className="px-4 py-2 text-sm bg-primary text-primary-foreground rounded-lg hover:bg-primary/90 disabled:opacity-50 flex items-center">
                                 {addMemberMutation.isPending ? <><span className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin mr-2" />新增中...</> : <><Check className="w-4 h-4 mr-1" />確認新增</>}
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {/* 編輯描述 Modal */}
+            {showEditDescriptionModal && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm">
+                    <div className="bg-card border border-border rounded-xl shadow-xl w-full max-w-lg mx-4 p-6 space-y-5">
+                        <div className="flex justify-between items-center">
+                            <h2 className="text-lg font-bold flex items-center"><FileText className="w-5 h-5 mr-2 text-primary" />編輯商機描述</h2>
+                            <button onClick={() => setShowEditDescriptionModal(false)} className="p-1 rounded-full hover:bg-muted"><X className="w-5 h-5 text-muted-foreground" /></button>
+                        </div>
+                        <div className="space-y-4">
+                            <div>
+                                <label className="block text-sm font-medium mb-1">商機描述</label>
+                                <textarea
+                                    value={editedDescription}
+                                    onChange={(e) => setEditedDescription(e.target.value)}
+                                    rows={8}
+                                    className="w-full border border-border rounded-lg px-3 py-2 bg-background text-sm focus:outline-none focus:ring-2 focus:ring-primary/50 resize-none"
+                                />
+                            </div>
+                            {descriptionError && <p className="text-sm text-red-500 bg-red-50 dark:bg-red-950/30 px-3 py-2 rounded-lg">{descriptionError}</p>}
+                        </div>
+                        <div className="flex justify-end space-x-3">
+                            <button onClick={() => setShowEditDescriptionModal(false)} className="px-4 py-2 text-sm border border-border rounded-lg hover:bg-muted">取消</button>
+                            <button
+                                onClick={handleUpdateDescription}
+                                disabled={updateDescriptionMutation.isPending}
+                                className="px-4 py-2 text-sm bg-primary text-primary-foreground rounded-lg hover:bg-primary/90 disabled:opacity-50"
+                            >
+                                {updateDescriptionMutation.isPending ? "儲存中..." : "儲存描述"}
                             </button>
                         </div>
                     </div>
