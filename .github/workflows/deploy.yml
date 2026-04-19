@@ -7,11 +7,11 @@ on:
   workflow_dispatch:
 
 jobs:
-  build-and-deploy:
+  build-and-push:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout GitHub Action
+      - name: Checkout
         uses: actions/checkout@v4
 
       - name: Log in to Azure Container Registry (ACR)
@@ -32,9 +32,5 @@ jobs:
           docker push ${{ secrets.ACR_LOGIN_SERVER }}/pmps:${{ github.sha }}
           docker push ${{ secrets.ACR_LOGIN_SERVER }}/pmps:latest
 
-      - name: Deploy to Azure Web App
-        uses: azure/webapps-deploy@v2
-        with:
-          app-name: 'howardlabpmp'
-          publish-profile: ${{ secrets.AZURE_WEBAPP_PUBLISH_PROFILE }}
-          images: '${{ secrets.ACR_LOGIN_SERVER }}/pmps:${{ github.sha }}'
+      # Azure Web App 透過 ACR Continuous Deployment Webhook 自動拉取 latest image
+      # 設定方式: Azure Portal → Web App → 部署中心 → Azure Container Registry → 開啟持續部署
