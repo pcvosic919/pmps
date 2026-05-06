@@ -2,8 +2,29 @@ import mongoose from "mongoose";
 
 const DEFAULT_MONGODB_URI = "mongodb://localhost:27017/pmp_system";
 
+function parseBooleanEnv(value: string | undefined, defaultValue: boolean) {
+    if (value === undefined) {
+        return defaultValue;
+    }
+
+    return ["1", "true", "yes", "on"].includes(value.trim().toLowerCase());
+}
+
+function isCosmosMongoUri(uri: string) {
+    return uri.includes(".mongo.cosmos.azure.com") || uri.includes(".documents.azure.com");
+}
+
 export function getMongoUri() {
     return process.env.MONGODB_URI || DEFAULT_MONGODB_URI;
+}
+
+export function getMongooseCreationOptions(mongoUri = getMongoUri()) {
+    const isCosmos = isCosmosMongoUri(mongoUri);
+
+    return {
+        autoCreate: parseBooleanEnv(process.env.MONGOOSE_AUTO_CREATE, !isCosmos),
+        autoIndex: parseBooleanEnv(process.env.MONGOOSE_AUTO_INDEX, !isCosmos),
+    };
 }
 
 export function isDbConnected() {
@@ -17,6 +38,7 @@ export async function connectDB() {
 
     const mongoUri = getMongoUri();
     const usingFallbackUri = !process.env.MONGODB_URI;
+    const mongooseCreationOptions = getMongooseCreationOptions(mongoUri);
 
     // Mask URI for logging (only hide password part)
     const maskedUri = mongoUri.replace(/\/\/.*@/, "//***:***@");
@@ -27,9 +49,16 @@ export async function connectDB() {
         console.log(`📡  偵測到環境變數 MONGODB_URI，正在連線至: ${maskedUri}`);
     }
 
+    if (!mongooseCreationOptions.autoCreate || !mongooseCreationOptions.autoIndex) {
+        console.log(
+            `ℹ️  Mongoose 自動建置設定：autoCreate=${mongooseCreationOptions.autoCreate}, autoIndex=${mongooseCreationOptions.autoIndex}`
+        );
+    }
+
     try {
         await mongoose.connect(mongoUri, {
-            serverSelectionTimeoutMS: 5000 // 5 seconds timeout
+            serverSelectionTimeoutMS: 5000, // 5 seconds timeout
+            ...mongooseCreationOptions,
         });
         console.log("✅  資料庫連線成功：MongoDB Connected");
     } catch (error) {
