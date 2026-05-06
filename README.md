@@ -113,6 +113,15 @@ pnpm seed:demo     # 寫入 MongoDB demo 資料
 | `COPILOT_API_KEY` | **是** | Copilot Studio REST API 安全驗證密鑰 (X-API-KEY) |
 | `GRAPH_API_SECRET` | 否 | Microsoft Graph API 祕鑰 (SharePoint 整合用) |
 | `PORT` | 否 | 容器 Port，預設為 `5000` |
+| `MONGOOSE_AUTO_CREATE` | 否 | 是否允許 Mongoose 自動建立 collection；Cosmos DB 端點預設為 `false`，避免免費方案啟動時一次建立多個 400 RU/s container |
+| `MONGOOSE_AUTO_INDEX` | 否 | 是否允許 Mongoose 自動建立/同步 index；Cosmos DB 端點預設為 `false`，需要時可搭配 `pnpm db:prepare` 手動同步 |
+
+### Azure Cosmos DB for MongoDB 免費方案注意事項
+Cosmos DB 免費方案常見總吞吐量上限為 1000 RU/s；若每個 collection/container 都使用獨立 400 RU/s，建立第 3 個 container 時會嘗試把總量提高到 1200 RU/s，因而出現 `BadRequest (400)` / `Substatus: 1028`。建議做法：
+
+1. 在 Azure Portal 建立資料庫時選擇 **shared database throughput**，並將資料庫層級 RU/s 設為免費方案可承載的數值（例如 1000 RU/s），不要讓每個 collection 各自配置 400 RU/s。
+2. 部署環境保留預設的 Cosmos 偵測行為，或明確設定 `MONGOOSE_AUTO_CREATE=false`、`MONGOOSE_AUTO_INDEX=false`，避免 App Service 啟動時由 Mongoose 自動建立 container/index 而超過 RU 上限。
+3. 資料庫層級 shared throughput 設定完成後，執行 `pnpm db:prepare` 依序建立系統需要的 collections；若需要同步 index，另外設定 `DB_PREPARE_SYNC_INDEXES=true pnpm db:prepare`。
 
 ### 打包與運作原理
 1. 透過 `Dockerfile` 進行 Multi-stage Build。
