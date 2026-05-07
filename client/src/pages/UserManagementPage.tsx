@@ -63,12 +63,17 @@ export function UserManagementPage() {
 
     // Flatten the infinite pages into a single array
     const users = (data?.pages.flatMap(page => page.items) || []) as any[];
-    const updateUser = trpc.users.updateUser.useMutation({ onSuccess: () => { setEditingUser(null); refetch() } });
-    const deleteUser = trpc.users.deleteManual.useMutation({ onSuccess: () => refetch() });
-    const createUser = trpc.users.createManual.useMutation({ onSuccess: () => { setIsCreatingUser(false); refetch(); createForm.reset(); } });
+    const utils = trpc.useUtils();
+    const refreshUsers = async () => {
+        await utils.users.list.invalidate();
+        await refetch();
+    };
+    const updateUser = trpc.users.updateUser.useMutation({ onSuccess: () => { setEditingUser(null); void refreshUsers(); } });
+    const deleteUser = trpc.users.deleteManual.useMutation({ onSuccess: () => { void refreshUsers(); } });
+    const createUser = trpc.users.createManual.useMutation({ onSuccess: () => { setIsCreatingUser(false); createForm.reset(); void refreshUsers(); } });
     const syncEntraUsers = trpc.users.syncEntraUsers.useMutation({
         onSuccess: () => {
-            refetch();
+            void refreshUsers();
         }
     });
 
@@ -76,7 +81,7 @@ export function UserManagementPage() {
         onSuccess: () => {
             setIsBatchEditing(false);
             setSelectedUserIds([]);
-            refetch();
+            void refreshUsers();
         }
     });
 

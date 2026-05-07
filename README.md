@@ -114,13 +114,13 @@ pnpm seed:demo     # 寫入 MongoDB demo 資料
 | `COPILOT_API_KEY` | **是** | Copilot Studio REST API 安全驗證密鑰 (X-API-KEY) |
 | `GRAPH_API_SECRET` | 否 | Microsoft Graph API 祕鑰 (SharePoint 整合用) |
 | `PORT` | 否 | 容器 Port，預設為 `5000` |
-| `MONGOOSE_AUTO_CREATE` | 否 | 是否允許 Mongoose 自動建立 collection；Cosmos DB 端點預設為 `false`，避免免費方案啟動時一次建立多個 400 RU/s container |
-| `MONGOOSE_AUTO_INDEX` | 否 | 是否允許 Mongoose 自動建立/同步 index；Cosmos DB 端點預設為 `false`，需要時可搭配 `pnpm db:prepare` 手動同步 |
+| `MONGOOSE_AUTO_CREATE` | 否 | 是否允許 Mongoose 在 App 啟動時自動建立 collection；Cosmos DB 端點預設為 `false`，避免免費方案啟動時一次建立多個 400 RU/s container。這不會停用資料儲存；只要 collections 已由 `pnpm db:prepare` 建好，App 仍會正常讀寫資料。 |
+| `MONGOOSE_AUTO_INDEX` | 否 | 是否允許 Mongoose 在 App 啟動時自動建立/同步 index；Cosmos DB 端點預設為 `false`，需要時可搭配 `pnpm db:prepare` 手動同步 |
 
 ### Azure Cosmos DB for MongoDB 免費方案注意事項
 Cosmos DB 免費方案常見總吞吐量上限為 1000 RU/s；若每個 collection/container 都使用獨立 400 RU/s，建立第 3 個 container 時會嘗試把總量提高到 1200 RU/s，因而出現 `BadRequest (400)` / `Substatus: 1028`。建議做法：
 
-1. 建立或更新 **database-level shared throughput**，將資料庫層級 RU/s 設為免費方案可承載的數值（例如 1000 RU/s），不要讓每個 collection 各自配置 400 RU/s。可用 Azure Portal 選擇 **Share throughput across containers**，或使用本專案提供的 Azure CLI 包裝指令：
+1. 建立或更新 **database-level shared throughput**，將資料庫層級 RU/s 設為免費方案可承載的數值（例如 1000 RU/s），不要讓每個 collection 各自配置 400 RU/s。建議使用本專案提供的 Azure CLI 包裝指令；它會先設定 database shared throughput，再建立本系統需要的 collections，且建立 collection 時刻意不傳 `--throughput`，避免變成 dedicated-throughput container：
    ```bash
    AZURE_RESOURCE_GROUP=<resource-group> \
    COSMOS_ACCOUNT_NAME=<cosmos-account-name> \
@@ -129,10 +129,33 @@ Cosmos DB 免費方案常見總吞吐量上限為 1000 RU/s；若每個 collecti
    pnpm cosmos:shared-throughput
    ```
 2. 確認 `MONGODB_URI` 指向同一個 database（例如包含 `/pmp_system?...`），或設定 `MONGODB_DB_NAME=pmp_system`。若 Cosmos 連線字串沒有指定 database，後端會使用 `pmp_system`，避免 Mongoose 預設落到 `test` database。
-3. 部署環境保留預設的 Cosmos 偵測行為，或明確設定 `MONGOOSE_AUTO_CREATE=false`、`MONGOOSE_AUTO_INDEX=false`，避免 App Service 啟動時由 Mongoose 自動建立 container/index 而超過 RU 上限。
-4. 資料庫層級 shared throughput 設定完成後，執行 `pnpm db:prepare` 依序建立系統需要的 collections；若需要同步 index，另外設定 `DB_PREPARE_SYNC_INDEXES=true pnpm db:prepare`。
+3. 部署環境保留預設的 Cosmos 偵測行為，或明確設定 `MONGOOSE_AUTO_CREATE=false`、`MONGOOSE_AUTO_INDEX=false`，避免 App Service 啟動時由 Mongoose 自動建立 container/index 而超過 RU 上限。這不是關閉資料儲存，而是把「建 container」改成由管理員用下一步手動執行一次。
+4. `pnpm cosmos:shared-throughput` 完成後，再執行 `pnpm db:prepare` 做連線與 collection 檢查；Cosmos DB 端點下 `pnpm db:prepare` 不會用 MongoDB driver 隱含建立缺少的 collection，避免再次觸發 400 RU/s dedicated container。若需要同步 index，另外設定 `DB_PREPARE_SYNC_INDEXES=true pnpm db:prepare`。
+
+本系統需要的 Cosmos DB for MongoDB collections/containers 如下，`pnpm cosmos:shared-throughput` 會依序確認並建立，不需要在 Azure Portal 一個一個手動新增：
+
+| Collection / Container | 主要資料 |
+|---|---|
+| `users` | 使用者、角色與帳號狀態 |
+| `opportunities` | 商機資料 |
+| `servicerequests` | 專案/服務請求、WBS、變更請求、附件中繼資料 |
+| `timesheets` | 工時資料 |
+| `issues` | 問題與風險 |
+| `notifications` | 系統通知 |
+| `settlementlocks` | 結算鎖定紀錄 |
+| `customfields` | 自訂欄位設定 |
+| `systemsettings` | 系統設定 |
 
 > 若 `test` 或其他既有 database 已經建立了 dedicated-throughput collections，建議先建立新的 shared-throughput database（例如 `pmp_system`），把 `MONGODB_URI` / `MONGODB_DB_NAME` 指過去後再執行 `pnpm db:prepare`，避免沿用會繼續佔用獨立 RU/s 的舊 collections。
+
+#### 不增加 Cosmos DB 成本的修復流程
+收到 `total throughput limit of 1000 RU/s`、`would have increased the total throughput to 1200 RU/s` 或 `Substatus: 1028` 時，請不要提高帳戶 RU/s 上限；改用下列方式讓系統維持在免費額度內：
+
+1. **停止目前的建立流程與 App Service 自動建置**：確認部署環境保留 `MONGOOSE_AUTO_CREATE=false`、`MONGOOSE_AUTO_INDEX=false`，避免服務啟動時繼續建立 dedicated-throughput containers；這不影響已存在 collections 的資料讀寫。
+2. **釋放已佔用的 dedicated RU/s**：若錯誤前剛建立的 collections 尚未有正式資料，先在 Azure Portal 或 Azure CLI 刪除這些 dedicated-throughput collections；每個 collection 通常會釋放 400 RU/s。正式資料請先匯出或備份，不要直接刪除。
+3. **建立新的 shared-throughput database（最安全）**：用不同 database 名稱（例如 `pmp_system_shared`）執行 `pnpm cosmos:shared-throughput`，建立 1000 RU/s database-level shared throughput 與上表 collections；再將 `MONGODB_DB_NAME` 或 `MONGODB_URI` 路徑切到新 database，執行 `pnpm db:prepare` 驗證。之後 App 就能正常儲存資料。
+4. **或改造空的既有 database**：如果目前 database 沒有要保留的資料，可清空 dedicated collections 後，執行 `COSMOS_SHARED_THROUGHPUT=1000 pnpm cosmos:shared-throughput` 建立 shared-throughput collections，再重跑 `pnpm db:prepare` 驗證。
+5. **降低尖峰而非擴容**：匯入/seed 資料時採小批次、重試 429、錯開排程，避免短時間消耗 RU/s；這不改變帳戶上限，也不產生額外 Cosmos DB 吞吐量成本。
 
 ### 打包與運作原理
 1. 透過 `Dockerfile` 進行 Multi-stage Build。

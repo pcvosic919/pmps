@@ -1,7 +1,7 @@
 import dotenv from "dotenv";
 import path from "path";
 import mongoose from "mongoose";
-import { connectDB, disconnectDB, getMongoDatabaseName, getMongoUri } from "../server/db";
+import { connectDB, disconnectDB, getMongoDatabaseName, getMongoUri, isCosmosMongoUri } from "../server/db";
 import { CustomFieldModel } from "../server/models/CustomField";
 import { IssueModel } from "../server/models/Issue";
 import { NotificationModel } from "../server/models/Notification";
@@ -39,7 +39,60 @@ function shouldSyncIndexes() {
     return process.env.DB_PREPARE_SYNC_INDEXES === "true";
 }
 
-async function ensureCollection(model: mongoose.Model<unknown>) {
+function getAppCollectionNames() {
+    return appModels.map((model) => model.collection.name);
+}
+
+function getMissingCollectionHelp(collectionName: string) {
+    return `Cosmos DB collection '${collectionName}' does not exist. ` +
+        "Do not let the MongoDB driver create it implicitly because Cosmos DB may allocate dedicated 400 RU/s throughput. " +
+        "Run pnpm cosmos:shared-throughput first so the required collections are created under database-level shared throughput, then rerun pnpm db:prepare.";
+}
+
+function stringifyError(error: unknown) {
+    if (error instanceof Error) {
+        return `${error.name}: ${error.message}\n${error.stack ?? ""}`;
+    }
+
+    try {
+        return JSON.stringify(error);
+    } catch {
+        return String(error);
+    }
+}
+
+function isCosmosThroughputLimitError(error: unknown) {
+    const errorText = stringifyError(error);
+    return (
+        errorText.includes("Substatus: 1028") ||
+        errorText.includes("total throughput limit") ||
+        errorText.includes("x-ms-offer-throughput")
+    );
+}
+
+function printCosmosThroughputLimitHelp() {
+    console.error(`
+Cosmos DB RU/s 上限被觸發，這通常表示 collection 正以 dedicated throughput 建立。
+
+不增加成本的處理方式：
+1. 不要提高帳戶 RU/s 上限，也不要改用更高付費配置。
+2. MONGOOSE_AUTO_CREATE=false 只是不讓 App 啟動時自動建立 container；既有 collections 仍可正常讀寫與儲存資料。
+3. 先刪除剛才失敗流程中已建立、且不需要保留資料的 dedicated-throughput collections，釋放已佔用的 400 RU/s 配額。
+4. 在資料庫層級建立/更新 shared throughput，讓所有 collections 共用免費額度內的 1000 RU/s：
+   AZURE_RESOURCE_GROUP=<resource-group> \
+   COSMOS_ACCOUNT_NAME=<cosmos-account-name> \
+   COSMOS_DATABASE_NAME=${getMongoDatabaseName() ?? "pmp_system"} \
+   COSMOS_SHARED_THROUGHPUT=1000 \
+   pnpm cosmos:shared-throughput
+5. 確認 MONGODB_URI 或 MONGODB_DB_NAME 指向同一個 shared-throughput database 後，再重新執行 pnpm db:prepare。
+   pnpm cosmos:shared-throughput 會建立本系統需要的 collections：${getAppCollectionNames().join(", ")}
+   pnpm db:prepare 在 Cosmos DB 端點只會驗證 collections，避免 MongoDB driver 隱含建立 dedicated-throughput container。
+
+如果既有 database/collections 已經承載正式資料，請先備份或改用新的 shared-throughput database，再切換 MONGODB_DB_NAME，避免直接刪除正式資料。
+`);
+}
+
+async function ensureCollection(model: mongoose.Model<unknown>, options: { createMissingCollections: boolean }) {
     const collectionName = model.collection.name;
     const existingCollections = await mongoose.connection.db?.listCollections({ name: collectionName }).toArray();
     const exists = Boolean(existingCollections?.length);
@@ -47,6 +100,10 @@ async function ensureCollection(model: mongoose.Model<unknown>) {
     if (exists) {
         console.log(`✓ Collection already exists: ${collectionName}`);
         return;
+    }
+
+    if (!options.createMissingCollections) {
+        throw new Error(getMissingCollectionHelp(collectionName));
     }
 
     await mongoose.connection.db?.createCollection(collectionName);
@@ -61,10 +118,17 @@ async function prepare() {
         console.log(`Preparing collections in database: ${databaseName}`);
     }
 
+    console.log(`Required application collections: ${getAppCollectionNames().join(", ")}`);
+
+    const createMissingCollections = !isCosmosMongoUri(getMongoUri());
+    if (!createMissingCollections) {
+        console.log("Cosmos DB detected: pnpm db:prepare will verify collections only. Create missing collections with pnpm cosmos:shared-throughput so they use database-level shared throughput.");
+    }
+
     await connectDB();
 
     for (const model of appModels) {
-        await ensureCollection(model);
+        await ensureCollection(model, { createMissingCollections });
     }
 
     if (shouldSyncIndexes()) {
@@ -80,6 +144,11 @@ async function prepare() {
 void prepare()
     .catch((error) => {
         console.error("Failed to prepare database:", error);
+
+        if (isCosmosThroughputLimitError(error)) {
+            printCosmosThroughputLimitHelp();
+        }
+
         process.exitCode = 1;
     })
     .finally(async () => {

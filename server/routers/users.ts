@@ -16,16 +16,21 @@ const userListInput = z.object({
     sortOrder: z.enum(["asc", "desc"]).optional()
 }).optional();
 
+const escapeRegExp = (value: string) => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
 const buildSearchQuery = (search?: string) => {
     const keyword = search?.trim();
     if (!keyword) {
         return {};
     }
 
+    const pattern = new RegExp(escapeRegExp(keyword), "i");
     return {
-        $text: {
-            $search: keyword
-        }
+        $or: [
+            { name: pattern },
+            { email: pattern },
+            { department: pattern }
+        ]
     };
 };
 
@@ -40,7 +45,7 @@ export const usersRouter = router({
             const direction = sortOrder === "desc" ? -1 : 1;
             const cursor = input?.cursor ? decodeCursor(input.cursor) : null;
 
-            const query: Record<string, unknown> = buildSearchQuery(search);
+            let query: Record<string, unknown> = buildSearchQuery(search);
 
             if (cursor) {
                 const cursorValue = cursor.value;
@@ -53,15 +58,10 @@ export const usersRouter = router({
                     ]
                 };
 
-                if ("$and" in query && Array.isArray(query.$and)) {
-                    query.$and = [...query.$and, cursorFilter];
-                } else if (Object.keys(query).length > 0) {
-                    query.$and = [query, cursorFilter];
-                    for (const key of Object.keys(query).filter((key) => key !== "$and")) {
-                        delete query[key];
-                    }
+                if (Object.keys(query).length > 0) {
+                    query = { $and: [query, cursorFilter] };
                 } else {
-                    Object.assign(query, cursorFilter);
+                    query = cursorFilter;
                 }
             }
 
@@ -136,12 +136,12 @@ export const usersRouter = router({
             isActive: z.boolean().default(true)
         }))
         .mutation(async ({ input }) => {
-            await UserModel.create({
+            const user = await UserModel.create({
                 ...input,
                 provider: "manual",
                 providerId: `manual_${Date.now()}`
             });
-            return { success: true };
+            return { success: true, id: user._id.toString() };
         }),
 
     syncEntraUsers: roleProcedure(["admin"])
