@@ -16,7 +16,8 @@
     "seed:demo": "tsx scripts/seed-demo.ts",
     "seed:local": "tsx scripts/seed-demo.ts",
     "lint": "pnpm -r lint",
-    "db:prepare": "tsx scripts/prepare-db.ts"
+    "db:prepare": "tsx scripts/prepare-db.ts",
+    "cosmos:shared-throughput": "bash scripts/prepare-cosmos-shared-throughput.sh"
   },
   "devDependencies": {
     "@types/node": "^22.8.4",
@@ -24,5 +25,11 @@
     "tsx": "^4.19.2",
     "typescript": "^5.6.3",
     "vitest": "^2.1.3"
+  },
+  "packageManager": "pnpm@10.28.1",
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "esbuild"
+    ]
   }
 }

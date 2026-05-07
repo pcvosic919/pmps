@@ -102,7 +102,8 @@ pnpm seed:demo     # 寫入 MongoDB demo 資料
 在生產環境 (如 Azure 控制台) 中，必須設定以下變數：
 | 變數名稱 | 必填 | 說明 |
 |---|---|---|
-| `MONGODB_URI` | **是** | Cosmos DB / MongoDB 完整連線字串 (需啟動 SSL) |
+| `MONGODB_URI` | **是** | Cosmos DB / MongoDB 完整連線字串 (需啟動 SSL；Cosmos DB 建議在路徑指定 database，例如 `/pmp_system`) |
+| `MONGODB_DB_NAME` | 否 | 明確指定 MongoDB database；Cosmos DB 連線字串未包含 database 路徑時會預設使用 `pmp_system`，避免落到 `test` database |
 | `JWT_SECRET` | **是** | JWT 與通知 SSE 短效 Token 簽章密鑰，未設定時服務不會啟動 |
 | `DEMO_LOGIN_ENABLED` | 否 | 設為 `true` 時允許登入頁顯示並使用 Demo 快速登入（建議僅測試環境） |
 | `ENTRA_ENABLED` | 否 | 設為 `true` 可作為 Entra ID 開關的後備值；正式建議仍由系統設定頁維護 |
@@ -119,9 +120,19 @@ pnpm seed:demo     # 寫入 MongoDB demo 資料
 ### Azure Cosmos DB for MongoDB 免費方案注意事項
 Cosmos DB 免費方案常見總吞吐量上限為 1000 RU/s；若每個 collection/container 都使用獨立 400 RU/s，建立第 3 個 container 時會嘗試把總量提高到 1200 RU/s，因而出現 `BadRequest (400)` / `Substatus: 1028`。建議做法：
 
-1. 在 Azure Portal 建立資料庫時選擇 **shared database throughput**，並將資料庫層級 RU/s 設為免費方案可承載的數值（例如 1000 RU/s），不要讓每個 collection 各自配置 400 RU/s。
-2. 部署環境保留預設的 Cosmos 偵測行為，或明確設定 `MONGOOSE_AUTO_CREATE=false`、`MONGOOSE_AUTO_INDEX=false`，避免 App Service 啟動時由 Mongoose 自動建立 container/index 而超過 RU 上限。
-3. 資料庫層級 shared throughput 設定完成後，執行 `pnpm db:prepare` 依序建立系統需要的 collections；若需要同步 index，另外設定 `DB_PREPARE_SYNC_INDEXES=true pnpm db:prepare`。
+1. 建立或更新 **database-level shared throughput**，將資料庫層級 RU/s 設為免費方案可承載的數值（例如 1000 RU/s），不要讓每個 collection 各自配置 400 RU/s。可用 Azure Portal 選擇 **Share throughput across containers**，或使用本專案提供的 Azure CLI 包裝指令：
+   ```bash
+   AZURE_RESOURCE_GROUP=<resource-group> \
+   COSMOS_ACCOUNT_NAME=<cosmos-account-name> \
+   COSMOS_DATABASE_NAME=pmp_system \
+   COSMOS_SHARED_THROUGHPUT=1000 \
+   pnpm cosmos:shared-throughput
+   ```
+2. 確認 `MONGODB_URI` 指向同一個 database（例如包含 `/pmp_system?...`），或設定 `MONGODB_DB_NAME=pmp_system`。若 Cosmos 連線字串沒有指定 database，後端會使用 `pmp_system`，避免 Mongoose 預設落到 `test` database。
+3. 部署環境保留預設的 Cosmos 偵測行為，或明確設定 `MONGOOSE_AUTO_CREATE=false`、`MONGOOSE_AUTO_INDEX=false`，避免 App Service 啟動時由 Mongoose 自動建立 container/index 而超過 RU 上限。
+4. 資料庫層級 shared throughput 設定完成後，執行 `pnpm db:prepare` 依序建立系統需要的 collections；若需要同步 index，另外設定 `DB_PREPARE_SYNC_INDEXES=true pnpm db:prepare`。
+
+> 若 `test` 或其他既有 database 已經建立了 dedicated-throughput collections，建議先建立新的 shared-throughput database（例如 `pmp_system`），把 `MONGODB_URI` / `MONGODB_DB_NAME` 指過去後再執行 `pnpm db:prepare`，避免沿用會繼續佔用獨立 RU/s 的舊 collections。
 
 ### 打包與運作原理
 1. 透過 `Dockerfile` 進行 Multi-stage Build。
