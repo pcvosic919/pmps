@@ -39,6 +39,46 @@ function shouldSyncIndexes() {
     return process.env.DB_PREPARE_SYNC_INDEXES === "true";
 }
 
+function stringifyError(error: unknown) {
+    if (error instanceof Error) {
+        return `${error.name}: ${error.message}\n${error.stack ?? ""}`;
+    }
+
+    try {
+        return JSON.stringify(error);
+    } catch {
+        return String(error);
+    }
+}
+
+function isCosmosThroughputLimitError(error: unknown) {
+    const errorText = stringifyError(error);
+    return (
+        errorText.includes("Substatus: 1028") ||
+        errorText.includes("total throughput limit") ||
+        errorText.includes("x-ms-offer-throughput")
+    );
+}
+
+function printCosmosThroughputLimitHelp() {
+    console.error(`
+Cosmos DB RU/s 上限被觸發，這通常表示 collection 正以 dedicated throughput 建立。
+
+不增加成本的處理方式：
+1. 不要提高帳戶 RU/s 上限，也不要改用更高付費配置。
+2. 先刪除剛才失敗流程中已建立、且不需要保留資料的 dedicated-throughput collections，釋放已佔用的 400 RU/s 配額。
+3. 在資料庫層級建立/更新 shared throughput，讓所有 collections 共用免費額度內的 1000 RU/s：
+   AZURE_RESOURCE_GROUP=<resource-group> \
+   COSMOS_ACCOUNT_NAME=<cosmos-account-name> \
+   COSMOS_DATABASE_NAME=${getMongoDatabaseName() ?? "pmp_system"} \
+   COSMOS_SHARED_THROUGHPUT=1000 \
+   pnpm cosmos:shared-throughput
+4. 確認 MONGODB_URI 或 MONGODB_DB_NAME 指向同一個 shared-throughput database 後，再重新執行 pnpm db:prepare。
+
+如果既有 database/collections 已經承載正式資料，請先備份或改用新的 shared-throughput database，再切換 MONGODB_DB_NAME，避免直接刪除正式資料。
+`);
+}
+
 async function ensureCollection(model: mongoose.Model<unknown>) {
     const collectionName = model.collection.name;
     const existingCollections = await mongoose.connection.db?.listCollections({ name: collectionName }).toArray();
@@ -80,6 +120,11 @@ async function prepare() {
 void prepare()
     .catch((error) => {
         console.error("Failed to prepare database:", error);
+
+        if (isCosmosThroughputLimitError(error)) {
+            printCosmosThroughputLimitHelp();
+        }
+
         process.exitCode = 1;
     })
     .finally(async () => {

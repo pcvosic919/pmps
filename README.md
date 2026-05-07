@@ -134,6 +134,15 @@ Cosmos DB 免費方案常見總吞吐量上限為 1000 RU/s；若每個 collecti
 
 > 若 `test` 或其他既有 database 已經建立了 dedicated-throughput collections，建議先建立新的 shared-throughput database（例如 `pmp_system`），把 `MONGODB_URI` / `MONGODB_DB_NAME` 指過去後再執行 `pnpm db:prepare`，避免沿用會繼續佔用獨立 RU/s 的舊 collections。
 
+#### 不增加 Cosmos DB 成本的修復流程
+收到 `total throughput limit of 1000 RU/s`、`would have increased the total throughput to 1200 RU/s` 或 `Substatus: 1028` 時，請不要提高帳戶 RU/s 上限；改用下列方式讓系統維持在免費額度內：
+
+1. **停止目前的建立流程與 App Service 自動建置**：確認部署環境保留 `MONGOOSE_AUTO_CREATE=false`、`MONGOOSE_AUTO_INDEX=false`，避免服務啟動時繼續建立 dedicated-throughput containers。
+2. **釋放已佔用的 dedicated RU/s**：若錯誤前剛建立的 collections 尚未有正式資料，先在 Azure Portal 或 Azure CLI 刪除這些 dedicated-throughput collections；每個 collection 通常會釋放 400 RU/s。正式資料請先匯出或備份，不要直接刪除。
+3. **建立新的 shared-throughput database（最安全）**：用不同 database 名稱（例如 `pmp_system_shared`）建立 1000 RU/s database-level shared throughput，將 `MONGODB_DB_NAME` 或 `MONGODB_URI` 路徑切到新 database，再執行 `pnpm db:prepare`。
+4. **或改造空的既有 database**：如果目前 database 沒有要保留的資料，可清空 dedicated collections 後，執行 `COSMOS_SHARED_THROUGHPUT=1000 pnpm cosmos:shared-throughput`，再重跑 `pnpm db:prepare`。
+5. **降低尖峰而非擴容**：匯入/seed 資料時採小批次、重試 429、錯開排程，避免短時間消耗 RU/s；這不改變帳戶上限，也不產生額外 Cosmos DB 吞吐量成本。
+
 ### 打包與運作原理
 1. 透過 `Dockerfile` 進行 Multi-stage Build。
 2. 後端 Express 伺服器會**自動託管** `client/dist` 靜態檔案。
