@@ -1,7 +1,7 @@
 import dotenv from "dotenv";
 import path from "path";
 import mongoose from "mongoose";
-import { connectDB, disconnectDB, getMongoUri } from "../server/db";
+import { connectDB, disconnectDB, getMongoDatabaseName, getMongoUri } from "../server/db";
 import { CustomFieldModel } from "../server/models/CustomField";
 import { IssueModel } from "../server/models/Issue";
 import { NotificationModel } from "../server/models/Notification";
@@ -55,6 +55,12 @@ async function ensureCollection(model: mongoose.Model<unknown>) {
 
 async function prepare() {
     console.log("Preparing MongoDB database at", getMongoUri());
+    const databaseName = getMongoDatabaseName();
+
+    if (databaseName) {
+        console.log(`Preparing collections in database: ${databaseName}`);
+    }
+
     await connectDB();
 
     for (const model of appModels) {
