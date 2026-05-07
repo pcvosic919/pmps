@@ -43,12 +43,6 @@ function getAppCollectionNames() {
     return appModels.map((model) => model.collection.name);
 }
 
-function getMissingCollectionHelp(collectionName: string) {
-    return `Cosmos DB collection '${collectionName}' does not exist. ` +
-        "Do not let the MongoDB driver create it implicitly because Cosmos DB may allocate dedicated 400 RU/s throughput. " +
-        "Run pnpm cosmos:shared-throughput first so the required collections are created under database-level shared throughput, then rerun pnpm db:prepare.";
-}
-
 function stringifyError(error: unknown) {
     if (error instanceof Error) {
         return `${error.name}: ${error.message}\n${error.stack ?? ""}`;
@@ -85,14 +79,13 @@ Cosmos DB RU/s 上限被觸發，這通常表示 collection 正以 dedicated thr
    COSMOS_SHARED_THROUGHPUT=1000 \
    pnpm cosmos:shared-throughput
 5. 確認 MONGODB_URI 或 MONGODB_DB_NAME 指向同一個 shared-throughput database 後，再重新執行 pnpm db:prepare。
-   pnpm cosmos:shared-throughput 會建立本系統需要的 collections：${getAppCollectionNames().join(", ")}
-   pnpm db:prepare 在 Cosmos DB 端點只會驗證 collections，避免 MongoDB driver 隱含建立 dedicated-throughput container。
+   pnpm db:prepare 會建立本系統需要的 collections：${getAppCollectionNames().join(", ")}
 
 如果既有 database/collections 已經承載正式資料，請先備份或改用新的 shared-throughput database，再切換 MONGODB_DB_NAME，避免直接刪除正式資料。
 `);
 }
 
-async function ensureCollection(model: mongoose.Model<unknown>, options: { createMissingCollections: boolean }) {
+async function ensureCollection(model: mongoose.Model<unknown>) {
     const collectionName = model.collection.name;
     const existingCollections = await mongoose.connection.db?.listCollections({ name: collectionName }).toArray();
     const exists = Boolean(existingCollections?.length);
@@ -119,11 +112,6 @@ async function prepare() {
     }
 
     console.log(`Required application collections: ${getAppCollectionNames().join(", ")}`);
-
-    const createMissingCollections = !isCosmosMongoUri(getMongoUri());
-    if (!createMissingCollections) {
-        console.log("Cosmos DB detected: pnpm db:prepare will verify collections only. Create missing collections with pnpm cosmos:shared-throughput so they use database-level shared throughput.");
-    }
 
     await connectDB();
 
