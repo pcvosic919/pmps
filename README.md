@@ -120,7 +120,7 @@ pnpm seed:demo     # 寫入 MongoDB demo 資料
 ### Azure Cosmos DB for MongoDB 免費方案注意事項
 Cosmos DB 免費方案常見總吞吐量上限為 1000 RU/s；若每個 collection/container 都使用獨立 400 RU/s，建立第 3 個 container 時會嘗試把總量提高到 1200 RU/s，因而出現 `BadRequest (400)` / `Substatus: 1028`。建議做法：
 
-1. 建立或更新 **database-level shared throughput**，將資料庫層級 RU/s 設為免費方案可承載的數值（例如 1000 RU/s），不要讓每個 collection 各自配置 400 RU/s。可用 Azure Portal 選擇 **Share throughput across containers**，或使用本專案提供的 Azure CLI 包裝指令：
+1. 建立或更新 **database-level shared throughput**，將資料庫層級 RU/s 設為免費方案可承載的數值（例如 1000 RU/s），不要讓每個 collection 各自配置 400 RU/s。建議使用本專案提供的 Azure CLI 包裝指令；它會先設定 database shared throughput，再建立本系統需要的 collections，且建立 collection 時刻意不傳 `--throughput`，避免變成 dedicated-throughput container：
    ```bash
    AZURE_RESOURCE_GROUP=<resource-group> \
    COSMOS_ACCOUNT_NAME=<cosmos-account-name> \

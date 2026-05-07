@@ -11,7 +11,7 @@ function parseBooleanEnv(value: string | undefined, defaultValue: boolean) {
     return ["1", "true", "yes", "on"].includes(value.trim().toLowerCase());
 }
 
-function isCosmosMongoUri(uri: string) {
+export function isCosmosMongoUri(uri: string) {
     return uri.includes(".mongo.cosmos.azure.com") || uri.includes(".documents.azure.com");
 }
 

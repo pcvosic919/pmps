@@ -1,7 +1,7 @@
 import dotenv from "dotenv";
 import path from "path";
 import mongoose from "mongoose";
-import { connectDB, disconnectDB, getMongoDatabaseName, getMongoUri } from "../server/db";
+import { connectDB, disconnectDB, getMongoDatabaseName, getMongoUri, isCosmosMongoUri } from "../server/db";
 import { CustomFieldModel } from "../server/models/CustomField";
 import { IssueModel } from "../server/models/Issue";
 import { NotificationModel } from "../server/models/Notification";
@@ -95,6 +95,10 @@ async function ensureCollection(model: mongoose.Model<unknown>) {
         return;
     }
 
+    if (!options.createMissingCollections) {
+        throw new Error(getMissingCollectionHelp(collectionName));
+    }
+
     await mongoose.connection.db?.createCollection(collectionName);
     console.log(`+ Created collection: ${collectionName}`);
 }
@@ -112,7 +116,7 @@ async function prepare() {
     await connectDB();
 
     for (const model of appModels) {
-        await ensureCollection(model);
+        await ensureCollection(model, { createMissingCollections });
     }
 
     if (shouldSyncIndexes()) {
