@@ -9,6 +9,8 @@ const defaultSettings = {
     pcSlaTarget: 95,
     pcRenewalTarget: 85,
     pcUtilizationTarget: 80,
+    pcPresalesHourlyRate: 2000,
+    pcMaintenancePointValue: 500,
 };
 
 export default function ProfitCenterFormulaPage() {
@@ -34,6 +36,8 @@ export default function ProfitCenterFormulaPage() {
                 pcSlaTarget: data.pcSlaTarget,
                 pcRenewalTarget: data.pcRenewalTarget,
                 pcUtilizationTarget: data.pcUtilizationTarget,
+                pcPresalesHourlyRate: data.pcPresalesHourlyRate ?? 2000,
+                pcMaintenancePointValue: data.pcMaintenancePointValue ?? 500,
             });
         }
     }, [data]);
@@ -139,6 +143,45 @@ export default function ProfitCenterFormulaPage() {
                                 className="w-full p-2.5 rounded-lg border border-input bg-background/50 focus:bg-background transition-colors"
                             />
                             <p className="text-xs text-muted-foreground mt-2 italic">人員稼動率報表的目標值。</p>
+                        </div>
+                    </div>
+
+                    <div className="grid md:grid-cols-2 gap-8 border-t border-border/50 pt-8">
+                        <div>
+                            <label className="block text-sm font-bold mb-2">協銷預設單價 (NT$ / 小時)</label>
+                            <input
+                                type="number"
+                                min={0}
+                                value={settings.pcPresalesHourlyRate}
+                                onChange={e => setSettings(s => ({ ...s, pcPresalesHourlyRate: Number(e.target.value) }))}
+                                className="w-full p-2.5 rounded-lg border border-input bg-background/50 focus:bg-background transition-colors"
+                            />
+                            <p className="text-xs text-muted-foreground mt-1.5">用於計算協銷收入：協銷時數 × 此單價。</p>
+                        </div>
+                        <div>
+                            <label className="block text-sm font-bold mb-2">維運點數預設單價 (NT$ / 點)</label>
+                            <input
+                                type="number"
+                                min={0}
+                                value={settings.pcMaintenancePointValue}
+                                onChange={e => setSettings(s => ({ ...s, pcMaintenancePointValue: Number(e.target.value) }))}
+                                className="w-full p-2.5 rounded-lg border border-input bg-background/50 focus:bg-background transition-colors"
+                            />
+                            <p className="text-xs text-muted-foreground mt-1.5">用於計算維運收入：扣除點數 × 此單價。</p>
+                        </div>
+                    </div>
+
+                    <div className="grid md:grid-cols-2 gap-8 border-t border-border/50 pt-8">
+                        <div>
+                            <label className="block text-sm font-bold mb-2">年度部門 KPI 目標金額 (NT$)</label>
+                            <input
+                                type="number"
+                                min={0}
+                                value={(settings as any).pcKpiTarget ?? 5000000}
+                                onChange={e => setSettings(s => ({ ...s, pcKpiTarget: Number(e.target.value) } as any))}
+                                className="w-full p-2.5 rounded-lg border border-input bg-background/50 focus:bg-background transition-colors"
+                            />
+                            <p className="text-xs text-muted-foreground mt-1.5">各部門年度業績目標基準，用於 KPI 儀表板的達成率與 Gap 計算。</p>
                         </div>
                     </div>
                 </div>

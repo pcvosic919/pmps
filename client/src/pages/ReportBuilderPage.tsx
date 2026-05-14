@@ -147,26 +147,30 @@ export function ReportBuilderPage() {
                             )}
 
                             <div className="overflow-x-auto print:overflow-visible">
-                                <table className="w-full min-w-max text-sm text-left print:text-xs">
-                                    <thead className="text-xs text-muted-foreground uppercase bg-muted/50 border-y border-border">
-                                    <tr>
-                                        {Object.keys((reportData as any[])[0]).map(key => (
-                                            <th key={key} className="px-4 py-3">{key}</th>
-                                        ))}
-                                    </tr>
-                                </thead>
-                                <tbody>
-                                    {(reportData as any[]).map((row: any, i: number) => (
-                                        <tr key={i} className="border-b border-border/50 hover:bg-muted/20">
-                                            {Object.values(row).map((val: any, j: number) => (
-                                                <td key={j} className="px-4 py-3">{val}</td>
+                                {reportData && (reportData as any[]).length > 0 && typeof (reportData as any[])[0] === 'object' ? (
+                                    <table className="w-full min-w-max text-sm text-left print:text-xs">
+                                        <thead className="text-xs text-muted-foreground uppercase bg-muted/50 border-y border-border">
+                                        <tr>
+                                            {Object.keys((reportData as any[])[0] || {}).map(key => (
+                                                <th key={key} className="px-4 py-3">{key}</th>
                                             ))}
                                         </tr>
-                                    ))}
-                                </tbody>
-                            </table>
+                                    </thead>
+                                    <tbody>
+                                        {(reportData as any[]).map((row: any, i: number) => (
+                                            <tr key={i} className="border-b border-border/50 hover:bg-muted/20">
+                                                {Object.values(row || {}).map((val: any, j: number) => (
+                                                    <td key={j} className="px-4 py-3">{val}</td>
+                                                ))}
+                                            </tr>
+                                        ))}
+                                    </tbody>
+                                </table>
+                                ) : (
+                                    <div className="p-8 text-center text-muted-foreground">報表資料格式不正確或為空。</div>
+                                )}
+                            </div>
                         </div>
-                    </div>
                     )}
                 </div>
             </div>

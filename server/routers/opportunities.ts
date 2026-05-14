@@ -103,6 +103,7 @@ export const opportunitiesRouter = router({
 
             const items = await OpportunityModel.find(query)
                 .select("title customerName estimatedValue status expectedCloseDate ownerId createdAt members presalesAssignments productNames description")
+                .populate("ownerId", "name")
                 .sort({ [sortBy]: direction })
                 .limit(limit + 1)
                 .lean();
@@ -119,7 +120,8 @@ export const opportunitiesRouter = router({
                     estimatedValue: opp.estimatedValue,
                     status: opp.status,
                     expectedCloseDate: opp.expectedCloseDate,
-                    ownerId: opp.ownerId.toString(),
+                    ownerId: (opp.ownerId as any)?._id?.toString() || opp.ownerId?.toString(),
+                    ownerName: (opp.ownerId as any)?.name || "—",
                     createdAt: opp.createdAt,
                     productNames: opp.productNames || [],
                     description: opp.description || ""
@@ -147,7 +149,7 @@ export const opportunitiesRouter = router({
         return { count: activeCount };
     }),
 
-    create: roleProcedure(["admin", "business", "manager"])
+    create: roleProcedure(["admin", "business", "manager", "presales"])
         .input(z.object({
             title: z.string(),
             customerName: z.string(),
@@ -453,13 +455,14 @@ export const opportunitiesRouter = router({
             opportunityId: z.string(),
             title: z.string(),
             contractAmount: z.number(),
+            customerName: z.string().optional(),
             pmId: z.string().optional(),
             techId: z.string().optional()
         }))
         .mutation(async ({ input, ctx }) => {
             const opportunity = assertFound(
                 await OpportunityModel.findById(input.opportunityId)
-                    .select("title ownerId members presalesAssignments status")
+                    .select("title customerName ownerId members presalesAssignments status")
                     .lean(),
                 "找不到該商機"
             );
@@ -468,6 +471,7 @@ export const opportunitiesRouter = router({
 
             const result = await ServiceRequestModel.create({
                 title: input.title,
+                customerName: input.customerName || opportunity.customerName,
                 contractAmount: input.contractAmount,
                 opportunityId: input.opportunityId,
                 pmId: input.pmId ? toObjectId(input.pmId) : undefined,
@@ -588,7 +592,34 @@ export const opportunitiesRouter = router({
             return { success: true };
         }),
 
-    logPresalesTime: roleProcedure(["tech", "presales", "pm"])
+    updateEstimatedValue: protectedProcedure
+        .input(z.object({
+            id: z.string(),
+            estimatedValue: z.number().min(0, "預估金額不能為負數")
+        }))
+        .mutation(async ({ input, ctx }) => {
+            const opportunity = assertFound(
+                await OpportunityModel.findById(input.id)
+                    .select("ownerId members status")
+                    .lean(),
+                "找不到該商機"
+            );
+
+            const isBusinessOwner = isOpportunityBusinessOwner(ctx.user, opportunity);
+            const canUpdate = hasAnyRole(ctx.user, ["admin", "manager", "presales"]) || isBusinessOwner;
+            assertAuthorized(canUpdate, "您沒有權限更新預估金額");
+            assertOpportunityNotConverted(opportunity);
+
+            await OpportunityModel.updateOne(
+                { _id: input.id },
+                { $set: { estimatedValue: input.estimatedValue } }
+            );
+
+            return { success: true };
+        }),
+
+
+    logPresalesTime: roleProcedure(["admin", "tech", "presales", "pm"])
         .input(z.object({
             opportunityId: z.string(),
             workDate: z.coerce.date(),
@@ -602,7 +633,7 @@ export const opportunitiesRouter = router({
                     .lean(),
                 "找不到該商機"
             );
-            assertSettlementUnlocked(getMonthKey(input.workDate), "presales");
+            await assertSettlementUnlocked(getMonthKey(input.workDate), "presales");
             assertOpportunityNotConverted(opportunity);
 
             const isAssignedPresales = (opportunity.presalesAssignments || []).some((assignment: any) =>
@@ -682,6 +713,16 @@ export const opportunitiesRouter = router({
                     }
                 }
             );
+            return { success: true };
+        }),
+
+    delete: roleProcedure(["admin"])
+        .input(z.object({ id: z.string() }))
+        .mutation(async ({ input }) => {
+            const opp = await OpportunityModel.findById(input.id);
+            assertFound(opp, "找不到該商機");
+            
+            await OpportunityModel.findByIdAndDelete(input.id);
             return { success: true };
         }),
 });

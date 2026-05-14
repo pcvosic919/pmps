@@ -16,6 +16,7 @@ const toIdMap = (items: Array<{ _id: unknown; totalHours?: number; totalCost?: n
 export const analyticsRouter = router({
     getUtilization: roleProcedure(["admin", "manager", "pm"])
         .input(z.object({ 
+            month: z.string().optional(),
             departments: z.array(z.string()).optional(), 
             userIds: z.array(z.string()).optional(),
             department: z.string().optional(), // backward compatibility
@@ -48,17 +49,36 @@ export const analyticsRouter = router({
 
         const users = await UserModel.find(userQuery, { _id: 1, name: 1, department: 1, role: 1 }).lean();
 
-        const now = new Date();
-        const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
-        const endOfMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59, 999);
+        const currentMonth = input?.month || new Date().toISOString().slice(0, 7);
+        const [year, month] = currentMonth.split("-").map(Number);
+        
+        // Boundaries for the month in local server time
+        const startOfMonth = new Date(year, month - 1, 1, 0, 0, 0, 0);
+        const endOfMonth = new Date(year, month, 0, 23, 59, 59, 999);
+
+        // Calculate working days (Mon-Fri) for this month
+        let workingDays = 0;
+        let d = new Date(startOfMonth);
+        while (d <= endOfMonth) {
+            const dayOfWeek = d.getDay();
+            if (dayOfWeek !== 0 && dayOfWeek !== 6) workingDays++;
+            d.setDate(d.getDate() + 1);
+        }
+        const standardHours = workingDays * 8;
 
         const [projectAgg, presalesAgg] = await Promise.all([
             TimesheetModel.aggregate([
-                { $match: { type: "project", workDate: { $gte: startOfMonth, $lte: endOfMonth } } },
+                { $match: { 
+                    type: "project", 
+                    workDate: { $gte: startOfMonth, $lte: endOfMonth } 
+                } },
                 { $group: { _id: "$techId", totalHours: { $sum: "$hours" } } }
             ]),
             TimesheetModel.aggregate([
-                { $match: { type: "presales", workDate: { $gte: startOfMonth, $lte: endOfMonth } } },
+                { $match: { 
+                    type: "presales", 
+                    workDate: { $gte: startOfMonth, $lte: endOfMonth } 
+                } },
                 { $group: { _id: "$techId", totalHours: { $sum: "$hours" } } }
             ])
         ]);
@@ -66,23 +86,30 @@ export const analyticsRouter = router({
         const projectHoursMap = toIdMap(projectAgg, "totalHours");
         const presalesHoursMap = toIdMap(presalesAgg, "totalHours");
 
-        return users.map((u: any) => {
-            const userId = u._id.toString();
-            const projectHours = projectHoursMap.get(userId) ?? 0;
-            const presalesHours = presalesHoursMap.get(userId) ?? 0;
-            const totalHours = projectHours + presalesHours;
+        return {
+            month: currentMonth,
+            standardHours,
+            workingDays,
+            startDate: startOfMonth.toISOString(),
+            endDate: endOfMonth.toISOString(),
+            users: users.map((u: any) => {
+                const userId = u._id.toString();
+                const projectHours = projectHoursMap.get(userId) ?? 0;
+                const presalesHours = presalesHoursMap.get(userId) ?? 0;
+                const totalHours = projectHours + presalesHours;
 
-            return {
-                id: userId,
-                name: u.name,
-                department: u.department,
-                role: u.role,
-                projectHours,
-                presalesHours,
-                totalHours,
-                utilizationRate: Math.round((totalHours / 160) * 100)
-            };
-        });
+                return {
+                    id: userId,
+                    name: u.name,
+                    department: u.department,
+                    role: u.role,
+                    projectHours,
+                    presalesHours,
+                    totalHours,
+                    utilizationRate: standardHours > 0 ? Math.round((totalHours / standardHours) * 100) : 0
+                };
+            })
+        };
     }),
 
     getSettlements: roleProcedure(["admin", "manager"])
@@ -135,23 +162,26 @@ export const analyticsRouter = router({
             ]);
 
             const projectRevMap = new Map<string, number>();
+            const projectHoursMap = new Map<string, number>();
             const presalesRevMap = new Map<string, number>();
 
             for (const ts of (timesheets as any[])) {
                 const user = ts.techId;
                 if (!user) continue;
                 
-                let val = 0;
                 if (ts.type === "presales") {
                     // Presales: hourly rate
-                    val = ts.hours * (user.costRate?.hourlyRate || 0);
+                    const val = ts.hours * (user.costRate?.hourlyRate || 0);
                     const oppId = ts.opportunityId?.toString();
                     if (oppId) presalesRevMap.set(oppId, (presalesRevMap.get(oppId) || 0) + val);
                 } else {
-                    // Project: daily rate (1 day = 8 hours)
-                    val = (ts.hours / 8) * (user.costRate?.dailyRate || 0);
+                    // Project: cost = hours × hourly rate (時數 × 時薪)
+                    const cost = ts.hours * (user.costRate?.hourlyRate || 0);
                     const srId = ts.srId?.toString();
-                    if (srId) projectRevMap.set(srId, (projectRevMap.get(srId) || 0) + val);
+                    if (srId) {
+                        projectRevMap.set(srId, (projectRevMap.get(srId) || 0) + cost);
+                        projectHoursMap.set(srId, (projectHoursMap.get(srId) || 0) + ts.hours);
+                    }
                 }
             }
 
@@ -160,14 +190,18 @@ export const analyticsRouter = router({
                 isProjectLocked: locks.some((l: any) => l.type === "project" && l.isLocked),
                 isPresalesLocked: locks.some((l: any) => l.type === "presales" && l.isLocked),
                 projects: srs.map((sr: any) => {
-                    const totalRevenue = projectRevMap.get(sr._id.toString()) ?? 0;
-                    const margin = sr.contractAmount - totalRevenue;
+                    const totalCost = projectRevMap.get(sr._id.toString()) ?? 0;
+                    const totalHours = projectHoursMap.get(sr._id.toString()) ?? 0;
+                    // 本月收入費用 = 時數 × 時薪 (totalCost)
+                    // 本月毛利預估 = 合約金額 - 本月費用
+                    const margin = sr.contractAmount - totalCost;
                     return {
                         id: sr._id.toString(),
                         title: sr.title,
                         pmId: sr.pmId?.toString(),
                         contractAmount: sr.contractAmount,
-                        totalCost: totalRevenue, // Still named totalCost in FE but shows calculated interior revenue
+                        totalHours,      // 本月時數
+                        totalCost,       // 本月收入費用 (時數×時薪)
                         margin,
                         marginPercent: sr.contractAmount > 0 ? Math.round((margin / sr.contractAmount) * 100) : 0,
                         status: sr.status
@@ -305,6 +339,97 @@ export const analyticsRouter = router({
             }))
         };
     }),
+
+    getDeptKpi: roleProcedure(["admin", "manager"])
+        .input(z.object({
+            year: z.number().optional()  // 指定年度，預設今年
+        }).optional())
+        .query(async () => {
+            const now = new Date();
+            const year = now.getFullYear();
+            const yearStart = new Date(year, 0, 1);
+            const yearEnd = new Date(year, 11, 31, 23, 59, 59, 999);
+
+            // 取得所有部門與使用者
+            const allUsers = await UserModel.find(
+                { $or: [{ role: { $in: ["pm", "tech", "presales", "manager"] } }, { roles: { $in: ["pm", "tech", "presales", "manager"] } }] },
+                { _id: 1, name: 1, department: 1, role: 1, roles: 1, kpiTarget: 1 }
+            ).lean();
+
+            // 取得年度系統設定（目標業績）
+            const settingsRecords = await SystemSettingModel.find({ 
+                key: { $in: ["pcPresalesHourlyRate", "pcKpiTarget"] } 
+            }).lean();
+            const settingsMap = new Map(settingsRecords.map((s: any) => [s.key, s.value]));
+            const globalKpiTarget = Number(settingsMap.get("pcKpiTarget") || 5000000);
+            const presalesRate = Number(settingsMap.get("pcPresalesHourlyRate") || 2000);
+
+            // 按部門分組
+            const deptMap = new Map<string, { users: any[]; revenue: number; presalesRevenue: number; target: number }>();
+            for (const u of allUsers as any[]) {
+                const dept = u.department || "未指定";
+                if (!deptMap.has(dept)) {
+                    deptMap.set(dept, { users: [], revenue: 0, presalesRevenue: 0, target: globalKpiTarget });
+                }
+                deptMap.get(dept)!.users.push(u);
+            }
+
+            // 年度 SR 合約金額按 PM 部門分組
+            const allSrs = await ServiceRequestModel.find(
+                { createdAt: { $gte: yearStart, $lte: yearEnd } },
+                { contractAmount: 1, pmId: 1 }
+            ).lean();
+            for (const sr of allSrs as any[]) {
+                const pmUser = (allUsers as any[]).find(u => u._id.toString() === sr.pmId?.toString());
+                if (!pmUser) continue;
+                const dept = pmUser.department || "未指定";
+                if (deptMap.has(dept)) {
+                    deptMap.get(dept)!.revenue += (sr.contractAmount || 0);
+                }
+            }
+
+            // 年度協銷工時 × 單價 按部門分組
+            const presalesTs = await TimesheetModel.find(
+                { type: "presales", workDate: { $gte: yearStart, $lte: yearEnd } },
+                { hours: 1, techId: 1 }
+            ).lean();
+            for (const ts of presalesTs as any[]) {
+                const user = (allUsers as any[]).find(u => u._id.toString() === ts.techId?.toString());
+                if (!user) continue;
+                const dept = user.department || "未指定";
+                if (deptMap.has(dept)) {
+                    deptMap.get(dept)!.presalesRevenue += (ts.hours || 0) * presalesRate;
+                }
+            }
+
+            const result = Array.from(deptMap.entries()).map(([dept, data]) => {
+                const totalRevenue = data.revenue + data.presalesRevenue;
+                const achievementRate = data.target > 0 ? Math.round((totalRevenue / data.target) * 100) : 0;
+                const gap = totalRevenue - data.target;
+                return {
+                    department: dept,
+                    memberCount: data.users.length,
+                    projectRevenue: data.revenue,
+                    presalesRevenue: data.presalesRevenue,
+                    totalRevenue,
+                    target: data.target,
+                    achievementRate,
+                    gap,  // 正數=超標，負數=缺口
+                };
+            }).filter(d => d.memberCount > 0);
+
+            const grandTotal = result.reduce((acc, d) => acc + d.totalRevenue, 0);
+            const grandTarget = result.reduce((acc, d) => acc + d.target, 0);
+
+            return {
+                year,
+                departments: result,
+                grandTotal,
+                grandTarget,
+                grandAchievementRate: grandTarget > 0 ? Math.round((grandTotal / grandTarget) * 100) : 0,
+                grandGap: grandTotal - grandTarget
+            };
+        }),
 
     getWinRateTrend: roleProcedure(["admin", "manager"])
         .input(z.object({ 
@@ -819,4 +944,131 @@ export const analyticsRouter = router({
             
             return [];
         }),
+
+    getProfitCenterReport: roleProcedure(["admin", "manager"])
+        .input(z.object({
+            startDate: z.string(),
+            endDate: z.string(),
+            department: z.string().optional()
+        }))
+        .query(async ({ input }) => {
+            const start = new Date(input.startDate);
+            const end = new Date(input.endDate);
+            end.setHours(23, 59, 59, 999);
+
+            // Fetch settings
+            const settingsRecords = await SystemSettingModel.find({ 
+                key: { $in: ["pcPresalesHourlyRate", "pcMaintenancePointValue", "pcOverheadRate"] } 
+            }).lean();
+            const settingsMap = new Map(settingsRecords.map((s: any) => [s.key, s.value]));
+            const pcPresalesHourlyRate = Number(settingsMap.get("pcPresalesHourlyRate") || 2000);
+            const pcOverheadRate = Number(settingsMap.get("pcOverheadRate") || 15);
+
+            let srMatch: any = { createdAt: { $gte: start, $lte: end } };
+            let tsMatch: any = { workDate: { $gte: start, $lte: end } };
+            
+            if (input.department) {
+                const deptUsers = await UserModel.find({ department: input.department }, { _id: 1 }).lean();
+                const deptIds = deptUsers.map(u => u._id);
+                srMatch.pmId = { $in: deptIds };
+                tsMatch.techId = { $in: deptIds };
+            }
+
+            const [srs, timesheets, users] = await Promise.all([
+                ServiceRequestModel.find(srMatch, { srType: 1, contractAmount: 1, totalPoints: 1, pointValue: 1 }).lean(),
+                TimesheetModel.find(tsMatch).populate("techId", "costRate").lean(),
+                UserModel.find({}, { costRate: 1 }).lean()
+            ]);
+
+            let presalesRevenue = 0;
+            let presalesCost = 0;
+            let projectRevenue = 0;
+            let projectCost = 0;
+            let maintenanceRevenue = 0;
+            let maintenanceCost = 0;
+
+            // 1. Calculate SR Revenues (Projects & Maintenance created in period)
+            for (const sr of srs as any[]) {
+                if (sr.srType === "maintenance") {
+                    maintenanceRevenue += (sr.contractAmount || 0);
+                } else {
+                    projectRevenue += (sr.contractAmount || 0);
+                }
+            }
+
+            // 2. Calculate Costs and Presales Revenue from Timesheets
+            for (const ts of timesheets as any[]) {
+                const hours = ts.hours || 0;
+                const costAmount = ts.costAmount || 0; // pre-calculated in timesheet or we can fallback
+                
+                // Fallback cost calculation if ts.costAmount is 0
+                let actualCost = costAmount;
+                if (actualCost === 0 && ts.techId?.costRate?.hourlyRate) {
+                    actualCost = hours * ts.techId.costRate.hourlyRate;
+                }
+
+                if (ts.type === "presales") {
+                    presalesCost += actualCost;
+                    presalesRevenue += (hours * pcPresalesHourlyRate);
+                } else if (ts.type === "project") {
+                    projectCost += actualCost;
+                } else if (ts.type === "maintenance") { // Assuming we might add this later or it falls under another type
+                    maintenanceCost += actualCost;
+                }
+            }
+            
+            // Note: If timesheets don't have "maintenance" type yet, maybe they log under "project" for maintenance SRs. 
+            // We'd need to match ts.srId to SR to know if it's maintenance. 
+            // Let's refine the cost calculation by mapping ts to SR if it's a project type
+            const tsMatchSr = { type: "project", workDate: { $gte: start, $lte: end } };
+            if (input.department) (tsMatchSr as any).techId = tsMatch.techId;
+            const projectTs = await TimesheetModel.find(tsMatchSr).populate("srId", "srType").populate("techId", "costRate").lean();
+            
+            // Reset project and maintenance costs, we will recalculate based on SR type
+            projectCost = 0;
+            maintenanceCost = 0;
+
+            for (const ts of projectTs as any[]) {
+                const hours = ts.hours || 0;
+                let actualCost = ts.costAmount || 0;
+                if (actualCost === 0 && ts.techId?.costRate?.hourlyRate) {
+                    actualCost = hours * ts.techId.costRate.hourlyRate;
+                }
+
+                if (ts.srId?.srType === "maintenance") {
+                    maintenanceCost += actualCost;
+                } else {
+                    projectCost += actualCost;
+                }
+            }
+
+            const presalesMargin = presalesRevenue - presalesCost;
+            const projectMargin = projectRevenue - projectCost;
+            const maintenanceMargin = maintenanceRevenue - maintenanceCost;
+
+            const totalMargin = presalesMargin + projectMargin + maintenanceMargin;
+            const totalDirectCost = presalesCost + projectCost + maintenanceCost;
+            
+            // 共同成本 (Overhead)
+            const overheadCost = totalDirectCost * (pcOverheadRate / 100);
+            const netContributionMargin = totalMargin - overheadCost;
+
+            // ROI = 貢獻毛利 / 部門資產 (這裡部門資產暫以 總直接成本 + 共同成本 估算，若無成本則為 1 避免除零)
+            const totalAsset = totalDirectCost + overheadCost;
+            const roi = totalAsset > 0 ? (netContributionMargin / totalAsset) * 100 : 0;
+
+            return {
+                presales: { revenue: presalesRevenue, cost: presalesCost, margin: presalesMargin },
+                project: { revenue: projectRevenue, cost: projectCost, margin: projectMargin },
+                maintenance: { revenue: maintenanceRevenue, cost: maintenanceCost, margin: maintenanceMargin },
+                total: { 
+                    revenue: presalesRevenue + projectRevenue + maintenanceRevenue, 
+                    directCost: totalDirectCost, 
+                    margin: totalMargin, 
+                    overheadCost, 
+                    netContributionMargin, 
+                    roi 
+                }
+            };
+        })
 });

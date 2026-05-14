@@ -106,12 +106,24 @@ export function WbsManagementPage() {
                 const importedItems = json.map((row: any) => {
                     const assigneeName = row['負責人'] || row['Assignee'];
                     const assignee = techs?.find(t => t.name === assigneeName);
+                    
+                    // Handle Excel date format or string
+                    const parseDate = (val: any) => {
+                        if (!val) return undefined;
+                        const d = new Date(val);
+                        return isNaN(d.getTime()) ? undefined : d;
+                    };
+
                     return {
-                        title: row['項目名稱'] || row['Title'] || row['項目'] || '未命名項目',
+                        title: row['工作項目'] || row['項目名稱'] || row['Title'] || row['項目'] || '未命名項目',
                         estimatedHours: Number(row['預估工時'] || row['Hours'] || row['工時'] || 0),
+                        actualHours: Number(row['實際工時'] || 0),
                         assigneeId: assignee?.id,
                         level: Number(row['階層'] || row['Level'] || 0),
-                        completionPercentage: 0
+                        completionPercentage: Number(row['進度百分比'] || row['進度'] || 0),
+                        startDate: parseDate(row['開始日期'] || row['Start Date']),
+                        endDate: parseDate(row['結束日期'] || row['End Date']),
+                        colorCode: row['標記顏色'] || row['Color'] || '#E2E8F0'
                     };
                 });
 
@@ -234,12 +246,19 @@ export function WbsManagementPage() {
             toast.error("沒有可匯出的 WBS 版本資料");
             return;
         }
-        const headers = ["任務標題", "預估工時 (Hours)", "指派對象", "進度百分比 (%)", "十六進位色彩色標"];
-        const rows = latestVersion.items.map((item: any) => [
+        const itemNumbers = computeItemNumbers(latestVersion.items);
+        const headers = ["階層編號", "階層", "工作項目", "預估工時", "實際工時", "負責人", "進度百分比", "開始日期", "結束日期", "工作說明", "標記顏色"];
+        const rows = latestVersion.items.map((item: any, idx: number) => [
+            `"${itemNumbers[idx]}"`,
+            item.level || 0,
             `"${item.title.replace(/"/g, '""')}"`,
             item.estimatedHours,
+            item.actualHours || 0,
             `"${techs?.find(t => t.id === item.assigneeId)?.name || '未指派'}"`,
             item.completionPercentage || 0,
+            item.startDate ? `"${new Date(item.startDate).toISOString().split('T')[0]}"` : '""',
+            item.endDate ? `"${new Date(item.endDate).toISOString().split('T')[0]}"` : '""',
+            `"${(item.description || '').replace(/"/g, '""')}"`,
             `"${item.colorCode || '#E2E8F0'}"`
         ]);
         const csvContent = "data:text/csv;charset=utf-8,\uFEFF" + [headers.join(","), ...rows.map((r: any[]) => r.join(","))].join("\n");
@@ -250,7 +269,7 @@ export function WbsManagementPage() {
         document.body.appendChild(link);
         link.click();
         document.body.removeChild(link);
-        toast.success("WBS 已成功匯出");
+        toast.success("WBS 已成功完整匯出 (包含實際工時)");
     };
 
     // File upload (Mock implementation)
@@ -566,6 +585,11 @@ export function WbsManagementPage() {
                                                                         {isAdded && <span className="rounded bg-emerald-100 px-1.5 py-0.5 text-[10px] font-semibold text-emerald-700">新增</span>}
                                                                         {assigneeChanged && <span className="rounded bg-blue-100 px-1.5 py-0.5 text-[10px] font-semibold text-blue-700">改派</span>}
                                                                     </div>
+                                                                    {item.description && (
+                                                                        <div className="mt-1 text-[11px] text-muted-foreground whitespace-pre-wrap bg-muted/20 p-2 rounded border border-border/50">
+                                                                            {item.description}
+                                                                        </div>
+                                                                    )}
                                                                     <div className="mt-1.5 flex items-center gap-2 w-48">
                                                                         <div className="h-1.5 w-full bg-muted rounded-full overflow-hidden">
                                                                             <div className="h-full bg-primary transition-all" style={{ width: `${item.completionPercentage || 0}%`, backgroundColor: item.colorCode || 'hsl(var(--primary))' }} />
@@ -726,7 +750,7 @@ export function WbsManagementPage() {
                                         ))}
                                         <button onClick={handleAddDraftItem}
                                             className="w-full py-2 border border-dashed border-primary/40 text-primary rounded-lg text-sm font-medium hover:bg-primary/5 transition-colors flex items-center justify-center gap-1">
-                                            <Plus className="w-4 h-4" /> 新增任務項目
+                                            <Plus className="w-4 h-4" /> 新增工作項目
                                         </button>
                                     </div>
                                 )}

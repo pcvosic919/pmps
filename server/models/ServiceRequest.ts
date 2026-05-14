@@ -1,5 +1,5 @@
 import mongoose, { Schema, Document } from "mongoose";
-import { changeRequestStatuses, memberRoles, srStatuses, wbsVersionStatuses, type ChangeRequestInput, type ChangeRequestStatus, type CustomFieldValue, type MemberRole, type ServiceRequestAttachment, type SrStatus, type WbsItemInput, type WbsVersionInput, type WbsVersionStatus } from "../../shared/types";
+import { changeRequestStatuses, memberRoles, srStatuses, srTypes, wbsVersionStatuses, type ChangeRequestInput, type ChangeRequestStatus, type CustomFieldValue, type MemberRole, type ServiceRequestAttachment, type SrStatus, type SrType, type WbsItemInput, type WbsVersionInput, type WbsVersionStatus } from "../../shared/types";
 
 export interface IWbsItem extends Omit<WbsItemInput, "assigneeId"> {
     id: mongoose.Types.ObjectId;
@@ -35,7 +35,11 @@ export interface IServiceRequestAttachment extends Omit<ServiceRequestAttachment
 export interface IServiceRequest extends Document {
     opportunityId?: mongoose.Types.ObjectId;
     title: string;
+    customerName?: string;
     contractAmount: number;
+    srType: SrType;
+    totalPoints?: number;
+    pointValue?: number;
     pmId?: mongoose.Types.ObjectId;
     status: SrStatus;
     marginEstimate: number;
@@ -59,7 +63,8 @@ const WbsItemSchema = new Schema<IWbsItem>({
     assigneeId: { type: Schema.Types.ObjectId, ref: "User" },
     completionPercentage: { type: Number, default: 0, min: 0, max: 100 },
     colorCode: { type: String, default: "#E2E8F0" },
-    level: { type: Number, default: 0 }
+    level: { type: Number, default: 0 },
+    description: { type: String }
 });
 
 const AuditLogSchema = new Schema({
@@ -95,7 +100,11 @@ const ChangeRequestSchema = new Schema<IChangeRequest>({
 const ServiceRequestSchema = new Schema<IServiceRequest>({
     opportunityId: { type: Schema.Types.ObjectId, ref: "Opportunity" },
     title: { type: String, required: true },
+    customerName: { type: String },
     contractAmount: { type: Number, required: true, default: 0 },
+    srType: { type: String, enum: srTypes, default: "project", required: true },
+    totalPoints: { type: Number },
+    pointValue: { type: Number },
     pmId: { type: Schema.Types.ObjectId, ref: "User" },
     status: { type: String, enum: srStatuses, default: "new", required: true },
     marginEstimate: { type: Number, default: 0 },

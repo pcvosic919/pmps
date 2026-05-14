@@ -82,9 +82,9 @@ export function SettlementsPage() {
         if (!currentData.length) return;
         let csvContent = "\ufeff"; // BOM for excel
         if (activeTab === "project") {
-            csvContent += "SR單號,名稱,金額,成本,毛利,狀態\n";
+            csvContent += "SR單號,名稱,金額,本月時數,收入費用,毛利,狀態\n";
             currentData.forEach((r: any) => {
-                csvContent += `SR-${r.id.slice(-6)},${r.title.replace(/,/g, ' ')},${r.contractAmount},${r.totalCost},${r.margin},${getStatusLabel(r.status)}\n`;
+                csvContent += `SR-${r.id.slice(-6)},${r.title.replace(/,/g, ' ')},${r.contractAmount},${r.totalHours?.toFixed(1) || 0},${r.totalCost},${r.margin},${getStatusLabel(r.status)}\n`;
             });
         } else {
             csvContent += "商機單號,名稱,客戶,本月協銷營收,狀態\n";
@@ -245,7 +245,8 @@ export function SettlementsPage() {
                                     <th className="px-6 py-3 font-medium">SR 單號 / 名稱</th>
                                     <th className="px-6 py-3 font-medium">PM ID</th>
                                     {!hasRole("tech") && <th className="px-6 py-3 font-medium text-right">合約金額 (Revenue)</th>}
-                                    <th className="px-6 py-3 font-medium text-right">本月工時成本 (Cost)</th>
+                                    <th className="px-6 py-3 font-medium text-right">本月時數 (hrs)</th>
+                                    <th className="px-6 py-3 font-medium text-right">本月收入費用 (時數×時薪)</th>
                                     <th className="px-6 py-3 font-medium text-right">本月毛利預估</th>
                                     <th className="px-6 py-3 font-medium text-center">狀態</th>
                                 </tr>
@@ -278,7 +279,13 @@ export function SettlementsPage() {
                                             {!hasRole("tech") && (
                                                 <td className="px-6 py-4 text-right font-medium">${sr.contractAmount?.toLocaleString() || "0"}</td>
                                             )}
-                                            <td className="px-6 py-4 text-right text-rose-600 font-medium">${sr.totalCost?.toLocaleString() || "0"}</td>
+                                            <td className="px-6 py-4 text-right font-medium text-sky-700">
+                                                {sr.totalHours?.toFixed(1) || "0"} hrs
+                                            </td>
+                                            <td className="px-6 py-4 text-right text-rose-600 font-medium">
+                                                <div>NT$ {sr.totalCost?.toLocaleString() || "0"}</div>
+                                                <div className="text-xs text-muted-foreground mt-0.5">{sr.totalHours?.toFixed(1) || "0"} hrs × 時薪</div>
+                                            </td>
                                             <td className="px-6 py-4 text-right">
                                                 <div className={`font-bold ${sr.margin >= 0 ? 'text-emerald-600' : 'text-rose-600'}`}>
                                                     ${sr.margin?.toLocaleString() || "0"}

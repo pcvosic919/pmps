@@ -8,7 +8,7 @@ export const BREAKGLASS_CONFIG = {
     email: process.env.BREAKGLASS_EMAIL || "demo@demo.com",
     password: process.env.BREAKGLASS_PASSWORD || "password123",
     user: {
-        id: "static-break-glass-admin-id",
+        id: "000000000000000000000000",
         name: "Break-Glass Admin",
         email: process.env.BREAKGLASS_EMAIL || "demo@demo.com",
 

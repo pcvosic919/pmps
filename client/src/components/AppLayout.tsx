@@ -93,6 +93,7 @@ const navGroups: NavGroup[] = [
             { icon: Users, label: "資源池", href: "/resources", roles: ["admin", "manager"] },
             { icon: Activity, label: "稼動率", href: "/utilization", roles: ["admin", "manager"] },
             { icon: PieChart, label: "KPI 儀表板", href: "/kpi", roles: ["admin", "manager"] },
+            { icon: Activity, label: "利潤中心儀表板", href: "/profit-center-report", roles: ["admin", "manager"] },
             { icon: FileSpreadsheet, label: "月度結算", href: "/settlements", roles: ["admin", "manager"] },
             { icon: FileText, label: "自訂報表", href: "/reports", roles: ["admin", "manager"] },
         ],

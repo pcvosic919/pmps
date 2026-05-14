@@ -6,8 +6,10 @@ export function UtilizationPage() {
     const [searchTerm, setSearchTerm] = useState("");
     const [filterDept, setFilterDept] = useState<string>("");
     const [filterUser, setFilterUser] = useState<string>("");
+    const [selectedMonth, setSelectedMonth] = useState<string>(new Date().toISOString().slice(0, 7));
 
     const filterInput = {
+        month: selectedMonth,
         department: filterDept || undefined,
         userId: filterUser || undefined
     };
@@ -16,13 +18,21 @@ export function UtilizationPage() {
     const allUsers = usersData?.items || [];
     const departments = Array.from(new Set(allUsers.map((u: any) => u.department).filter(Boolean))) as string[];
 
-    const { data, isLoading } = trpc.analytics.getUtilization.useQuery(filterInput);
-    const utilizationData = (data || []) as any[];
+    const { data, isLoading, error } = trpc.analytics.getUtilization.useQuery(filterInput);
+    
+    const utilizationData = data?.users || [];
+    const standardHours = data?.standardHours || 160;
 
-    const filteredData = utilizationData?.filter(u =>
-        u.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        (u.department && u.department.toLowerCase().includes(searchTerm.toLowerCase()))
-    );
+    const filteredData = utilizationData?.filter(u => {
+        const search = searchTerm.toLowerCase().trim();
+        if (!search) return true;
+        return (
+            u.name.toLowerCase().includes(search) ||
+            (u.department && u.department.toLowerCase().includes(search))
+        );
+    });
+
+    if (error) return <div className="p-8 text-center text-destructive">載入失敗: {error.message}</div>;
 
     const getUtilizationColor = (rate: number) => {
         if (rate >= 100) return "text-red-700 bg-red-100 border-red-200";
@@ -40,15 +50,25 @@ export function UtilizationPage() {
 
     return (
         <div className="space-y-6">
-            <div className="flex justify-between items-center bg-card p-6 rounded-xl shadow-sm border border-border/50">
+            <div className="flex flex-col md:flex-row justify-between items-start md:items-center bg-card p-6 rounded-xl shadow-sm border border-border/50 gap-4">
                 <div>
                     <h2 className="text-3xl font-bold tracking-tight bg-clip-text text-transparent bg-gradient-to-r from-primary to-primary/60">稼動率看板 (Utilization)</h2>
-                    <p className="text-muted-foreground mt-1">追蹤本月份人員的可計費時數與整體負載率 (基準為 160 小時/月)</p>
+                    <p className="text-muted-foreground mt-1">追蹤 <span className="font-bold text-foreground">{selectedMonth}</span> 人員的可計費時數與整體負載率 (基準為 {standardHours} 小時/月)</p>
                 </div>
-                <div className="flex gap-4 items-center">
+                <div className="flex gap-6 items-center w-full md:w-auto">
+                    <div className="flex flex-col">
+                        <label className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider mb-1">選擇月份</label>
+                        <input 
+                            type="month" 
+                            value={selectedMonth} 
+                            onChange={(e) => setSelectedMonth(e.target.value)}
+                            className="bg-background border border-border rounded-lg px-3 py-1.5 text-sm font-bold focus:ring-2 focus:ring-primary/20 outline-none transition-all shadow-sm"
+                        />
+                    </div>
+                    <div className="h-10 w-[1px] bg-border hidden md:block" />
                     <div className="text-right">
-                        <div className="text-sm font-medium text-muted-foreground">本月平均稼動率</div>
-                        <div className={`text-2xl font-bold ${avgUtilization >= 80 ? 'text-emerald-600' : 'text-amber-600'}`}>
+                        <div className="text-xs font-bold text-muted-foreground uppercase tracking-widest mb-0.5">平均稼動率</div>
+                        <div className={`text-2xl font-black ${avgUtilization >= 80 ? 'text-emerald-600' : 'text-amber-600'}`}>
                             {avgUtilization}%
                         </div>
                     </div>

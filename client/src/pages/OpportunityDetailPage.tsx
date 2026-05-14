@@ -49,6 +49,7 @@ export function OpportunityDetailPage() {
 
     const [showSRModal, setShowSRModal] = useState(false);
     const [srTitle, setSrTitle] = useState("");
+    const [srCustomerName, setSrCustomerName] = useState("");
     const [srAmount, setSrAmount] = useState("");
     const [srPmId, setSrPmId] = useState("");
     const [srTechId, setSrTechId] = useState("");
@@ -61,6 +62,9 @@ export function OpportunityDetailPage() {
     const [showEditDescriptionModal, setShowEditDescriptionModal] = useState(false);
     const [editedDescription, setEditedDescription] = useState("");
     const [descriptionError, setDescriptionError] = useState("");
+    const [showEditEstimatedValueModal, setShowEditEstimatedValueModal] = useState(false);
+    const [editedEstimatedValue, setEditedEstimatedValue] = useState("");
+    const [estimatedValueError, setEstimatedValueError] = useState("");
 
     // ------ Queries ------
     const { data: opp, isLoading: isOppLoading, refetch: refetchOpp } = trpc.opportunities.getById.useQuery({ id }, { enabled: !!id });
@@ -95,7 +99,14 @@ export function OpportunityDetailPage() {
     });
 
     const removeMemberMutation = trpc.opportunities.removeMember.useMutation({
-        onSuccess: () => refetchMembers()
+        onSuccess: () => refetchMembers(),
+    });
+
+    const deleteOpportunityMutation = trpc.opportunities.delete.useMutation({
+        onSuccess: () => {
+            window.location.href = "/opportunities";
+        },
+        onError: (err) => alert(err.message || "刪除失敗")
     });
 
     const updateStatusMutation = trpc.opportunities.updateStatus.useMutation({
@@ -115,10 +126,19 @@ export function OpportunityDetailPage() {
         onError: (err) => setDescriptionError(err.message || "更新描述失敗")
     });
 
+    const updateEstimatedValueMutation = trpc.opportunities.updateEstimatedValue.useMutation({
+        onSuccess: () => {
+            refetchOpp();
+            setShowEditEstimatedValueModal(false);
+            setEstimatedValueError("");
+        },
+        onError: (err) => setEstimatedValueError(err.message || "更新預估金額失敗")
+    });
+
     const createSRMutation = trpc.opportunities.createSR.useMutation({
         onSuccess: (data) => {
             setShowSRModal(false);
-            setSrTitle(""); setSrAmount(""); setSrPmId(""); setSrTechId(""); setSrError("");
+            setSrTitle(""); setSrCustomerName(""); setSrAmount(""); setSrPmId(""); setSrTechId(""); setSrError("");
             // Navigate to the new SR
             window.location.href = `/service-requests/${data.id}`;
         },
@@ -153,6 +173,7 @@ export function OpportunityDetailPage() {
         createSRMutation.mutate({ 
             opportunityId: id, 
             title: srTitle, 
+            customerName: srCustomerName,
             contractAmount: amount, 
             pmId: srPmId || undefined,
             techId: srTechId || undefined
@@ -161,6 +182,15 @@ export function OpportunityDetailPage() {
 
     const handleUpdateDescription = () => {
         updateDescriptionMutation.mutate({ id, description: editedDescription });
+    };
+
+    const handleUpdateEstimatedValue = () => {
+        const value = parseFloat(editedEstimatedValue.replace(/,/g, ""));
+        if (isNaN(value) || value < 0) {
+            setEstimatedValueError("請輸入有效金額");
+            return;
+        }
+        updateEstimatedValueMutation.mutate({ id, estimatedValue: value });
     };
 
     if (isOppLoading || isMembersLoading || isAssignmentsLoading || isTimesheetsLoading) {
@@ -291,17 +321,31 @@ export function OpportunityDetailPage() {
                             <span>{opp.customerName}</span>
                         </div>
                     </div>
-                    {/* 一鍵建 SR */}
-                    {!hasRole("business") && (
-                        <button
-                            onClick={() => { if (!isConverted) { setShowSRModal(true); setSrTitle(opp.title + " - SR"); setSrError(""); } }}
-                            disabled={isConverted}
-                            className="flex items-center gap-2 px-4 py-2 bg-primary text-primary-foreground rounded-lg hover:bg-primary/90 transition-colors text-sm font-medium shadow-sm disabled:opacity-50"
-                        >
-                            <FileText className="w-4 h-4" />
-                            {isConverted ? "已轉案，請結案重建" : "一鍵建立 SR / 專案"}
-                        </button>
-                    )}
+                    {/* 一鍵建 SR 與刪除商機 */}
+                    <div className="flex items-center gap-2">
+                        {!hasRole("business") && (
+                            <button
+                                onClick={() => { if (!isConverted) { setShowSRModal(true); setSrTitle(`${opp.title} ${opp.customerName} - SR`); setSrError(""); } }}
+                                disabled={isConverted}
+                                className="flex items-center gap-2 px-4 py-2 bg-primary text-primary-foreground rounded-lg hover:bg-primary/90 transition-colors text-sm font-medium shadow-sm disabled:opacity-50"
+                            >
+                                <FileText className="w-4 h-4" />
+                                {isConverted ? "已轉案，請結案重建" : "一鍵建立 SR / 專案"}
+                            </button>
+                        )}
+                        {hasRole("admin") && (
+                            <button
+                                onClick={() => {
+                                    if (confirm("確定要刪除此商機嗎？此操作無法復原。")) {
+                                        deleteOpportunityMutation.mutate({ id });
+                                    }
+                                }}
+                                className="flex items-center gap-2 px-4 py-2 border border-red-200 bg-red-50 text-red-600 rounded-lg hover:bg-red-100 transition-colors text-sm font-medium shadow-sm"
+                            >
+                                刪除商機
+                            </button>
+                        )}
+                    </div>
                 </div>
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-6 pt-6 border-t border-border/50">
                     <div className="space-y-1">
@@ -309,7 +353,21 @@ export function OpportunityDetailPage() {
                         <p className="font-semibold">#{opp.id}</p>
                     </div>
                     <div className="space-y-1">
-                        <span className="text-sm text-muted-foreground">預估金額</span>
+                        <div className="flex items-center justify-between gap-3">
+                            <span className="text-sm text-muted-foreground">預估金額</span>
+                            {(isBusinessOwner || hasRole("admin") || hasRole("manager") || hasRole("presales")) && !isConverted && (
+                                <button
+                                    onClick={() => {
+                                        setEditedEstimatedValue(opp.estimatedValue.toString());
+                                        setEstimatedValueError("");
+                                        setShowEditEstimatedValueModal(true);
+                                    }}
+                                    className="text-xs font-medium text-primary hover:text-primary/80 transition-colors"
+                                >
+                                    編輯
+                                </button>
+                            )}
+                        </div>
                         <p className="font-semibold text-lg text-primary">NT$ {opp.estimatedValue.toLocaleString()}</p>
                     </div>
                     <div className="space-y-1">
@@ -676,6 +734,39 @@ export function OpportunityDetailPage() {
                             <button onClick={handleAddMember} disabled={addMemberMutation.isPending}
                                 className="px-4 py-2 text-sm bg-primary text-primary-foreground rounded-lg hover:bg-primary/90 disabled:opacity-50 flex items-center">
                                 {addMemberMutation.isPending ? <><span className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin mr-2" />新增中...</> : <><Check className="w-4 h-4 mr-1" />確認新增</>}
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {/* 編輯預估金額 Modal */}
+            {showEditEstimatedValueModal && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm">
+                    <div className="bg-card border border-border rounded-xl shadow-xl w-full max-w-lg mx-4 p-6 space-y-5">
+                        <div className="flex justify-between items-center">
+                            <h2 className="text-lg font-bold">編輯預估金額</h2>
+                            <button onClick={() => setShowEditEstimatedValueModal(false)} className="p-1 rounded-full hover:bg-muted"><X className="w-5 h-5 text-muted-foreground" /></button>
+                        </div>
+                        <div className="space-y-4">
+                            <div>
+                                <label className="block text-sm font-medium mb-1">預估金額</label>
+                                <input
+                                    type="number"
+                                    min="0"
+                                    step="100"
+                                    value={editedEstimatedValue}
+                                    onChange={(e) => setEditedEstimatedValue(e.target.value)}
+                                    className="w-full border border-border rounded-lg px-3 py-2 bg-background text-sm focus:outline-none focus:ring-2 focus:ring-primary/50"
+                                />
+                            </div>
+                            {estimatedValueError && <p className="text-sm text-red-500 bg-red-50 dark:bg-red-950/30 px-3 py-2 rounded-lg">{estimatedValueError}</p>}
+                        </div>
+                        <div className="flex justify-end space-x-3">
+                            <button onClick={() => setShowEditEstimatedValueModal(false)} className="px-4 py-2 text-sm border border-border rounded-lg hover:bg-muted">取消</button>
+                            <button onClick={handleUpdateEstimatedValue} disabled={updateEstimatedValueMutation.isPending}
+                                className="px-4 py-2 text-sm bg-primary text-primary-foreground rounded-lg hover:bg-primary/90 disabled:opacity-50">
+                                {updateEstimatedValueMutation.isPending ? "儲存中..." : "儲存金額"}
                             </button>
                         </div>
                     </div>

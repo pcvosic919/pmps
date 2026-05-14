@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { trpc } from "../lib/trpc";
 import { Link } from "wouter";
 import { FileText, AlertTriangle, ChevronRight, BarChart3, Plus } from "lucide-react";
@@ -13,7 +13,10 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 
 const srSchema = z.object({
     title: z.string().min(1, "SR 名稱不可為空"),
-    contractAmount: z.number().min(0, "合約金額不能為負"),
+    srType: z.enum(["project", "maintenance"]).default("project"),
+    contractAmount: z.number().min(0, "合約金額不能為負").optional(),
+    totalPoints: z.number().min(0).optional(),
+    pointValue: z.number().min(0).optional(),
     pmId: z.string().min(1, "請指派 PM"),
     joinPmAsMember: z.boolean().default(true),
     opportunityId: z.string().optional()
@@ -38,14 +41,38 @@ export function ServiceRequestsPage() {
         }
     });
 
-    const form = useForm<any>({
-        resolver: zodResolver(srSchema) as any,
-        defaultValues: { title: "", contractAmount: 0, pmId: "", opportunityId: "", joinPmAsMember: true }
+    const deleteSr = trpc.projects.delete.useMutation({ 
+        onSuccess: () => refetch(),
+        onError: (err) => alert(err.message || "刪除失敗")
     });
 
+    const { data: settings } = trpc.system.getSettings.useQuery();
+
+    const form = useForm<any>({
+        resolver: zodResolver(srSchema) as any,
+        defaultValues: { 
+            title: "", srType: "project", contractAmount: 0, 
+            totalPoints: 0, pointValue: 500, 
+            pmId: "", opportunityId: "", joinPmAsMember: true 
+        }
+    });
+
+    // Update default pointValue when settings are loaded
+    useEffect(() => {
+        if (settings?.pcMaintenancePointValue) {
+            form.setValue("pointValue", settings.pcMaintenancePointValue);
+        }
+    }, [settings?.pcMaintenancePointValue]);
+
     const handleCreate = (values: z.infer<typeof srSchema>) => {
+        let finalContractAmount = values.contractAmount || 0;
+        if (values.srType === "maintenance") {
+            finalContractAmount = (values.totalPoints || 0) * (values.pointValue || 0);
+        }
+
         createSR.mutate({
             ...values,
+            contractAmount: finalContractAmount,
             opportunityId: values.opportunityId === "none" || !values.opportunityId ? undefined : values.opportunityId
         });
     };
@@ -93,68 +120,98 @@ export function ServiceRequestsPage() {
                 )}
             </div>
 
-            <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-                {srs?.map((sr: any) => (
-                    <div key={sr.id} className="group bg-card border border-border rounded-xl p-5 hover:border-primary/50 hover:shadow-md transition-all relative overflow-hidden">
-                        {sr.marginWarning && (
-                            <div className="absolute top-0 right-0 w-16 h-16 overflow-hidden">
-                                <div className="absolute top-0 right-0 w-16 h-16 bg-destructive/10 -rotate-45 translate-x-8 -translate-y-8 absolute group-hover:bg-destructive/20 transition-colors" />
-                                <AlertTriangle className="absolute top-2 right-2 w-4 h-4 text-destructive z-10" />
-                            </div>
-                        )}
-
-                        <div className="flex justify-between items-start mb-4">
-                            <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold border ${getStatusColor(sr.status)}`}>
-                                {getStatusLabel(sr.status)}
-                            </span>
-                            <span className="text-xs font-medium text-muted-foreground bg-muted px-2 py-1 rounded-md border text-right">
-                                SR-#{sr.id}
-                            </span>
-                        </div>
-
-                        <h3 className="text-lg font-bold text-foreground mb-3 group-hover:text-primary transition-colors line-clamp-2" title={sr.title}>
-                            {sr.title}
-                        </h3>
-
-                        <div className="space-y-3 py-3 border-t border-border/60">
-                            {!hasRole("tech") && (
-                                <div className="flex justify-between items-center text-sm">
-                                    <span className="text-muted-foreground">合約金額</span>
-                                    <span className="font-bold text-foreground">NT$ {sr.contractAmount?.toLocaleString() || 0}</span>
-                                </div>
+            <div className="bg-card border border-border rounded-xl shadow-sm overflow-hidden">
+                <div className="overflow-x-auto">
+                    <table className="w-full text-left border-collapse">
+                        <thead>
+                            <tr className="bg-muted/50 border-b border-border text-[11px] font-bold text-muted-foreground uppercase tracking-widest">
+                                <th className="px-6 py-4">狀態 / 類型</th>
+                                <th className="px-6 py-4">ID / SR 名稱</th>
+                                <th className="px-6 py-4">合約金額 (NT$)</th>
+                                <th className="px-6 py-4">預估毛利</th>
+                                <th className="px-6 py-4">建立日期</th>
+                                <th className="px-6 py-4 text-right">操作</th>
+                            </tr>
+                        </thead>
+                        <tbody className="divide-y divide-border/50">
+                            {srs?.map((sr: any) => (
+                                <tr key={sr.id} className="group hover:bg-muted/30 transition-colors">
+                                    <td className="px-6 py-4">
+                                        <div className="flex flex-col gap-1.5">
+                                            <span className={`inline-flex items-center w-fit px-2 py-0.5 rounded-full text-[10px] font-bold border ${getStatusColor(sr.status)}`}>
+                                                {getStatusLabel(sr.status)}
+                                            </span>
+                                            <span className={`inline-flex items-center w-fit px-2 py-0.5 rounded-full text-[10px] font-bold border ${sr.srType === 'maintenance' ? 'bg-purple-100 text-purple-700 border-purple-200' : 'bg-blue-100 text-blue-700 border-blue-200'}`}>
+                                                {sr.srType === 'maintenance' ? '維運' : '專案'}
+                                            </span>
+                                        </div>
+                                    </td>
+                                    <td className="px-6 py-4">
+                                        <div className="flex flex-col">
+                                            <div className="flex items-center gap-1.5 mb-0.5">
+                                                <span className="text-[10px] font-mono text-muted-foreground">SR-#{sr.id}</span>
+                                                {sr.marginWarning && <AlertTriangle className="w-3.5 h-3.5 text-destructive animate-pulse" title="毛利預警" />}
+                                            </div>
+                                            <span className="text-sm font-bold text-foreground group-hover:text-primary transition-colors line-clamp-1" title={sr.title}>
+                                                {sr.title}
+                                            </span>
+                                        </div>
+                                    </td>
+                                    <td className="px-6 py-4">
+                                        {!hasRole("tech") ? (
+                                            <span className="text-sm font-mono font-bold text-foreground">
+                                                {sr.contractAmount?.toLocaleString() || 0}
+                                            </span>
+                                        ) : (
+                                            <span className="text-xs text-muted-foreground italic">權限受限</span>
+                                        )}
+                                    </td>
+                                    <td className="px-6 py-4">
+                                        <span className={`text-sm font-bold ${sr.marginWarning ? 'text-destructive underline decoration-wavy' : 'text-green-600'}`}>
+                                            {sr.marginEstimate}%
+                                        </span>
+                                    </td>
+                                    <td className="px-6 py-4 text-xs text-muted-foreground">
+                                        {new Date(sr.createdAt).toLocaleDateString()}
+                                    </td>
+                                    <td className="px-6 py-4 text-right">
+                                        <div className="flex items-center justify-end gap-3">
+                                            <Link href={`/service-requests/${sr.id}`}>
+                                                <a className="inline-flex items-center px-3 py-1.5 text-xs font-bold bg-primary/5 text-primary border border-primary/10 rounded-lg hover:bg-primary hover:text-white transition-all shadow-sm">
+                                                    管理 WBS
+                                                    <ChevronRight className="w-3.5 h-3.5 ml-1" />
+                                                </a>
+                                            </Link>
+                                            {hasRole("admin") && (
+                                                <button
+                                                    onClick={() => {
+                                                        if (confirm("確定要刪除此專案與 SR 嗎？此操作無法復原。")) {
+                                                            deleteSr.mutate({ id: sr.id });
+                                                        }
+                                                    }}
+                                                    className="p-1.5 text-muted-foreground hover:text-red-500 hover:bg-red-50 rounded-md transition-colors"
+                                                    title="刪除專案"
+                                                >
+                                                    <Trash2 className="w-4 h-4" />
+                                                </button>
+                                            )}
+                                        </div>
+                                    </td>
+                                </tr>
+                            ))}
+                            {(!srs || srs.length === 0) && (
+                                <tr>
+                                    <td colSpan={6} className="px-6 py-12 text-center text-muted-foreground italic">
+                                        <div className="flex flex-col items-center justify-center opacity-50">
+                                            <FileText className="w-10 h-10 mb-2" />
+                                            <p>尚無服務請求資料</p>
+                                        </div>
+                                    </td>
+                                </tr>
                             )}
-                            <div className="flex justify-between items-center text-sm">
-                                <span className="text-muted-foreground flex items-center">
-                                    <BarChart3 className="w-3.5 h-3.5 mr-1" />
-                                    預估毛利
-                                </span>
-                                <span className={`font-semibold ${sr.marginWarning ? 'text-destructive' : 'text-green-600 dark:text-green-400'}`}>
-                                    {sr.marginEstimate}%
-                                </span>
-                            </div>
-                        </div>
-
-                        <div className="pt-4 mt-2 flex justify-between items-center border-t border-border/60">
-                            <span className="text-xs text-muted-foreground flex items-center">
-                                建立於: {new Date(sr.createdAt).toLocaleDateString()}
-                            </span>
-                            <Link href={`/service-requests/${sr.id}`}>
-                                <a className="inline-flex items-center text-sm font-medium text-primary hover:text-primary/80 transition-colors">
-                                    管理 WBS
-                                    <ChevronRight className="w-4 h-4 ml-1" />
-                                </a>
-                            </Link>
-                        </div>
-                    </div>
-                ))}
-
-                {(!srs || srs.length === 0) && (
-                    <div className="col-span-full p-12 text-center bg-card border border-dashed rounded-xl">
-                        <FileText className="w-12 h-12 text-muted-foreground/50 mx-auto mb-3" />
-                        <h3 className="text-lg font-medium">尚無服務請求 (SR)</h3>
-                        <p className="text-muted-foreground mt-1">從商機介面轉換已成交的商機後顯示於此</p>
-                    </div>
-                )}
+                        </tbody>
+                    </table>
+                </div>
             </div>
             <Dialog open={isCreating} onOpenChange={setIsCreating}>
                 <DialogContent className="sm:max-w-lg">
@@ -182,21 +239,82 @@ export function ServiceRequestsPage() {
 
                             <FormField
                                 control={form.control}
-                                name="contractAmount"
+                                name="srType"
                                 render={({ field }: any) => (
                                     <FormItem>
-                                        <FormLabel>合約金額 (NT$) *</FormLabel>
-                                        <FormControl>
-                                            <Input
-                                                type="number"
-                                                {...field}
-                                                onChange={(e) => field.onChange(Number(e.target.value))}
-                                            />
-                                        </FormControl>
+                                        <FormLabel>類型 *</FormLabel>
+                                        <Select onValueChange={field.onChange} defaultValue={field.value}>
+                                            <FormControl>
+                                                <SelectTrigger>
+                                                    <SelectValue placeholder="請選擇類型" />
+                                                </SelectTrigger>
+                                            </FormControl>
+                                            <SelectContent>
+                                                <SelectItem value="project">專案 (Project)</SelectItem>
+                                                <SelectItem value="maintenance">維運 (Maintenance)</SelectItem>
+                                            </SelectContent>
+                                        </Select>
                                         <FormMessage />
                                     </FormItem>
                                 )}
                             />
+
+                            {form.watch("srType") === "project" ? (
+                                <FormField
+                                    control={form.control}
+                                    name="contractAmount"
+                                    render={({ field }: any) => (
+                                        <FormItem>
+                                            <FormLabel>合約金額 (NT$) *</FormLabel>
+                                            <FormControl>
+                                                <Input
+                                                    type="number"
+                                                    {...field}
+                                                    onChange={(e) => field.onChange(Number(e.target.value))}
+                                                />
+                                            </FormControl>
+                                            <FormMessage />
+                                        </FormItem>
+                                    )}
+                                />
+                            ) : (
+                                <div className="grid grid-cols-2 gap-4">
+                                    <FormField
+                                        control={form.control}
+                                        name="totalPoints"
+                                        render={({ field }: any) => (
+                                            <FormItem>
+                                                <FormLabel>總點數 *</FormLabel>
+                                                <FormControl>
+                                                    <Input
+                                                        type="number"
+                                                        {...field}
+                                                        onChange={(e) => field.onChange(Number(e.target.value))}
+                                                    />
+                                                </FormControl>
+                                                <FormMessage />
+                                            </FormItem>
+                                        )}
+                                    />
+                                    <FormField
+                                        control={form.control}
+                                        name="pointValue"
+                                        render={({ field }: any) => (
+                                            <FormItem>
+                                                <FormLabel>點數單價 (NT$) *</FormLabel>
+                                                <FormControl>
+                                                    <Input
+                                                        type="number"
+                                                        {...field}
+                                                        onChange={(e) => field.onChange(Number(e.target.value))}
+                                                    />
+                                                </FormControl>
+                                                <FormMessage />
+                                            </FormItem>
+                                        )}
+                                    />
+                                </div>
+                            )}
 
                             <FormField
                                 control={form.control}

@@ -104,7 +104,7 @@ export function ResourcesPage() {
 
             <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
                 {resources?.map((user: any) => {
-                    const userUt = utilizationData?.find((u: any) => u.id === user.id);
+                    const userUt = utilizationData?.users?.find((u: any) => u.id === user.id);
                     const utilization = userUt?.utilizationRate || 0;
                     const skills = localSkills[user.id] ?? [
                         { name: "React", level: "advanced" as SkillLevel },

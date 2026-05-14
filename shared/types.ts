@@ -81,6 +81,9 @@ export const srStatuses = [
 
 export type SrStatus = typeof srStatuses[number];
 
+export const srTypes = ["project", "maintenance"] as const;
+export type SrType = typeof srTypes[number];
+
 export const wbsVersionStatuses = [
     "draft",
     "submitted",
@@ -167,6 +170,7 @@ export interface WbsItemInput {
     completionPercentage?: number;
     colorCode?: string;
     level?: number;
+    description?: string;
 }
 
 export interface WbsVersionInput {

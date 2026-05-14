@@ -11,6 +11,7 @@ import { Toaster, toast } from "react-hot-toast";
 import { useCurrentUser } from "./lib/useCurrentUser";
 import { AuthProvider, useAuth } from "./lib/auth";
 import { encryptPayload, decryptPayload } from "../../shared/crypto";
+import { ErrorBoundary } from "./components/ErrorBoundary";
 
 const LoginPage = lazy(() => import("./pages/LoginPage").then((module) => ({ default: module.LoginPage })));
 const UserManagementPage = lazy(() => import("./pages/UserManagementPage").then((module) => ({ default: module.UserManagementPage })));
@@ -35,6 +36,7 @@ const ResourcesPage = lazy(() => import("./pages/ResourcesPage").then((module) =
 const OpportunityDetailPage = lazy(() => import("./pages/OpportunityDetailPage").then((module) => ({ default: module.OpportunityDetailPage })));
 const ProjectManagementPage = lazy(() => import("./pages/ProjectManagementPage").then((module) => ({ default: module.ProjectManagementPage })));
 const ProfitCenterFormulaPage = lazy(() => import("./pages/ProfitCenterFormulaPage"));
+const ProfitCenterReportPage = lazy(() => import("./pages/ProfitCenterReportPage").then((module) => ({ default: module.ProfitCenterReportPage })));
 
 type ActiveRouteDefinition = {
   path: string;
@@ -84,10 +86,10 @@ function ProjectManagementRoute() {
   }
 
   const canAccess = !!user && (
-    user.role === "manager" || user.role === "pm" || user.role === "tech" ||
-    user.roles.includes("manager") || user.roles.includes("pm") || user.roles.includes("tech")
+    user.role === "admin" || user.role === "manager" || user.role === "pm" || user.role === "tech" ||
+    user.roles.includes("admin") || user.roles.includes("manager") || user.roles.includes("pm") || user.roles.includes("tech")
   );
-  return canAccess ? <ProjectManagementPage /> : <RestrictedPage message="只有 Manager、PM 與 Tech 可以檢視專案管理。" />;
+  return canAccess ? <ProjectManagementPage /> : <RestrictedPage message="只有 Admin、Manager、PM 與 Tech 可以檢視專案管理。" />;
 }
 
 const activeRoutes: ActiveRouteDefinition[] = [
@@ -113,6 +115,7 @@ const activeRoutes: ActiveRouteDefinition[] = [
   { path: "/kpi", component: KpiDashboardPage, pageFile: "KpiDashboardPage.tsx", lifecycle: "保留 / 上線", notes: "KPI 儀表板。" },
   { path: "/reports", component: ReportBuilderPage, pageFile: "ReportBuilderPage.tsx", lifecycle: "保留 / 上線", notes: "自訂報表產生與匯出。" },
   { path: "/formula/profit-center", component: ProfitCenterFormulaPage, pageFile: "ProfitCenterFormulaPage.tsx", lifecycle: "保留 / 上線", notes: "利潤中心公式專用頁面。" },
+  { path: "/profit-center-report", component: ProfitCenterReportPage, pageFile: "ProfitCenterReportPage.tsx", lifecycle: "保留 / 上線", notes: "利潤中心業績結算儀表板" },
 ];
 
 // `client/src/App.tsx` is the source of truth for routed pages; README and navigation
@@ -214,12 +217,14 @@ function AppShell() {
         <LoginPage />
       ) : (
         <AppLayout>
-          <Switch>
-            {activeRoutes.map((route) => (
-              <Route key={route.path} path={route.path} component={route.component} />
-            ))}
-            <Route path="/:rest*" component={NotFound} />
-          </Switch>
+          <ErrorBoundary>
+            <Switch>
+              {activeRoutes.map((route) => (
+                <Route key={route.path} path={route.path} component={route.component} />
+              ))}
+              <Route path="/:rest*" component={NotFound} />
+            </Switch>
+          </ErrorBoundary>
         </AppLayout>
       )}
     </Suspense>

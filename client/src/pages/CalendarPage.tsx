@@ -12,6 +12,11 @@ export function CalendarPage() {
     const [editingEvent, setEditingEvent] = useState<any>(null);
     const [editForm, setEditForm] = useState({ startDate: "", endDate: "" });
 
+    // Day view state
+    const [selectedDay, setSelectedDay] = useState<Date | null>(null);
+    const [showDayModal, setShowDayModal] = useState(false);
+    const [quickScheduleTaskId, setQuickScheduleTaskId] = useState("");
+
     // Fetch WBS items assigned to current user
     const { data: assignments, isLoading } = trpc.projects.getMyProjectAssignments.useQuery();
 
@@ -44,6 +49,32 @@ export function CalendarPage() {
         setEditForm({
             startDate: event.startDate ? new Date(event.startDate).toISOString().slice(0, 10) : "",
             endDate: event.endDate ? new Date(event.endDate).toISOString().slice(0, 10) : ""
+        });
+        setShowDayModal(false);
+    };
+
+    const openDayModal = (day: Date) => {
+        setSelectedDay(day);
+        setShowDayModal(true);
+        setQuickScheduleTaskId("");
+    };
+
+    const handleQuickSchedule = (taskId: string) => {
+        const task = (assignments || []).find((a: any) => a.id === taskId);
+        if (!task || !selectedDay) return;
+
+        const remainingHours = Math.max(0, task.estimatedHours - (task.actualHours || 0));
+        // Calculate days needed based on 8 hours/day
+        const daysNeeded = Math.max(1, Math.ceil(remainingHours / 8));
+        
+        const startDate = selectedDay;
+        const endDate = addDays(selectedDay, daysNeeded - 1);
+
+        updateScheduleMutation.mutate({
+            srId: task.srId,
+            itemId: task.id,
+            startDate,
+            endDate
         });
     };
 
@@ -112,24 +143,32 @@ export function CalendarPage() {
 
                 daysArray.push(
                     <div 
-                        className={`min-h-[120px] p-2 border-r border-b border-border/30 transition-colors 
+                        className={`min-h-[120px] p-2 border-r border-b border-border/30 transition-colors cursor-pointer
                                    ${!isCurrentMonth ? "bg-muted/10 text-muted-foreground opacity-50" : "bg-card"} 
                                    hover:bg-muted/20`}
                         key={dayCursor.toString()}
+                        onClick={() => openDayModal(cloneDay)}
                     >
                         <div className="flex justify-between items-start mb-2">
                             <span className={`w-7 h-7 flex items-center justify-center rounded-full text-sm font-bold ${isToday ? "bg-primary text-primary-foreground shadow-md" : "text-foreground/80"}`}>
                                 {formattedDate}
                             </span>
                         </div>
-                        <div className="space-y-1.5 overflow-y-auto max-h-[85px] scrollbar-thin scrollbar-thumb-border">
+                        <div className="space-y-1.5 overflow-y-auto max-h-[100px] pr-1">
                             {dayAssignments.map((event: any, idx: number) => (
-                                <div key={idx} onClick={() => openEditModal(event)} className="bg-primary/10 border border-primary/20 rounded md flex flex-col p-1.5 cursor-pointer hover:bg-primary/20 transition-colors group">
-                                    <div className="text-[10px] text-primary/70 font-semibold mb-0.5 truncate">{event.srTitle}</div>
-                                    <div className="text-xs font-medium truncate text-foreground/90">{event.title}</div>
-                                    <div className="text-[10px] text-muted-foreground mt-0.5 flex items-center">
-                                        <Clock className="w-3 h-3 mr-1" />
-                                        {event.estimatedHours}h (已報 {event.actualHours}h)
+                                <div key={idx} onClick={(e) => { e.stopPropagation(); openEditModal(event); }} className="bg-primary/5 border border-primary/20 rounded-md flex flex-col p-2 cursor-pointer hover:bg-primary/10 transition-all group shadow-sm">
+                                    <div className="text-[10px] text-primary/70 font-bold mb-0.5 truncate uppercase tracking-wider">{event.srTitle}</div>
+                                    <div className="text-xs font-semibold truncate text-foreground/90 leading-tight">{event.title}</div>
+                                    {event.isPmView && (
+                                        <div className="text-[9px] bg-primary/10 text-primary px-1.5 py-0.5 rounded-sm mt-1 inline-block truncate w-fit">
+                                            👤 {event.assigneeName}
+                                        </div>
+                                    )}
+                                    <div className="text-[10px] text-muted-foreground mt-1 flex items-center gap-1.5">
+                                        <Clock className="w-3 h-3" />
+                                        <span>{event.estimatedHours}h</span>
+                                        <span className="opacity-40">|</span>
+                                        <span>已報 {event.actualHours}h</span>
                                     </div>
                                 </div>
                             ))}
@@ -178,6 +217,11 @@ export function CalendarPage() {
                                     <div key={event.id} onClick={() => openEditModal(event)} className="bg-background border border-border p-2.5 rounded shadow-sm hover:border-primary cursor-pointer transition-colors group">
                                         <div className="text-[10px] text-primary/80 font-semibold mb-1 truncate">{event.srTitle}</div>
                                         <div className="text-sm font-medium text-foreground mb-1 group-hover:text-primary">{event.title}</div>
+                                        {event.isPmView && (
+                                            <div className="text-[10px] bg-primary/10 text-primary px-1.5 py-0.5 rounded-sm mb-1.5 inline-block">
+                                                {event.assigneeName}
+                                            </div>
+                                        )}
                                         <div className="text-xs text-muted-foreground flex items-center justify-between">
                                             <span className="flex items-center"><Clock className="w-3 h-3 mr-1" /> {event.estimatedHours}h</span>
                                             <span className="text-[10px] bg-muted px-1.5 rounded">點擊排程</span>
@@ -241,6 +285,141 @@ export function CalendarPage() {
                                     {updateScheduleMutation.isPending ? "儲存中..." : "儲存設定"}
                                 </button>
                             </div>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {showDayModal && selectedDay && (
+                <div className="fixed inset-0 bg-background/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+                    <div className="bg-card w-full max-w-lg rounded-xl shadow-2xl border border-border overflow-hidden">
+                        <div className="p-4 border-b border-border flex justify-between items-center bg-primary/5">
+                            <h3 className="font-bold flex items-center gap-2">
+                                <CalendarIcon className="w-5 h-5 text-primary" />
+                                {format(selectedDay, "yyyy/MM/dd")} 排程詳情
+                            </h3>
+                            <button onClick={() => setShowDayModal(false)} className="p-1 hover:bg-muted rounded text-muted-foreground">
+                                <X className="w-5 h-5" />
+                            </button>
+                        </div>
+                        
+                        <div className="p-6 space-y-6">
+                            {/* Current Day Status */}
+                            <div>
+                                <h4 className="text-sm font-bold mb-3 flex justify-between items-center">
+                                    當日已安排任務
+                                    <span className="text-[10px] bg-muted px-2 py-0.5 rounded-full font-normal text-muted-foreground">一天以 8 小時為限</span>
+                                </h4>
+                                <div className="space-y-2">
+                                    {(() => {
+                                        const dayTasks = (assignments || []).filter((a: any) => {
+                                            if (!a.startDate || !a.endDate) return false;
+                                            const d = new Date(selectedDay).setHours(0,0,0,0);
+                                            return d >= new Date(a.startDate).setHours(0,0,0,0) && d <= new Date(a.endDate).setHours(0,0,0,0);
+                                        });
+                                        
+                                        if (dayTasks.length === 0) return <div className="text-center py-6 border border-dashed rounded-lg text-xs text-muted-foreground bg-muted/20">此日尚無安排任何任務</div>;
+                                        
+                                        let totalHours = 0;
+                                        return (
+                                            <>
+                                                {dayTasks.map((t, i) => {
+                                                    totalHours += 4; // Mocking 4h per task slot as requested (AM/PM logic)
+                                                    return (
+                                                        <div key={i} className="flex items-center gap-3 p-3 bg-background border border-border rounded-lg group hover:border-primary/50 transition-colors">
+                                                            <div className={`w-2 h-10 rounded-full ${i === 0 ? "bg-amber-400" : "bg-blue-400"}`} title={i === 0 ? "上午時段 (4h)" : "下午時段 (4h)"} />
+                                                            <div className="flex-1 min-w-0">
+                                                                <div className="text-[10px] text-muted-foreground truncate">{t.srTitle}</div>
+                                                                <div className="text-sm font-bold truncate">{t.title}</div>
+                                                                <div className="flex items-center gap-2 mt-1">
+                                                                    <span className="text-[10px] text-primary bg-primary/5 px-1.5 rounded">{i === 0 ? "早上 (AM) 4h" : "下午 (PM) 4h"}</span>
+                                                                    <span className="text-[10px] text-muted-foreground">總預估: {t.estimatedHours}h</span>
+                                                                </div>
+                                                            </div>
+                                                            <button onClick={() => openEditModal(t)} className="p-2 opacity-0 group-hover:opacity-100 text-muted-foreground hover:text-primary transition-all">
+                                                                <Clock className="w-4 h-4" />
+                                                            </button>
+                                                        </div>
+                                                    );
+                                                })}
+                                                <div className="pt-2 flex justify-end">
+                                                    <div className="text-xs font-semibold text-muted-foreground">
+                                                        當日佔用: <span className={totalHours > 8 ? "text-red-500" : "text-primary"}>{totalHours}h / 8h</span>
+                                                    </div>
+                                                </div>
+                                            </>
+                                        );
+                                    })()}
+                                </div>
+                            </div>
+
+                            {/* Quick Schedule Section */}
+                            <div className="pt-4 border-t border-border bg-muted/5 p-4 -mx-6 mb-[-1.5rem]">
+                                <h4 className="text-sm font-bold mb-3 px-2">快速加入排程</h4>
+                                <div className="space-y-4 px-2">
+                                    <div className="space-y-2">
+                                        <label className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest">選擇待排程任務</label>
+                                        <select 
+                                            value={quickScheduleTaskId} 
+                                            onChange={(e) => setQuickScheduleTaskId(e.target.value)}
+                                            className="w-full text-sm rounded-lg border border-border bg-background px-4 py-2.5 outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all shadow-sm"
+                                        >
+                                            <option value="">-- 請選擇 --</option>
+                                            {unscheduledAssignments.map(a => (
+                                                <option key={a.id} value={a.id}>
+                                                    [{a.srTitle.slice(0, 8)}...] {a.title} (餘 {a.estimatedHours - (a.actualHours || 0)}h)
+                                                </option>
+                                            ))}
+                                        </select>
+                                    </div>
+
+                                    {quickScheduleTaskId && (
+                                        <div className="bg-primary/5 rounded-lg p-3 border border-primary/10 animate-in fade-in slide-in-from-top-2">
+                                            <div className="flex justify-between items-center mb-2">
+                                                <span className="text-xs font-medium text-muted-foreground">預計工期預覽:</span>
+                                                <span className="text-xs font-bold text-primary bg-primary/10 px-2 py-0.5 rounded-full">
+                                                    {(() => {
+                                                        const t = (assignments || []).find(a => a.id === quickScheduleTaskId);
+                                                        if (!t) return "";
+                                                        const rem = Math.max(0, t.estimatedHours - (t.actualHours || 0));
+                                                        return `共 ${Math.ceil(rem / 8)} 天 (${rem}h)`;
+                                                    })()}
+                                                </span>
+                                            </div>
+                                            <div className="flex items-center gap-2 text-xs font-bold text-foreground/70">
+                                                <div className="flex-1 bg-background border border-border p-2 rounded text-center">
+                                                    {format(selectedDay, "MM/dd")}
+                                                </div>
+                                                <ChevronRight className="w-4 h-4 text-muted-foreground" />
+                                                <div className="flex-1 bg-background border border-border p-2 rounded text-center">
+                                                    {(() => {
+                                                        const t = (assignments || []).find(a => a.id === quickScheduleTaskId);
+                                                        if (!t) return "";
+                                                        const rem = Math.max(0, t.estimatedHours - (t.actualHours || 0));
+                                                        const days = Math.max(1, Math.ceil(rem / 8));
+                                                        return format(addDays(selectedDay, days - 1), "MM/dd");
+                                                    })()}
+                                                </div>
+                                            </div>
+                                        </div>
+                                    )}
+
+                                    <button 
+                                        disabled={!quickScheduleTaskId || updateScheduleMutation.isPending}
+                                        onClick={() => handleQuickSchedule(quickScheduleTaskId)}
+                                        className="w-full flex justify-center items-center gap-2 px-4 py-3 bg-primary text-primary-foreground rounded-xl text-sm font-bold hover:bg-primary/90 disabled:opacity-50 transition-all shadow-lg shadow-primary/20 active:scale-95"
+                                    >
+                                        <CalendarIcon className="w-4 h-4" />
+                                        {updateScheduleMutation.isPending ? "儲存中..." : "儲存排程設定"}
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div className="p-4 bg-muted/20 border-t border-border flex justify-end">
+                            <button onClick={() => setShowDayModal(false)} className="px-4 py-2 text-sm font-medium border border-border rounded-lg hover:bg-background transition-colors">
+                                關閉
+                            </button>
                         </div>
                     </div>
                 </div>

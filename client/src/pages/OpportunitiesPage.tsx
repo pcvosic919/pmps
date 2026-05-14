@@ -1,8 +1,9 @@
 import { useState, useEffect, useRef } from "react";
 import { trpc } from "../lib/trpc";
 import { Link } from "wouter";
-import { Plus, Briefcase, Calendar, ChevronRight, Building2, Search, Loader2 } from "lucide-react";
+import { Plus, Briefcase, Calendar, ChevronRight, Building2, Search, Loader2, Trash2, User2 } from "lucide-react";
 import { useDebounce } from "../lib/useDebounce";
+import { useCurrentUser } from "../lib/useCurrentUser";
 import { z } from "zod";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
@@ -55,6 +56,8 @@ export function OpportunitiesPage() {
     const { data: settings } = trpc.system.getSettings.useQuery();
     const availableProducts = settings?.availableProducts || [];
     const oppFields = customFieldDefs?.filter((f: any) => f.entityType === "opportunity") || [];
+    const { user } = useCurrentUser();
+    const isAdmin = !!user && (user.role === "admin" || user.roles.includes("admin"));
 
     const observerRef = useRef<HTMLDivElement>(null);
 
@@ -92,6 +95,11 @@ export function OpportunitiesPage() {
             form.reset();
             setCustomFieldsValues({}); // 清空
         }
+    });
+
+    const deleteOpp = trpc.opportunities.delete.useMutation({
+        onSuccess: () => refetch(),
+        onError: (err) => alert(err.message || "刪除失敗")
     });
 
     const handleCreate = (values: z.infer<typeof oppSchema>) => {
@@ -172,57 +180,90 @@ export function OpportunitiesPage() {
 
             </div>
 
-            <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-                {opps?.map((opp) => (
-                    <div key={opp.id} className="group bg-card border border-border rounded-xl p-5 hover:border-primary/50 hover:shadow-md transition-all">
-                        <div className="flex justify-between items-start mb-4">
-                            <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold border ${getStatusColor(opp.status)}`}>
-                                {getStatusLabel(opp.status)}
-                            </span>
-                            <span className="text-xs font-medium text-muted-foreground bg-muted px-2 py-1 rounded-md border">
-                                ID: #{opp.id}
-                            </span>
-                        </div>
-
-                        <h3 className="text-lg font-bold text-foreground mb-1 group-hover:text-primary transition-colors line-clamp-1">{opp.title}</h3>
-
-                        <div className="flex items-center text-sm text-muted-foreground mb-4">
-                            <Building2 className="w-4 h-4 mr-1.5 opacity-70" />
-                            <span className="truncate">{opp.customerName}</span>
-                        </div>
-
-                        <div className="space-y-3 py-3 border-t border-border/60">
-                            <div className="flex justify-between items-center text-sm">
-                                <span className="text-muted-foreground">預估金額</span>
-                                <span className="font-bold text-foreground">NT$ {opp.estimatedValue.toLocaleString()}</span>
-                            </div>
-                            <div className="flex justify-between items-center text-sm">
-                                <span className="text-muted-foreground flex items-center">
-                                    <Calendar className="w-3.5 h-3.5 mr-1" />
-                                    建立日期
-                                </span>
-                                <span className="font-medium">{new Date(opp.createdAt).toLocaleDateString()}</span>
-                            </div>
-                        </div>
-
-                        <div className="pt-4 mt-2 flex justify-end">
-                            <Link href={`/opportunities/${opp.id}`}>
-                                <a className="inline-flex items-center text-sm font-medium text-primary hover:text-primary/80 transition-colors">
-                                    查看詳情
-                                    <ChevronRight className="w-4 h-4 ml-1" />
-                                </a>
-                            </Link>
-                        </div>
-                    </div>
-                ))}
-
-                {(!opps || opps.length === 0) && (
-                    <div className="col-span-full p-12 text-center bg-card border border-dashed rounded-xl">
-                        <Briefcase className="w-12 h-12 text-muted-foreground/50 mx-auto mb-3" />
-                        <h3 className="text-lg font-medium">尚無商機</h3>
-                        <p className="text-muted-foreground mt-1">點擊上方按鈕建立您的第一筆商機</p>
-                    </div>
-                )}
+            <div className="bg-card border border-border rounded-xl shadow-sm overflow-hidden">
+                <div className="overflow-x-auto">
+                    <table className="w-full text-left border-collapse">
+                        <thead>
+                            <tr className="bg-muted/50 border-b border-border text-[11px] font-bold text-muted-foreground uppercase tracking-widest">
+                                <th className="px-6 py-4">狀態</th>
+                                <th className="px-6 py-4">ID / 商機名稱</th>
+                                <th className="px-6 py-4">客戶名稱</th>
+                                <th className="px-6 py-4">預估金額 (NT$)</th>
+                                <th className="px-6 py-4">負責人</th>
+                                <th className="px-6 py-4">建立日期</th>
+                                <th className="px-6 py-4 text-right">操作</th>
+                            </tr>
+                        </thead>
+                        <tbody className="divide-y divide-border/50">
+                            {opps?.map((opp) => (
+                                <tr key={opp.id} className="group hover:bg-muted/30 transition-colors">
+                                    <td className="px-6 py-4">
+                                        <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold border ${getStatusColor(opp.status)}`}>
+                                            {getStatusLabel(opp.status)}
+                                        </span>
+                                    </td>
+                                    <td className="px-6 py-4">
+                                        <div className="flex flex-col">
+                                            <span className="text-[10px] font-mono text-muted-foreground mb-0.5">#{opp.id}</span>
+                                            <span className="text-sm font-bold text-foreground group-hover:text-primary transition-colors line-clamp-1">{opp.title}</span>
+                                        </div>
+                                    </td>
+                                    <td className="px-6 py-4">
+                                        <div className="flex items-center text-sm text-foreground/80">
+                                            <Building2 className="w-3.5 h-3.5 mr-2 opacity-50" />
+                                            {opp.customerName}
+                                        </div>
+                                    </td>
+                                    <td className="px-6 py-4">
+                                        <span className="text-sm font-mono font-bold text-foreground">
+                                            {opp.estimatedValue.toLocaleString()}
+                                        </span>
+                                    </td>
+                                    <td className="px-6 py-4 text-sm font-medium text-primary/80">
+                                        {(opp as any).ownerName || "—"}
+                                    </td>
+                                    <td className="px-6 py-4 text-xs text-muted-foreground">
+                                        {new Date(opp.createdAt).toLocaleDateString()}
+                                    </td>
+                                    <td className="px-6 py-4 text-right">
+                                        <div className="flex items-center justify-end gap-3">
+                                            {isAdmin && (
+                                                <button
+                                                    onClick={() => {
+                                                        if (confirm(`確定要刪除商機「${opp.title}」嗎？此操作無法復原。`)) {
+                                                            deleteOpp.mutate({ id: opp.id });
+                                                        }
+                                                    }}
+                                                    disabled={deleteOpp.isPending}
+                                                    className="p-1.5 text-muted-foreground hover:text-red-500 hover:bg-red-50 rounded-md transition-colors"
+                                                    title="刪除商機"
+                                                >
+                                                    <Trash2 className="w-4 h-4" />
+                                                </button>
+                                            )}
+                                            <Link href={`/opportunities/${opp.id}`}>
+                                                <a className="inline-flex items-center px-3 py-1.5 text-xs font-bold bg-primary/5 text-primary border border-primary/10 rounded-lg hover:bg-primary hover:text-white transition-all">
+                                                    詳細資訊
+                                                    <ChevronRight className="w-3.5 h-3.5 ml-1" />
+                                                </a>
+                                            </Link>
+                                        </div>
+                                    </td>
+                                </tr>
+                            ))}
+                            {(!opps || opps.length === 0) && (
+                                <tr>
+                                    <td colSpan={7} className="px-6 py-12 text-center text-muted-foreground italic">
+                                        <div className="flex flex-col items-center justify-center opacity-50">
+                                            <Briefcase className="w-10 h-10 mb-2" />
+                                            <p>尚無商機資料</p>
+                                        </div>
+                                    </td>
+                                </tr>
+                            )}
+                        </tbody>
+                    </table>
+                </div>
             </div>
 
             <div ref={observerRef} className="flex justify-center mt-6">

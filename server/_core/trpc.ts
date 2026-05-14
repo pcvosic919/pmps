@@ -79,7 +79,9 @@ export type Context = Awaited<ReturnType<typeof createContext>>;
 
 const t = initTRPC.context<Context>().create({
     errorFormatter({ shape, error }) {
-        console.error("🚨 tRPC Error Detailed:", error);
+        if (error.code !== "UNAUTHORIZED") {
+            console.error("🚨 tRPC Error Detailed:", error);
+        }
         return shape;
     }
 });

@@ -154,7 +154,7 @@ export const projectsRouter = router({
 
         const items = await ServiceRequestModel.find(
             query,
-            { _id: 1, title: 1, contractAmount: 1, pmId: 1, status: 1, marginEstimate: 1, marginWarning: 1, createdAt: 1, opportunityId: 1, members: 1, wbsVersions: 1, changeRequests: 1 }
+            { _id: 1, title: 1, contractAmount: 1, srType: 1, pmId: 1, status: 1, marginEstimate: 1, marginWarning: 1, createdAt: 1, opportunityId: 1, members: 1, wbsVersions: 1, changeRequests: 1 }
         )
             .sort({ createdAt: -1 })
             .limit(input?.limit ?? 200)
@@ -184,19 +184,25 @@ export const projectsRouter = router({
     createSR: roleProcedure(["admin", "business", "pm", "presales"])
         .input(z.object({
             title: z.string(),
+            customerName: z.string().optional(),
             contractAmount: z.number(),
+            srType: z.enum(["project", "maintenance"]).default("project"),
+            totalPoints: z.number().optional(),
+            pointValue: z.number().optional(),
             pmId: z.string(),
             joinPmAsMember: z.boolean().default(true),
             opportunityId: z.string().optional()
         }))
         .mutation(async ({ input, ctx }) => {
+            let oppCustomerName = "";
             if (input.opportunityId) {
                 const opportunity = assertFound(
                     await OpportunityModel.findById(input.opportunityId)
-                        .select("ownerId members presalesAssignments status")
+                        .select("customerName ownerId members presalesAssignments status")
                         .lean(),
                     "找不到該商機"
                 );
+                oppCustomerName = opportunity.customerName || "";
                 assertAuthorized(canAccessServiceRequest(ctx.user, { members: buildSrMembers(ctx.user.id, input.pmId, input.joinPmAsMember) }, opportunity), "您沒有權限從此商機建立 SR");
                 if (opportunity.status === "converted") {
                     throw new TRPCError({ code: "BAD_REQUEST", message: "此商機已轉案，請勿重複建立 SR" });
@@ -205,7 +211,11 @@ export const projectsRouter = router({
 
             const sr = await ServiceRequestModel.create({
                 title: input.title,
+                customerName: input.customerName || oppCustomerName,
                 contractAmount: input.contractAmount,
+                srType: input.srType,
+                totalPoints: input.totalPoints,
+                pointValue: input.pointValue,
                 pmId: toObjectId(input.pmId),
                 opportunityId: input.opportunityId ? new mongoose.Types.ObjectId(input.opportunityId) : undefined,
                 status: "new",
@@ -271,7 +281,7 @@ export const projectsRouter = router({
             return { success: true };
         }),
 
-    getWbsPendingReview: roleProcedure(["manager", "pm"])
+    getWbsPendingReview: roleProcedure(["admin", "manager", "pm"])
         .query(async ({ ctx }) => {
             const matchClause: any = { "wbsVersions.status": "submitted" };
             if (!hasAnyRole(ctx.user as any, ["admin", "manager"])) {
@@ -303,7 +313,7 @@ export const projectsRouter = router({
             }));
         }),
 
-    reviewWbsVersion: roleProcedure(["manager", "pm"])
+    reviewWbsVersion: roleProcedure(["admin", "manager", "pm"])
         .input(z.object({
             id: z.string(), // wbsVersion _id
             action: z.enum(approvalActions),
@@ -326,23 +336,29 @@ export const projectsRouter = router({
                 throw new TRPCError({ code: "BAD_REQUEST", message: "此版本不在待審核狀態" });
             }
 
-            await ServiceRequestModel.updateOne(
-                { "wbsVersions._id": input.id },
-                {
-                    $set: {
-                        "wbsVersions.$.status": input.action,
-                        "wbsVersions.$.reviewedBy": ctx.user.id,
-                        "wbsVersions.$.rejectionReason": input.rejectionReason ?? null
-                    },
-                    $push: {
-                        "wbsVersions.$.auditLogs": {
-                            action: input.action,
-                            userId: toObjectId(ctx.user.id),
-                            timestamp: new Date(),
-                            reason: input.rejectionReason ?? null
-                        }
+            const updatePayload: any = {
+                $set: {
+                    "wbsVersions.$.status": input.action,
+                    "wbsVersions.$.reviewedBy": ctx.user.id,
+                    "wbsVersions.$.rejectionReason": input.rejectionReason ?? null
+                },
+                $push: {
+                    "wbsVersions.$.auditLogs": {
+                        action: input.action,
+                        userId: toObjectId(ctx.user.id),
+                        timestamp: new Date(),
+                        reason: input.rejectionReason ?? null
                     }
                 }
+            };
+
+            if (input.action === "approved" && sr.status === "new") {
+                updatePayload.$set.status = "in_progress";
+            }
+
+            await ServiceRequestModel.updateOne(
+                { "wbsVersions._id": input.id },
+                updatePayload
             );
 
             const recipients = [sr.pmId?.toString(), version.submittedBy?.toString()]
@@ -480,7 +496,7 @@ export const projectsRouter = router({
             };
         }),
 
-    submitWbsVersion: roleProcedure(["tech", "presales", "pm"])
+    submitWbsVersion: roleProcedure(["admin", "tech", "presales", "pm"])
         .input(z.object({
             srId: z.string(),
             versionNumber: z.number(),
@@ -492,7 +508,8 @@ export const projectsRouter = router({
                 endDate: z.coerce.date().optional(),
                 completionPercentage: z.number().optional(),
                 colorCode: z.string().optional(),
-                level: z.number().optional()
+                level: z.number().optional(),
+                description: z.string().optional()
             }))
         }))
         .mutation(async ({ ctx, input }) => {
@@ -519,7 +536,8 @@ export const projectsRouter = router({
                     endDate: item.endDate,
                     completionPercentage: item.completionPercentage,
                     colorCode: item.colorCode,
-                    level: item.level || 0
+                    level: item.level || 0,
+                    description: item.description
                 })),
                 auditLogs: [{
                     action: "submitted",
@@ -703,10 +721,15 @@ export const projectsRouter = router({
 
     getMyProjectAssignments: protectedProcedure
         .query(async ({ ctx }) => {
+            const userId = new mongoose.Types.ObjectId(ctx.user.id);
             const srs = await ServiceRequestModel.find({
-                "wbsVersions.items.assigneeId": new mongoose.Types.ObjectId(ctx.user.id)
+                $or: [
+                    { "wbsVersions.items.assigneeId": userId },
+                    { pmId: userId }
+                ]
             })
-                .select("title wbsVersions")
+                .select("title pmId wbsVersions")
+                .populate("wbsVersions.items.assigneeId", "name")
                 .lean();
 
             return srs.flatMap((sr: any) => {
@@ -715,8 +738,10 @@ export const projectsRouter = router({
                     return [];
                 }
 
+                const isPm = sr.pmId?.toString() === ctx.user.id;
+
                 return (effectiveVersion.items || [])
-                    .filter((item: any) => item.assigneeId?.toString() === ctx.user.id)
+                    .filter((item: any) => isPm || item.assigneeId?._id?.toString() === ctx.user.id || item.assigneeId?.toString() === ctx.user.id)
                     .map((item: any) => ({
                         id: item._id.toString(),
                         srId: sr._id.toString(),
@@ -725,7 +750,10 @@ export const projectsRouter = router({
                         actualHours: item.actualHours || 0,
                         startDate: item.startDate,
                         endDate: item.endDate,
-                        srTitle: sr.title
+                        srTitle: sr.title,
+                        assigneeId: item.assigneeId?._id?.toString() || item.assigneeId?.toString(),
+                        assigneeName: item.assigneeId?.name || "未指派",
+                        isPmView: isPm && (item.assigneeId?._id?.toString() || item.assigneeId?.toString()) !== ctx.user.id
                     }));
             });
         }),
@@ -747,7 +775,7 @@ export const projectsRouter = router({
             const item = effectiveVersion.items.find((i: any) => i._id.toString() === input.itemId);
             if (!item) throw new TRPCError({ code: "NOT_FOUND", message: "找不到任務項目" });
             
-            if (item.assigneeId?.toString() !== ctx.user.id && !hasAnyRole(ctx.user, ["manager", "pm"])) {
+            if (item.assigneeId?.toString() !== ctx.user.id && !hasAnyRole(ctx.user, ["admin", "manager", "pm"])) {
                 throw new TRPCError({ code: "FORBIDDEN", message: "無權限修改此任務" });
             }
             
@@ -793,7 +821,7 @@ export const projectsRouter = router({
             });
         }),
 
-    logProjectTime: roleProcedure(["tech", "presales"])
+    logProjectTime: roleProcedure(["admin", "tech", "presales", "pm"])
         .input(z.object({
             srId: z.string(), // Added for query aggregation efficiency
             wbsItemId: z.string(),
@@ -826,7 +854,7 @@ export const projectsRouter = router({
             if (!effectiveVersion || !wbsItem) {
                 throw new TRPCError({ code: "BAD_REQUEST", message: "找不到可填報的 WBS 項目" });
             }
-            if (wbsItem.assigneeId?.toString() !== ctx.user.id) {
+            if (wbsItem.assigneeId?.toString() !== ctx.user.id && !hasAnyRole(ctx.user, ["admin", "manager"])) {
                 throw new TRPCError({ code: "FORBIDDEN", message: "您只能填寫指派給自己的 WBS 項目" });
             }
 
@@ -879,6 +907,16 @@ export const projectsRouter = router({
             }
 
             await TimesheetModel.deleteOne({ _id: input.id });
+            return { success: true };
+        }),
+
+    delete: roleProcedure(["admin"])
+        .input(z.object({ id: z.string() }))
+        .mutation(async ({ input }) => {
+            const sr = await ServiceRequestModel.findById(input.id);
+            assertFound(sr, "找不到該專案");
+            
+            await ServiceRequestModel.findByIdAndDelete(input.id);
             return { success: true };
         })
 });

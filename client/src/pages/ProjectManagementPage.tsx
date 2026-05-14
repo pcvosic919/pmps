@@ -3,7 +3,7 @@ import { trpc } from "../lib/trpc";
 import { Link } from "wouter";
 import {
     FolderKanban, ChevronRight, AlertTriangle, BarChart3,
-    CheckCircle2, Clock, XCircle, RefreshCw, Search
+    CheckCircle2, Clock, XCircle, RefreshCw, Search, Plus
 } from "lucide-react";
 import { useDebounce } from "../lib/useDebounce";
 import { useCurrentUser } from "../lib/useCurrentUser";
@@ -19,7 +19,10 @@ type SRStatus = typeof SR_STATUSES[number]["value"];
 
 export function ProjectManagementPage() {
     const { user, hasRole } = useCurrentUser();
-    const isManager = !!user && (user.role === "manager" || user.roles.includes("manager"));
+    const isManager = !!user && (
+        user.role === "admin" || user.role === "manager" ||
+        user.roles.includes("admin") || user.roles.includes("manager")
+    );
     const [search, setSearch] = useState("");
     const [filterStatus, setFilterStatus] = useState<string>("all");
     const [changingStatus, setChangingStatus] = useState<string | null>(null);
@@ -35,6 +38,10 @@ export function ProjectManagementPage() {
     const { data: allSrs } = trpc.projects.srList.useQuery({ limit: 200 });
     const { data: pendingWbs } = trpc.projects.getWbsPendingReview.useQuery(undefined, { enabled: isManager });
     const updateStatus = trpc.projects.updateSRStatus.useMutation({ onSuccess: () => refetch() });
+    const deleteSr = trpc.projects.delete.useMutation({ 
+        onSuccess: () => refetch(),
+        onError: (err) => alert(err.message || "刪除失敗")
+    });
 
     const getStatusInfo = (status: string) =>
         SR_STATUSES.find(s => s.value === status) ?? { label: status, color: "bg-gray-100 text-gray-800 border-gray-200" };
@@ -65,8 +72,16 @@ export function ProjectManagementPage() {
                     <h2 className="text-3xl font-bold tracking-tight bg-clip-text text-transparent bg-gradient-to-r from-primary to-primary/60">
                         專案管理
                     </h2>
-                    <p className="text-muted-foreground mt-1">集中查閱所有專案，並由 Manager / PM 持續追蹤進度與審核狀態</p>
+                    <p className="text-muted-foreground mt-1">集中查閱所有專案，並由 Admin / Manager / PM 持續追蹤進度與審核狀態</p>
                 </div>
+                {(hasRole("admin") || isManager) && (
+                    <Link href="/service-requests">
+                        <a className="bg-primary text-primary-foreground hover:bg-primary/90 px-5 py-2.5 rounded-lg inline-flex items-center text-sm font-medium transition-all shadow-md hover:shadow-lg">
+                            <Plus className="w-4 h-4 mr-2" />
+                            新增 SR
+                        </a>
+                    </Link>
+                )}
             </div>
 
             <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
@@ -187,6 +202,18 @@ export function ProjectManagementPage() {
                                             管理 WBS <ChevronRight className="w-3.5 h-3.5" />
                                         </a>
                                     </Link>
+                                    {hasRole("admin") && (
+                                        <button
+                                            onClick={() => {
+                                                if (confirm("確定要刪除此專案與 SR 嗎？此操作無法復原。")) {
+                                                    deleteSr.mutate({ id: sr.id });
+                                                }
+                                            }}
+                                            className="px-3 py-1.5 text-xs bg-red-50 text-red-600 border border-red-200 rounded-lg hover:bg-red-100 transition-colors whitespace-nowrap"
+                                        >
+                                            刪除專案
+                                        </button>
+                                    )}
                                 </div>
                             </div>
                         </div>

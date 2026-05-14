@@ -29,6 +29,9 @@ const settingsPayloadSchema = z.object({
     pcSlaTarget: z.number().min(0).max(100).default(95),
     pcRenewalTarget: z.number().min(0).max(100).default(85),
     pcUtilizationTarget: z.number().min(0).max(100).default(80),
+    pcPresalesHourlyRate: z.number().min(0).default(2000),
+    pcMaintenancePointValue: z.number().min(0).default(500),
+    pcKpiTarget: z.number().min(0).default(5000000),
     sharePointSiteUrl: z.string().trim().default("")
 });
 
@@ -55,6 +58,9 @@ const defaultSettings = {
     pcSlaTarget: 95,
     pcRenewalTarget: 85,
     pcUtilizationTarget: 80,
+    pcPresalesHourlyRate: 2000,
+    pcMaintenancePointValue: 500,
+    pcKpiTarget: 5000000,
     sharePointSiteUrl: ""
 };
 
@@ -88,6 +94,9 @@ const settingDefinitions: Record<SettingsKey, SettingDefinition> = {
     pcSlaTarget: { category: "general", valueType: "number" },
     pcRenewalTarget: { category: "general", valueType: "number" },
     pcUtilizationTarget: { category: "general", valueType: "number" },
+    pcPresalesHourlyRate: { category: "general", valueType: "number" },
+    pcMaintenancePointValue: { category: "general", valueType: "number" },
+    pcKpiTarget: { category: "general", valueType: "number" },
     sharePointSiteUrl: { category: "integrations", valueType: "string" }
 };
 

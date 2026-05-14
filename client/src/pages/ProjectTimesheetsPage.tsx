@@ -26,6 +26,7 @@ export function ProjectTimesheetsPage() {
     const logTime = trpc.projects.logProjectTime.useMutation({
         onSuccess: () => {
             utils.projects.getMyProjectTimesheets.invalidate();
+            utils.projects.getMyProjectAssignments.invalidate();
             setSelectedProjectId("");
             setSelectedWbsId("");
             setHours("");
@@ -36,6 +37,7 @@ export function ProjectTimesheetsPage() {
     const deleteTime = trpc.projects.deleteProjectTimesheet.useMutation({
         onSuccess: () => {
             utils.projects.getMyProjectTimesheets.invalidate();
+            utils.projects.getMyProjectAssignments.invalidate();
         }
     });
 

@@ -21,6 +21,7 @@ export function KpiDashboardPage() {
     const { data: trendData, isLoading: trendLoading } = trpc.analytics.getWinRateTrend.useQuery(filterInput);
     const { data: costRevData, isLoading: costRevLoading } = trpc.analytics.getCostVsRevenuePerPerson.useQuery(filterInput);
     const { data: projectStatusData, isLoading: projectStatusLoading } = trpc.analytics.getProjectStatusData.useQuery(filterInput);
+    const { data: deptKpiData, isLoading: deptKpiLoading } = trpc.analytics.getDeptKpi.useQuery();
     const [visibleCharts, setVisibleCharts] = useState({
         opportunityMix: true,
         projectStatus: true,
@@ -35,7 +36,7 @@ export function KpiDashboardPage() {
         { name: '流標 / 失敗', value: kpiData?.lostOpps || 0, color: '#ef4444' },
     ];
 
-    const utilizationData = utData?.slice(0, 5).map(u => ({
+    const utilizationData = utData?.users?.slice(0, 5).map((u: any) => ({
         name: u.name,
         稼動率: u.utilizationRate,
         target: 80
@@ -48,7 +49,7 @@ export function KpiDashboardPage() {
             ["total_revenue", String(kpiData?.totalRevenue || 0)],
             ["total_margin", String(kpiData?.totalMargin || 0)],
             ["margin_percent", String(kpiData?.marginPercent || 0)],
-            ["unlocked_utilization_count", String(utData?.length || 0)],
+            ["unlocked_utilization_count", String(utData?.users?.length || 0)],
         ];
 
         trendData?.forEach((item) => {
@@ -68,7 +69,7 @@ export function KpiDashboardPage() {
         URL.revokeObjectURL(url);
     };
 
-    if (kpiLoading || utLoading || trendLoading || costRevLoading || projectStatusLoading) {
+    if (kpiLoading || utLoading || trendLoading || costRevLoading || projectStatusLoading || deptKpiLoading) {
         return <div className="p-8 text-center text-muted-foreground animate-pulse">載入 KPI 數據中...</div>;
     }
 
@@ -213,6 +214,80 @@ export function KpiDashboardPage() {
                     </div>
                     <div className="text-2xl font-bold">${kpiData?.totalMargin?.toLocaleString() || 0}</div>
                     <div className="text-xs text-muted-foreground mt-1">基於結算模型估計</div>
+                </div>
+            </div>
+
+            {/* Dept KPI Table */}
+            <div className="bg-card border border-border rounded-xl shadow-sm overflow-hidden">
+                <div className="p-6 border-b border-border flex items-center justify-between">
+                    <div>
+                        <h3 className="text-lg font-bold flex items-center gap-2">
+                            <TrendingUp className="h-5 w-5 text-primary" />
+                            {deptKpiData?.year || new Date().getFullYear()} 年度各部門業績達成
+                        </h3>
+                        <p className="text-sm text-muted-foreground mt-0.5">年度目標 vs 實際業績（專案 + 協銷）</p>
+                    </div>
+                    <div className="text-right">
+                        <div className="text-xs text-muted-foreground">全公司合計</div>
+                        <div className={`text-2xl font-bold ${(deptKpiData?.grandAchievementRate || 0) >= 100 ? 'text-emerald-600' : 'text-amber-600'}`}>
+                            {deptKpiData?.grandAchievementRate || 0}%
+                        </div>
+                        <div className={`text-xs font-medium ${(deptKpiData?.grandGap || 0) >= 0 ? 'text-emerald-600' : 'text-rose-600'}`}>
+                            {(deptKpiData?.grandGap || 0) >= 0 ? '+' : ''}NT$ {Math.abs(deptKpiData?.grandGap || 0).toLocaleString()}
+                        </div>
+                    </div>
+                </div>
+                <div className="overflow-x-auto">
+                    <table className="w-full text-sm">
+                        <thead className="bg-muted/50 text-muted-foreground">
+                            <tr>
+                                <th className="px-6 py-3 text-left font-medium">部門</th>
+                                <th className="px-6 py-3 text-right font-medium">成員數</th>
+                                <th className="px-6 py-3 text-right font-medium">專案業績</th>
+                                <th className="px-6 py-3 text-right font-medium">協銷業績</th>
+                                <th className="px-6 py-3 text-right font-medium">合計業績</th>
+                                <th className="px-6 py-3 text-right font-medium">年度目標</th>
+                                <th className="px-6 py-3 text-center font-medium">達成率</th>
+                                <th className="px-6 py-3 text-right font-medium">Gap</th>
+                            </tr>
+                        </thead>
+                        <tbody className="divide-y divide-border">
+                            {(deptKpiData?.departments || []).length === 0 ? (
+                                <tr><td colSpan={8} className="px-6 py-8 text-center text-muted-foreground">無部門資料</td></tr>
+                            ) : (
+                                (deptKpiData?.departments || []).map((dept: any) => {
+                                    const isAchieved = dept.achievementRate >= 100;
+                                    const isClose = dept.achievementRate >= 80;
+                                    return (
+                                        <tr key={dept.department} className="hover:bg-muted/30 transition-colors">
+                                            <td className="px-6 py-4 font-semibold">{dept.department}</td>
+                                            <td className="px-6 py-4 text-right text-muted-foreground">{dept.memberCount} 人</td>
+                                            <td className="px-6 py-4 text-right">NT$ {dept.projectRevenue.toLocaleString()}</td>
+                                            <td className="px-6 py-4 text-right">NT$ {dept.presalesRevenue.toLocaleString()}</td>
+                                            <td className="px-6 py-4 text-right font-bold">NT$ {dept.totalRevenue.toLocaleString()}</td>
+                                            <td className="px-6 py-4 text-right text-muted-foreground">NT$ {dept.target.toLocaleString()}</td>
+                                            <td className="px-6 py-4 text-center">
+                                                <div className="flex items-center justify-center gap-2">
+                                                    <div className="w-24 h-2 bg-muted rounded-full overflow-hidden">
+                                                        <div
+                                                            className={`h-full rounded-full ${isAchieved ? 'bg-emerald-500' : isClose ? 'bg-amber-500' : 'bg-rose-500'}`}
+                                                            style={{ width: `${Math.min(dept.achievementRate, 100)}%` }}
+                                                        />
+                                                    </div>
+                                                    <span className={`text-xs font-bold min-w-[36px] ${isAchieved ? 'text-emerald-600' : isClose ? 'text-amber-600' : 'text-rose-600'}`}>
+                                                        {dept.achievementRate}%
+                                                    </span>
+                                                </div>
+                                            </td>
+                                            <td className={`px-6 py-4 text-right font-semibold ${dept.gap >= 0 ? 'text-emerald-600' : 'text-rose-600'}`}>
+                                                {dept.gap >= 0 ? '+' : ''}NT$ {Math.abs(dept.gap).toLocaleString()}
+                                            </td>
+                                        </tr>
+                                    );
+                                })
+                            )}
+                        </tbody>
+                    </table>
                 </div>
             </div>
 
