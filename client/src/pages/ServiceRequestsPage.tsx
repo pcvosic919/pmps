@@ -27,7 +27,6 @@ import { useCurrentUser } from "../lib/useCurrentUser";
 export function ServiceRequestsPage() {
     const { hasRole } = useCurrentUser();
     const { data: srs, isLoading, refetch } = trpc.projects.srList.useQuery();
-    const { data: opps } = trpc.opportunities.list.useInfiniteQuery({ limit: 100 }, { getNextPageParam: (lastPage) => lastPage.nextCursor });
     const { data: users } = trpc.users.list.useQuery({ limit: 100 });
 
     const [isCreating, setIsCreating] = useState(false);
@@ -76,8 +75,6 @@ export function ServiceRequestsPage() {
             opportunityId: undefined
         });
     };
-
-    const oppItems = opps?.pages.flatMap(p => p.items) || [];
 
     if (isLoading) {
         return <div className="p-8 text-center">載入中...</div>;
