@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from "react";
 import { trpc } from "../lib/trpc";
 import { Link } from "wouter";
-import { Plus, Briefcase, Calendar, ChevronRight, Building2, Search, Loader2, Trash2, User2 } from "lucide-react";
+import { Plus, Briefcase, ChevronRight, Building2, Search, Loader2, Trash2 } from "lucide-react";
 import { useDebounce } from "../lib/useDebounce";
 import { useCurrentUser } from "../lib/useCurrentUser";
 import { z } from "zod";

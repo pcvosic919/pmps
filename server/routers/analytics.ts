@@ -974,7 +974,7 @@ export const analyticsRouter = router({
                 tsMatch.techId = { $in: deptIds };
             }
 
-            const [srs, timesheets, users] = await Promise.all([
+            const [srs, timesheets] = await Promise.all([
                 ServiceRequestModel.find(srMatch, { srType: 1, contractAmount: 1, totalPoints: 1, pointValue: 1 }).lean(),
                 TimesheetModel.find(tsMatch).populate("techId", "costRate").lean(),
                 UserModel.find({}, { costRate: 1 }).lean()

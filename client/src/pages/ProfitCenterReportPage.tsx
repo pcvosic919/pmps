@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { trpc } from "../lib/trpc";
-import { Calculator, Download, Calendar, TrendingUp, AlertTriangle, TrendingDown } from "lucide-react";
+import { Calculator, Download, Calendar, TrendingUp, TrendingDown } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 

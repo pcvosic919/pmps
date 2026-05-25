@@ -1,7 +1,7 @@
 import { useState, useEffect } from "react";
 import { trpc } from "../lib/trpc";
 import { Link } from "wouter";
-import { FileText, AlertTriangle, ChevronRight, BarChart3, Plus } from "lucide-react";
+import { FileText, AlertTriangle, ChevronRight, Plus, Trash2 } from "lucide-react";
 import { z } from "zod";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
@@ -150,7 +150,7 @@ export function ServiceRequestsPage() {
                                         <div className="flex flex-col">
                                             <div className="flex items-center gap-1.5 mb-0.5">
                                                 <span className="text-[10px] font-mono text-muted-foreground">SR-#{sr.id}</span>
-                                                {sr.marginWarning && <AlertTriangle className="w-3.5 h-3.5 text-destructive animate-pulse" title="毛利預警" />}
+                                                {sr.marginWarning && <span title="毛利預警"><AlertTriangle className="w-3.5 h-3.5 text-destructive animate-pulse" /></span>}
                                             </div>
                                             <span className="text-sm font-bold text-foreground group-hover:text-primary transition-colors line-clamp-1" title={sr.title}>
                                                 {sr.title}
