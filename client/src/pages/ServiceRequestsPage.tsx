@@ -107,7 +107,7 @@ export function ServiceRequestsPage() {
                     <h2 className="text-3xl font-bold tracking-tight bg-clip-text text-transparent bg-gradient-to-r from-primary to-primary/60">服務請求 (SR)</h2>
                     <p className="text-muted-foreground mt-1">管理各專案的服務執行狀況與毛利預期</p>
                 </div>
-                {!hasRole("tech") && (
+                {(hasRole("admin") || hasRole("manager")) && (
                     <button
                         onClick={() => setIsCreating(true)}
                         className="bg-primary text-primary-foreground hover:bg-primary/90 px-5 py-2.5 rounded-lg inline-flex items-center text-sm font-medium transition-all shadow-md hover:shadow-lg">
