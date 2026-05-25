@@ -13,13 +13,19 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 
 const srSchema = z.object({
     title: z.string().min(1, "專案名稱不可為空"),
-    customerName: z.string().min(1, "公司名稱不可為空")
+    customerName: z.string().min(1, "公司名稱不可為空"),
+    srType: z.enum(["project", "maintenance"]).default("project"),
+    contractAmount: z.number().min(0, "合約金額不能為負").optional(),
+    totalPoints: z.number().min(0).optional(),
+    pointValue: z.number().min(0).optional(),
+    pmId: z.string().min(1, "請指派 PM"),
+    joinPmAsMember: z.boolean().default(true)
 });
 
 import { useCurrentUser } from "../lib/useCurrentUser";
 
 export function ServiceRequestsPage() {
-    const { hasRole, user } = useCurrentUser();
+    const { hasRole } = useCurrentUser();
     const { data: srs, isLoading, refetch } = trpc.projects.srList.useQuery();
     const { data: opps } = trpc.opportunities.list.useInfiniteQuery({ limit: 100 }, { getNextPageParam: (lastPage) => lastPage.nextCursor });
     const { data: users } = trpc.users.list.useQuery({ limit: 100 });
@@ -45,17 +51,28 @@ export function ServiceRequestsPage() {
     const form = useForm<any>({
         resolver: zodResolver(srSchema) as any,
         defaultValues: { 
-            title: "", customerName: "" 
+            title: "", customerName: "", srType: "project", contractAmount: 0, 
+            totalPoints: 0, pointValue: 500, 
+            pmId: "", joinPmAsMember: true 
         }
     });
 
+    // Update default pointValue when settings are loaded
+    useEffect(() => {
+        if (settings?.pcMaintenancePointValue) {
+            form.setValue("pointValue", settings.pcMaintenancePointValue);
+        }
+    }, [settings?.pcMaintenancePointValue]);
+
     const handleCreate = (values: z.infer<typeof srSchema>) => {
+        let finalContractAmount = values.contractAmount || 0;
+        if (values.srType === "maintenance") {
+            finalContractAmount = (values.totalPoints || 0) * (values.pointValue || 0);
+        }
+
         createSR.mutate({
             ...values,
-            srType: "project",
-            contractAmount: 0,
-            pmId: user?.id || "",
-            joinPmAsMember: true,
+            contractAmount: finalContractAmount,
             opportunityId: undefined
         });
     };
@@ -230,6 +247,134 @@ export function ServiceRequestsPage() {
                                             <Input placeholder="例：宏碁資訊服務股份有限公司" {...field} />
                                         </FormControl>
                                         <FormMessage />
+                                    </FormItem>
+                                )}
+                            />
+
+                            <FormField
+                                control={form.control}
+                                name="srType"
+                                render={({ field }: any) => (
+                                    <FormItem>
+                                        <FormLabel>類型 *</FormLabel>
+                                        <Select onValueChange={field.onChange} defaultValue={field.value}>
+                                            <FormControl>
+                                                <SelectTrigger>
+                                                    <SelectValue placeholder="請選擇類型" />
+                                                </SelectTrigger>
+                                            </FormControl>
+                                            <SelectContent>
+                                                <SelectItem value="project">專案 (Project)</SelectItem>
+                                                <SelectItem value="maintenance">維運 (Maintenance)</SelectItem>
+                                            </SelectContent>
+                                        </Select>
+                                        <FormMessage />
+                                    </FormItem>
+                                )}
+                            />
+
+                            {form.watch("srType") === "project" ? (
+                                <FormField
+                                    control={form.control}
+                                    name="contractAmount"
+                                    render={({ field }: any) => (
+                                        <FormItem>
+                                            <FormLabel>合約金額 (NT$) *</FormLabel>
+                                            <FormControl>
+                                                <Input
+                                                    type="number"
+                                                    {...field}
+                                                    onChange={(e) => field.onChange(Number(e.target.value))}
+                                                />
+                                            </FormControl>
+                                            <FormMessage />
+                                        </FormItem>
+                                    )}
+                                />
+                            ) : (
+                                <div className="grid grid-cols-2 gap-4">
+                                    <FormField
+                                        control={form.control}
+                                        name="totalPoints"
+                                        render={({ field }: any) => (
+                                            <FormItem>
+                                                <FormLabel>總點數 *</FormLabel>
+                                                <FormControl>
+                                                    <Input
+                                                        type="number"
+                                                        {...field}
+                                                        onChange={(e) => field.onChange(Number(e.target.value))}
+                                                    />
+                                                </FormControl>
+                                                <FormMessage />
+                                            </FormItem>
+                                        )}
+                                    />
+                                    <FormField
+                                        control={form.control}
+                                        name="pointValue"
+                                        render={({ field }: any) => (
+                                            <FormItem>
+                                                <FormLabel>點數單價 (NT$) *</FormLabel>
+                                                <FormControl>
+                                                    <Input
+                                                        type="number"
+                                                        {...field}
+                                                        onChange={(e) => field.onChange(Number(e.target.value))}
+                                                    />
+                                                </FormControl>
+                                                <FormMessage />
+                                            </FormItem>
+                                        )}
+                                    />
+                                </div>
+                            )}
+
+                            <FormField
+                                control={form.control}
+                                name="pmId"
+                                render={({ field }: any) => (
+                                    <FormItem>
+                                        <FormLabel>指派 PM *</FormLabel>
+                                        <Select onValueChange={field.onChange} defaultValue={field.value}>
+                                            <FormControl>
+                                                <SelectTrigger>
+                                                    <SelectValue placeholder="請選擇 PM" />
+                                                </SelectTrigger>
+                                            </FormControl>
+                                            <SelectContent>
+                                                {users?.items?.filter((u: any) => u.role === "pm" || u.roles?.includes("pm")).map((u: any) => (
+                                                    <SelectItem key={u.id} value={u.id}>
+                                                        {u.name}
+                                                    </SelectItem>
+                                                ))}
+                                            </SelectContent>
+                                        </Select>
+                                        <FormMessage />
+                                    </FormItem>
+                                )}
+                            />
+
+
+                            <FormField
+                                control={form.control}
+                                name="joinPmAsMember"
+                                render={({ field }: any) => (
+                                    <FormItem className="flex flex-row items-start space-x-3 space-y-0 rounded-md border p-4 shadow-sm">
+                                        <FormControl>
+                                            <input
+                                                type="checkbox"
+                                                checked={field.value}
+                                                onChange={(e) => field.onChange(e.target.checked)}
+                                                className="w-4 h-4 mt-1 rounded border-gray-300 text-primary cursor-pointer"
+                                            />
+                                        </FormControl>
+                                        <div className="space-y-1 leading-none">
+                                            <FormLabel>將 PM 加入專案團隊成員</FormLabel>
+                                            <p className="text-sm text-muted-foreground">
+                                                若取消勾選，PM 將不會出現在成員列表中
+                                            </p>
+                                        </div>
                                     </FormItem>
                                 )}
                             />
