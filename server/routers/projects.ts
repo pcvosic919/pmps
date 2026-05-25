@@ -509,7 +509,9 @@ export const projectsRouter = router({
                 completionPercentage: z.number().optional(),
                 colorCode: z.string().optional(),
                 level: z.number().optional(),
-                description: z.string().optional()
+                description: z.string().optional(),
+                code: z.string().optional(),
+                remarks: z.string().optional()
             }))
         }))
         .mutation(async ({ ctx, input }) => {

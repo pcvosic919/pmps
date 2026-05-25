@@ -15,12 +15,11 @@ export function WbsManagementPage() {
     const { hasRole, user } = useCurrentUser();
 
     const [isBuildingVersion, setIsBuildingVersion] = useState(false);
-    const [draftItems, setDraftItems] = useState<{ title: string, estimatedHours: number, assigneeId: string | undefined, startDate?: Date, endDate?: Date, completionPercentage?: number, colorCode?: string, level?: number }[]>([]);
+    const [draftItems, setDraftItems] = useState<{ title: string, estimatedHours: number, assigneeId: string | undefined, startDate?: Date, endDate?: Date, completionPercentage?: number, colorCode?: string, level?: number, code?: string, remarks?: string }[]>([]);
 
     // View settings
-    const [isDaysMode, setIsDaysMode] = useState(false);
-    const displayHours = (h: number) => isDaysMode ? (h / 8).toFixed(1) + ' 天' : h + ' 小時';
-    const displayHoursShort = (h: number) => isDaysMode ? (h / 8).toFixed(1) + 'd' : h + 'h';
+    const displayHours = (h: number) => h.toFixed(1) + ' 天';
+    const displayHoursShort = (h: number) => h.toFixed(1) + 'd';
 
     // Review state
     const [reviewingId, setReviewingId] = useState<string | null>(null);
@@ -103,27 +102,44 @@ export function WbsManagementPage() {
                 const worksheet = workbook.Sheets[sheetName];
                 const json = XLSX.utils.sheet_to_json(worksheet);
 
+                let currentLevel0 = "";
+
                 const importedItems = json.map((row: any) => {
-                    const assigneeName = row['負責人'] || row['Assignee'];
+                    // Handle Project Phase (Level 0) context
+                    if (row['專案階段']) {
+                        currentLevel0 = row['專案階段'];
+                    }
+
+                    // Extract assignee from columns like "[John]天數" or fallback to "負責人"
+                    let assigneeName = row['負責人'] || row['Assignee'];
+                    if (!assigneeName) {
+                        for (const key of Object.keys(row)) {
+                            if (key.startsWith('[') && key.endsWith(']天數') && row[key]) {
+                                assigneeName = key.substring(1, key.indexOf(']'));
+                                break;
+                            }
+                        }
+                    }
                     const assignee = techs?.find(t => t.name === assigneeName);
-                    
-                    // Handle Excel date format or string
-                    const parseDate = (val: any) => {
-                        if (!val) return undefined;
-                        const d = new Date(val);
-                        return isNaN(d.getTime()) ? undefined : d;
-                    };
+
+                    // Determine level based on "工作項次" (e.g. "1" -> 0, "1.1" -> 1)
+                    let level = Number(row['階層'] || row['Level'] || 0);
+                    if (row['工作項次']) {
+                        const parts = String(row['工作項次']).split('.');
+                        level = parts.length > 1 ? parts.length - 1 : 0;
+                    }
 
                     return {
-                        title: row['工作項目'] || row['項目名稱'] || row['Title'] || row['項目'] || '未命名項目',
-                        estimatedHours: Number(row['預估工時'] || row['Hours'] || row['工時'] || 0),
-                        actualHours: Number(row['實際工時'] || 0),
+                        title: row['工作項目'] || row['項目名稱'] || row['Title'] || row['項目'] || row['專案階段'] || '未命名項目',
+                        estimatedHours: Number(row['工作天數(小計)'] || row['工作天數'] || row['預估工時'] || row['Hours'] || row['工時'] || 0),
+                        actualHours: 0,
                         assigneeId: assignee?.id,
-                        level: Number(row['階層'] || row['Level'] || 0),
-                        completionPercentage: Number(row['進度百分比'] || row['進度'] || 0),
-                        startDate: parseDate(row['開始日期'] || row['Start Date']),
-                        endDate: parseDate(row['結束日期'] || row['End Date']),
-                        colorCode: row['標記顏色'] || row['Color'] || '#E2E8F0'
+                        level: level,
+                        completionPercentage: 0,
+                        code: row['工作編號'] || row['編號'] || '',
+                        description: row['工作說明'] || row['說明'] || '',
+                        remarks: row['備註'] || '',
+                        colorCode: '#E2E8F0'
                     };
                 });
 
@@ -183,11 +199,11 @@ export function WbsManagementPage() {
         });
     };
 
-    const handleAddDraftItem = () => setDraftItems([...draftItems, { title: "", estimatedHours: 4, assigneeId: undefined, level: 0 }]);
+    const handleAddDraftItem = () => setDraftItems([...draftItems, { title: "", estimatedHours: 4, assigneeId: undefined, level: 0, code: "", remarks: "" }]);
     const handleAddSubTask = (parentIndex: number) => {
         const parentLevel = draftItems[parentIndex].level || 0;
         const newItems = [...draftItems];
-        newItems.splice(parentIndex + 1, 0, { title: "", estimatedHours: 4, assigneeId: undefined, level: parentLevel + 1 });
+        newItems.splice(parentIndex + 1, 0, { title: "", estimatedHours: 4, assigneeId: undefined, level: parentLevel + 1, code: "", remarks: "" });
         setDraftItems(newItems);
     };
     const handleUpdateDraftItem = (index: number, field: string, value: any) => {
@@ -206,7 +222,9 @@ export function WbsManagementPage() {
                 endDate: item.endDate ? new Date(item.endDate) : undefined,
                 completionPercentage: item.completionPercentage || 0,
                 colorCode: item.colorCode || "#E2E8F0",
-                level: item.level || 0
+                level: item.level || 0,
+                code: item.code || "",
+                remarks: item.remarks || ""
             })));
         } else {
             setDraftItems([]);
@@ -247,20 +265,28 @@ export function WbsManagementPage() {
             return;
         }
         const itemNumbers = computeItemNumbers(latestVersion.items);
-        const headers = ["階層編號", "階層", "工作項目", "預估工時", "實際工時", "負責人", "進度百分比", "開始日期", "結束日期", "工作說明", "標記顏色"];
-        const rows = latestVersion.items.map((item: any, idx: number) => [
-            `"${itemNumbers[idx]}"`,
-            item.level || 0,
-            `"${item.title.replace(/"/g, '""')}"`,
-            item.estimatedHours,
-            item.actualHours || 0,
-            `"${techs?.find(t => t.id === item.assigneeId)?.name || '未指派'}"`,
-            item.completionPercentage || 0,
-            item.startDate ? `"${new Date(item.startDate).toISOString().split('T')[0]}"` : '""',
-            item.endDate ? `"${new Date(item.endDate).toISOString().split('T')[0]}"` : '""',
-            `"${(item.description || '').replace(/"/g, '""')}"`,
-            `"${item.colorCode || '#E2E8F0'}"`
-        ]);
+        const headers = ["專案階段", "工作項次", "工作項目", "工作編號", "工作說明", "工作天數(小計)", "[人員1]天數", "[人員1]單價", "[人員2]天數", "[人員2]單價", "[人員3]天數", "[人員3]單價", "內部成本小計", "備註"];
+        const rows = latestVersion.items.map((item: any, idx: number) => {
+            const assignee = techs?.find(t => t.id === item.assigneeId);
+            const costRate = assignee?.costRate?.dailyRate || 0;
+            const days = item.estimatedHours || 0; // Using estimatedHours as Days based on user preference
+            const internalCost = days * costRate;
+            
+            return [
+                `"${item.level === 0 ? item.title.replace(/"/g, '""') : ''}"`, // 專案階段
+                `"${itemNumbers[idx]}"`, // 工作項次
+                `"${item.title.replace(/"/g, '""')}"`, // 工作項目
+                `"${(item.code || '').replace(/"/g, '""')}"`, // 工作編號
+                `"${(item.description || '').replace(/"/g, '""')}"`, // 工作說明
+                days, // 工作天數(小計)
+                item.assigneeId ? days : '""', // [人員1]天數
+                item.assigneeId ? costRate : '""', // [人員1]單價
+                '""', '""', // [人員2]
+                '""', '""', // [人員3]
+                internalCost, // 內部成本小計
+                `"${(item.remarks || '').replace(/"/g, '""')}"` // 備註
+            ];
+        });
         const csvContent = "data:text/csv;charset=utf-8,\uFEFF" + [headers.join(","), ...rows.map((r: any[]) => r.join(","))].join("\n");
         const encodedUri = encodeURI(csvContent);
         const link = document.createElement("a");
@@ -269,7 +295,7 @@ export function WbsManagementPage() {
         document.body.appendChild(link);
         link.click();
         document.body.removeChild(link);
-        toast.success("WBS 已成功完整匯出 (包含實際工時)");
+        toast.success("WBS 已成功完整匯出");
     };
 
     // File upload (Mock implementation)
@@ -434,12 +460,7 @@ export function WbsManagementPage() {
                             <div className="flex justify-between items-center bg-card p-4 rounded-xl shadow-sm border border-border">
                                 <h3 className="font-bold text-lg flex items-center"><FileText className="w-5 h-5 mr-2 text-primary" />WBS 版本歷史</h3>
                                 <div className="flex items-center gap-3">
-                                    <label onClick={() => setIsDaysMode(!isDaysMode)} className="flex items-center gap-2 cursor-pointer text-sm font-medium mr-2">
-                                        <div className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors ${isDaysMode ? 'bg-primary' : 'bg-muted border border-border'}`}>
-                                            <span className={`inline-block h-4 w-4 rounded-full bg-white transition-transform ${isDaysMode ? 'translate-x-[18px]' : 'translate-x-0.5'}`} />
-                                        </div>
-                                        <span className="text-muted-foreground">{isDaysMode ? '人天模式 (Days)' : '人時模式 (Hours)'}</span>
-                                    </label>
+
                                     <button onClick={handleExportCsv} className="bg-muted text-foreground hover:bg-muted/80 border px-3 py-1.5 rounded-md inline-flex items-center text-sm font-medium transition-colors shadow-sm">
                                         匯出 CSV
                                     </button>
@@ -698,41 +719,70 @@ export function WbsManagementPage() {
                                                             className="flex-1 text-sm font-medium bg-transparent border-0 border-b border-transparent hover:border-border focus:border-primary focus:ring-0 px-1 py-1 transition-colors outline-none"
                                                         />
                                                     </div>
-                                                    <div className="flex gap-4 items-center lg:pl-8 flex-wrap">
-                                                        <div className="flex items-center text-xs text-muted-foreground">
-                                                            <span className="mr-2">色標:</span>
-                                                            <input type="color" value={item.colorCode || "#E2E8F0"}
-                                                                onChange={(e) => handleUpdateDraftItem(idx, 'colorCode', e.target.value)}
-                                                                className="w-12 h-6 p-0 border-0 rounded cursor-pointer ring-1 ring-border"
+                                                    <div className="flex flex-col gap-3 lg:pl-8">
+                                                        <div className="grid grid-cols-2 gap-3">
+                                                            <div className="flex flex-col gap-1 text-xs text-muted-foreground">
+                                                                <label>工作編號:</label>
+                                                                <input type="text" placeholder="選填" value={item.code || ""}
+                                                                    onChange={(e) => handleUpdateDraftItem(idx, 'code', e.target.value)}
+                                                                    className="px-2 py-1.5 bg-muted rounded border border-transparent focus:bg-background focus:border-primary outline-none"
+                                                                />
+                                                            </div>
+                                                            <div className="flex flex-col gap-1 text-xs text-muted-foreground">
+                                                                <label>工作天數(小計):</label>
+                                                                <input type="number" min="0.5" step="0.5" value={item.estimatedHours}
+                                                                    onChange={(e) => handleUpdateDraftItem(idx, 'estimatedHours', Number(e.target.value))}
+                                                                    className="px-2 py-1.5 bg-muted rounded border border-transparent focus:bg-background focus:border-primary outline-none"
+                                                                />
+                                                            </div>
+                                                        </div>
+
+                                                        <div className="flex flex-col gap-1 text-xs text-muted-foreground">
+                                                            <label>工作說明:</label>
+                                                            <textarea placeholder="選填" value={item.description || ""} rows={2}
+                                                                onChange={(e) => handleUpdateDraftItem(idx, 'description', e.target.value)}
+                                                                className="px-2 py-1.5 bg-muted rounded border border-transparent focus:bg-background focus:border-primary outline-none resize-y"
                                                             />
                                                         </div>
-                                                        <div className="flex items-center text-xs text-muted-foreground">
-                                                            <span className="mr-2">預估工量(H):</span>
-                                                            <input type="number" min="0.5" step="0.5" value={item.estimatedHours}
-                                                                onChange={(e) => handleUpdateDraftItem(idx, 'estimatedHours', Number(e.target.value))}
-                                                                className="w-16 px-2 py-1 bg-muted rounded border border-transparent focus:bg-background focus:border-primary outline-none"
-                                                            />
+
+                                                        <div className="grid grid-cols-2 gap-3">
+                                                            <div className="flex flex-col gap-1 text-xs text-muted-foreground">
+                                                                <label>指派給 (人員):</label>
+                                                                <select value={item.assigneeId || ""}
+                                                                    onChange={(e) => handleUpdateDraftItem(idx, 'assigneeId', e.target.value ? e.target.value : undefined)}
+                                                                    className="px-2 py-1.5 bg-muted rounded border border-transparent focus:bg-background focus:border-primary outline-none">
+                                                                    <option value="">-- 未指派 --</option>
+                                                                    {techs?.map(tech => <option key={tech.id} value={tech.id}>{tech.name}</option>)}
+                                                                </select>
+                                                            </div>
+                                                            <div className="flex flex-col gap-1 text-xs text-muted-foreground">
+                                                                <label>備註:</label>
+                                                                <input type="text" placeholder="選填" value={item.remarks || ""}
+                                                                    onChange={(e) => handleUpdateDraftItem(idx, 'remarks', e.target.value)}
+                                                                    className="px-2 py-1.5 bg-muted rounded border border-transparent focus:bg-background focus:border-primary outline-none"
+                                                                />
+                                                            </div>
                                                         </div>
-                                                        <div className="flex items-center text-xs text-muted-foreground flex-1 min-w-[150px]">
-                                                            <span className="mr-2">指派給:</span>
-                                                            <select value={item.assigneeId || ""}
-                                                                onChange={(e) => handleUpdateDraftItem(idx, 'assigneeId', e.target.value ? e.target.value : undefined)}
-                                                                className="flex-1 px-2 py-1 bg-muted rounded border border-transparent focus:bg-background focus:border-primary outline-none">
-                                                                <option value="">-- 未指派 --</option>
-                                                                {techs?.map(tech => <option key={tech.id} value={tech.id}>{tech.name}</option>)}
-                                                            </select>
-                                                        </div>
-                                                        <div className="flex items-center text-xs text-muted-foreground">
-                                                            <span className="mr-1">排程:</span>
-                                                            <input type="date" value={item.startDate ? typeof item.startDate === "string" ? item.startDate : new Date(item.startDate).toISOString().slice(0, 10) : ""}
-                                                                onChange={(e) => handleUpdateDraftItem(idx, 'startDate', e.target.value)}
-                                                                className="w-28 text-[10px] px-1 py-1 bg-muted rounded border border-transparent focus:bg-background focus:border-primary outline-none"
-                                                            />
-                                                            <span className="mx-1">-</span>
-                                                            <input type="date" value={item.endDate ? typeof item.endDate === "string" ? item.endDate : new Date(item.endDate).toISOString().slice(0, 10) : ""}
-                                                                onChange={(e) => handleUpdateDraftItem(idx, 'endDate', e.target.value)}
-                                                                className="w-28 text-[10px] px-1 py-1 bg-muted rounded border border-transparent focus:bg-background focus:border-primary outline-none"
-                                                            />
+                                                        <div className="flex gap-4 items-center flex-wrap pt-2 border-t border-border/50">
+                                                            <div className="flex items-center text-xs text-muted-foreground">
+                                                                <span className="mr-2">色標:</span>
+                                                                <input type="color" value={item.colorCode || "#E2E8F0"}
+                                                                    onChange={(e) => handleUpdateDraftItem(idx, 'colorCode', e.target.value)}
+                                                                    className="w-12 h-6 p-0 border-0 rounded cursor-pointer ring-1 ring-border"
+                                                                />
+                                                            </div>
+                                                            <div className="flex items-center text-xs text-muted-foreground">
+                                                                <span className="mr-1">排程:</span>
+                                                                <input type="date" value={item.startDate ? typeof item.startDate === "string" ? item.startDate : new Date(item.startDate).toISOString().slice(0, 10) : ""}
+                                                                    onChange={(e) => handleUpdateDraftItem(idx, 'startDate', e.target.value)}
+                                                                    className="w-28 text-[10px] px-1 py-1 bg-muted rounded border border-transparent focus:bg-background focus:border-primary outline-none"
+                                                                />
+                                                                <span className="mx-1">-</span>
+                                                                <input type="date" value={item.endDate ? typeof item.endDate === "string" ? item.endDate : new Date(item.endDate).toISOString().slice(0, 10) : ""}
+                                                                    onChange={(e) => handleUpdateDraftItem(idx, 'endDate', e.target.value)}
+                                                                    className="w-28 text-[10px] px-1 py-1 bg-muted rounded border border-transparent focus:bg-background focus:border-primary outline-none"
+                                                                />
+                                                            </div>
                                                         </div>
                                                     </div>
                                                 </div>
@@ -757,8 +807,8 @@ export function WbsManagementPage() {
                             </div>
                             <div className="p-4 border-t border-border bg-muted/10 flex justify-between items-center rounded-b-xl">
                                 <div className="text-sm">
-                                    <span className="text-muted-foreground mr-2">總計工時:</span>
-                                    <span className="font-bold text-lg">{draftItems.reduce((sum, i) => sum + i.estimatedHours, 0)} 小時</span>
+                                    <span className="text-muted-foreground mr-2">總計天數:</span>
+                                    <span className="font-bold text-lg">{draftItems.reduce((sum, i) => sum + i.estimatedHours, 0)} 天</span>
                                 </div>
                                 <button onClick={handleSaveVersion} disabled={submitVersion.isPending || draftItems.length === 0}
                                     className="bg-primary text-primary-foreground hover:bg-primary/90 px-6 py-2 rounded-md font-medium transition-colors flex items-center gap-2 disabled:opacity-50">

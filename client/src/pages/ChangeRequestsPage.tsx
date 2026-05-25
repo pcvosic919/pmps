@@ -343,7 +343,7 @@ export function ChangeRequestsPage() {
                                                                         />
                                                                     </FormControl>
                                                                     <FormLabel className="font-medium text-sm cursor-pointer w-full group-hover:text-primary transition-colors">
-                                                                        {item.title} <span className="ml-1 text-muted-foreground font-normal text-xs">({item.estimatedHours}h)</span>
+                                                                        {item.title} <span className="ml-1 text-muted-foreground font-normal text-xs">({item.estimatedHours} 天)</span>
                                                                     </FormLabel>
                                                                 </FormItem>
                                                             )

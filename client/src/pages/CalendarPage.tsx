@@ -166,7 +166,7 @@ export function CalendarPage() {
                                     )}
                                     <div className="text-[10px] text-muted-foreground mt-1 flex items-center gap-1.5">
                                         <Clock className="w-3 h-3" />
-                                        <span>{event.estimatedHours}h</span>
+                                        <span>{event.estimatedHours} 天</span>
                                         <span className="opacity-40">|</span>
                                         <span>已報 {event.actualHours}h</span>
                                     </div>
@@ -223,7 +223,7 @@ export function CalendarPage() {
                                             </div>
                                         )}
                                         <div className="text-xs text-muted-foreground flex items-center justify-between">
-                                            <span className="flex items-center"><Clock className="w-3 h-3 mr-1" /> {event.estimatedHours}h</span>
+                                            <span className="flex items-center"><Clock className="w-3 h-3 mr-1" /> {event.estimatedHours} 天</span>
                                             <span className="text-[10px] bg-muted px-1.5 rounded">點擊排程</span>
                                         </div>
                                     </div>
@@ -333,7 +333,7 @@ export function CalendarPage() {
                                                                 <div className="text-sm font-bold truncate">{t.title}</div>
                                                                 <div className="flex items-center gap-2 mt-1">
                                                                     <span className="text-[10px] text-primary bg-primary/5 px-1.5 rounded">{i === 0 ? "早上 (AM) 4h" : "下午 (PM) 4h"}</span>
-                                                                    <span className="text-[10px] text-muted-foreground">總預估: {t.estimatedHours}h</span>
+                                                                    <span className="text-[10px] text-muted-foreground">總預估: {t.estimatedHours} 天</span>
                                                                 </div>
                                                             </div>
                                                             <button onClick={() => openEditModal(t)} className="p-2 opacity-0 group-hover:opacity-100 text-muted-foreground hover:text-primary transition-all">
@@ -367,7 +367,7 @@ export function CalendarPage() {
                                             <option value="">-- 請選擇 --</option>
                                             {unscheduledAssignments.map(a => (
                                                 <option key={a.id} value={a.id}>
-                                                    [{a.srTitle.slice(0, 8)}...] {a.title} (餘 {a.estimatedHours - (a.actualHours || 0)}h)
+                                                    [{a.srTitle.slice(0, 8)}...] {a.title} (餘 {a.estimatedHours - (a.actualHours || 0)} 天)
                                                 </option>
                                             ))}
                                         </select>

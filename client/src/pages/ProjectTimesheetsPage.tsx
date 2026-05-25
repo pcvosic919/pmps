@@ -159,7 +159,7 @@ export function ProjectTimesheetsPage() {
                                     <option value="">-- 再選擇該專案下的 WBS --</option>
                                     {availableWbsItems.map((a: any) => (
                                         <option key={a.id} value={a.id}>
-                                            {a.title} ({a.estimatedHours}h / 已填 {a.actualHours || 0}h)
+                                            {a.title} ({a.estimatedHours} 天 / 已填 {a.actualHours || 0} 天)
                                         </option>
                                     ))}
                                 </select>

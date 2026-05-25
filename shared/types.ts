@@ -171,6 +171,8 @@ export interface WbsItemInput {
     colorCode?: string;
     level?: number;
     description?: string;
+    code?: string;
+    remarks?: string;
 }
 
 export interface WbsVersionInput {
