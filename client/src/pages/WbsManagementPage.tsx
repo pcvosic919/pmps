@@ -15,7 +15,7 @@ export function WbsManagementPage() {
     const { hasRole, user } = useCurrentUser();
 
     const [isBuildingVersion, setIsBuildingVersion] = useState(false);
-    const [draftItems, setDraftItems] = useState<{ title: string, estimatedHours: number, assigneeId: string | undefined, startDate?: Date, endDate?: Date, completionPercentage?: number, colorCode?: string, level?: number, code?: string, remarks?: string }[]>([]);
+    const [draftItems, setDraftItems] = useState<{ title: string, estimatedHours: number, assigneeId: string | undefined, startDate?: Date, endDate?: Date, completionPercentage?: number, colorCode?: string, level?: number, code?: string, remarks?: string, description?: string }[]>([]);
 
     // View settings
     const displayHours = (h: number) => h.toFixed(1) + ' 天';
@@ -102,14 +102,7 @@ export function WbsManagementPage() {
                 const worksheet = workbook.Sheets[sheetName];
                 const json = XLSX.utils.sheet_to_json(worksheet);
 
-                let currentLevel0 = "";
-
                 const importedItems = json.map((row: any) => {
-                    // Handle Project Phase (Level 0) context
-                    if (row['專案階段']) {
-                        currentLevel0 = row['專案階段'];
-                    }
-
                     // Extract assignee from columns like "[John]天數" or fallback to "負責人"
                     let assigneeName = row['負責人'] || row['Assignee'];
                     if (!assigneeName) {
