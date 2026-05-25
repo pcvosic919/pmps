@@ -15,6 +15,7 @@ import { useDebounce } from "../lib/useDebounce";
 const userSchema = z.object({
     name: z.string().min(1, "姓名不可為空"),
     email: z.string().email("請輸入有效的電子郵件"),
+    password: z.string().optional(),
     department: z.string().optional(),
     role: z.enum(roles),
     roles: z.array(z.enum(roles)).optional(),
@@ -92,7 +93,7 @@ export function UserManagementPage() {
 
     const createForm = useForm<any>({
         resolver: zodResolver(userSchema) as any,
-        defaultValues: { name: "", email: "", department: "", role: "user", isActive: true, roles: [] }
+        defaultValues: { name: "", email: "", password: "", department: "", role: "user", isActive: true, roles: [] }
     });
 
     const editForm = useForm<any>({
@@ -136,6 +137,7 @@ export function UserManagementPage() {
         createUser.mutate({
             name: values.name,
             email: values.email,
+            password: values.password || undefined,
             department: values.department,
             role: values.role,
             isActive: values.isActive,
@@ -578,6 +580,19 @@ export function UserManagementPage() {
                                         <FormLabel>電子郵件 (Email) *</FormLabel>
                                         <FormControl>
                                             <Input type="email" {...field} />
+                                        </FormControl>
+                                        <FormMessage />
+                                    </FormItem>
+                                )}
+                            />
+                            <FormField
+                                control={createForm.control}
+                                name="password"
+                                render={({ field }: any) => (
+                                    <FormItem>
+                                        <FormLabel>密碼 (Password)</FormLabel>
+                                        <FormControl>
+                                            <Input type="password" placeholder="留空代表不設定密碼" {...field} />
                                         </FormControl>
                                         <FormMessage />
                                     </FormItem>

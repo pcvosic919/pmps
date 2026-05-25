@@ -5,6 +5,7 @@ import { TRPCError } from "@trpc/server";
 import { roles } from "../../shared/types";
 import { decodeCursor, encodeCursor, toObjectId } from "../_core/cursor";
 import { assertEntraSyncConfigured, getEntraSettings, syncEntraUsersJob } from "../_core/entra";
+import { hashPassword } from "../_core/password";
 
 const userSortFields = ["name", "email", "role", "createdAt"] as const;
 
@@ -130,14 +131,21 @@ export const usersRouter = router({
         .input(z.object({
             name: z.string(),
             email: z.string().email(),
+            password: z.string().optional(),
             department: z.string().optional(),
             role: z.enum(roles).default("user"),
             roles: z.array(z.enum(roles)).default([]),
             isActive: z.boolean().default(true)
         }))
         .mutation(async ({ input }) => {
+            let hashedPassword = undefined;
+            if (input.password) {
+                hashedPassword = await hashPassword(input.password);
+            }
+
             const user = await UserModel.create({
                 ...input,
+                password: hashedPassword,
                 provider: "manual",
                 providerId: `manual_${Date.now()}`
             });
