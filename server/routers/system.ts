@@ -264,11 +264,34 @@ export const systemRouter = router({
         if (!setting?.value) {
             throw new TRPCError({ code: "BAD_REQUEST", message: "尚未設定 SharePoint 站台 URL" });
         }
-        const folderName = `TestFolder_${Date.now()}`;
-        const result = await sharePointService.createProjectFolder(setting.value, "測試", folderName);
-        if (!result.folderUrl) {
-            throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "測試建立 SharePoint 資料夾失敗" });
+
+        // Read credentials to give better diagnostics
+        const creds = await SystemSettingModel.find({ key: { $in: ["entraTenantId", "entraClientId", "graphApiSecret"] } }).lean();
+        const credMap = Object.fromEntries(creds.map(r => [r.key, r.value]));
+        if (!credMap["entraTenantId"]) {
+            throw new TRPCError({ code: "BAD_REQUEST", message: "尚未設定 Entra Tenant ID（請到「整合與 API」填寫）" });
         }
-        return { success: true, folderUrl: result.folderUrl };
+        if (!credMap["entraClientId"]) {
+            throw new TRPCError({ code: "BAD_REQUEST", message: "尚未設定 Entra Client ID（請到「整合與 API」填寫）" });
+        }
+        if (!credMap["graphApiSecret"]) {
+            throw new TRPCError({ code: "BAD_REQUEST", message: "尚未設定 Graph API Client Secret（請到「整合與 API」填寫）" });
+        }
+
+        try {
+            const folderName = `TestFolder_${Date.now()}`;
+            const result = await sharePointService.createProjectFolder(setting.value, "測試", folderName);
+            if (!result.folderUrl) {
+                throw new Error("createProjectFolder 回傳空的 folderUrl");
+            }
+            return { success: true, folderUrl: result.folderUrl };
+        } catch (err: any) {
+            const msg = err?.message || String(err);
+            console.error("[testSharePointFolder] 詳細錯誤:", msg);
+            throw new TRPCError({
+                code: "INTERNAL_SERVER_ERROR",
+                message: `SharePoint 測試失敗: ${msg}`
+            });
+        }
     }),
 });

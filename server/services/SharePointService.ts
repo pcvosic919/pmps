@@ -238,7 +238,7 @@ export class SharePointService {
       return { folderUrl: `${siteUrl}/Shared%20Documents/${encodeURIComponent(category)}/${encodeURIComponent(folderName)}` };
     } catch (err) {
       console.warn("[SharePointService] createProjectFolder failed:", err);
-      return { folderUrl: "" };
+      throw err;
     }
   }
 
