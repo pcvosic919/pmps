@@ -471,7 +471,7 @@ export function OpportunityDetailPage() {
                                     <div key={a.id} className="p-3 border rounded-lg flex justify-between items-center hover:bg-muted/50 transition-colors">
                                         <div>
                                             <p className="font-medium text-sm">{getTechName(a.techId)}</p>
-                                            <p className="text-xs text-muted-foreground">預估天數: {a.estimatedHours} 天</p>
+                                            <p className="text-xs text-muted-foreground">預估時數: {a.estimatedHours} 小時</p>
                                         </div>
                                     </div>
                                 ))}
@@ -649,7 +649,7 @@ export function OpportunityDetailPage() {
                                 )}
                             </div>
                             <div>
-                                <label className="block text-sm font-medium mb-1">預估天數</label>
+                                <label className="block text-sm font-medium mb-1">預估時數（小時）</label>
                                 <input type="number" min="0.5" step="0.5" value={assignHours} onChange={e => setAssignHours(e.target.value)}
                                     className="w-full border border-border rounded-lg px-3 py-2 bg-background text-sm focus:outline-none focus:ring-2 focus:ring-primary/50" />
                             </div>
@@ -822,7 +822,7 @@ export function OpportunityDetailPage() {
                                     className="w-full border border-border rounded-lg px-3 py-2 bg-background text-sm focus:outline-none focus:ring-2 focus:ring-primary/50" />
                             </div>
                             <div>
-                                <label className="block text-sm font-medium mb-1">實際天數</label>
+                                <label className="block text-sm font-medium mb-1">實際時數（小時）</label>
                                 <input type="number" min="0.5" step="0.5" value={tsHours} onChange={e => setTsHours(e.target.value)}
                                     className="w-full border border-border rounded-lg px-3 py-2 bg-background text-sm focus:outline-none focus:ring-2 focus:ring-primary/50" />
                             </div>
