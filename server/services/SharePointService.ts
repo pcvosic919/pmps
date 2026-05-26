@@ -90,7 +90,8 @@ export class SharePointService {
    */
   static buildFolderName(name: string, customerName: string, owner: string): string {
     const today = new Date().toISOString().slice(0, 10).replace(/-/g, "");
-    const sanitize = (s: string) => s.replace(/[/\\?<>*|":]/g, "_").trim().slice(0, 60);
+    // SharePoint invalid characters: ~ " # % & * : < > ? / \ { | } .
+    const sanitize = (s: string) => s.replace(/[~"#%&*:<>?/\\{|}.]/g, "_").trim().slice(0, 60);
     return `${today}_${sanitize(name)}_${sanitize(customerName)}_${sanitize(owner)}`;
   }
 
