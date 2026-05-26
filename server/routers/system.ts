@@ -258,4 +258,17 @@ export const systemRouter = router({
 
             return { folderUrl: result.folderUrl };
         }),
+
+    testSharePointFolder: roleProcedure(["admin"]).mutation(async () => {
+        const setting = await SystemSettingModel.findOne({ key: "sharePointSiteUrl" }).lean();
+        if (!setting?.value) {
+            throw new TRPCError({ code: "BAD_REQUEST", message: "尚未設定 SharePoint 站台 URL" });
+        }
+        const folderName = `TestFolder_${Date.now()}`;
+        const result = await sharePointService.createProjectFolder(setting.value, "測試", folderName);
+        if (!result.folderUrl) {
+            throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "測試建立 SharePoint 資料夾失敗" });
+        }
+        return { success: true, folderUrl: result.folderUrl };
+    }),
 });

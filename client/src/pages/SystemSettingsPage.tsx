@@ -46,6 +46,15 @@ export function SystemSettingsPage() {
         }
     }, [data]);
 
+    const testSharePoint = trpc.system.testSharePointFolder.useMutation({
+        onSuccess: (res) => {
+            toast.success(`測試成功！已建立資料夾: ${res.folderUrl}`, { duration: 5000 });
+        },
+        onError: (error) => {
+            toast.error(error.message || "測試建立資料夾失敗");
+        }
+    });
+
     const handleSave = () => {
         updateSettings.mutate(settings);
     };
@@ -269,13 +278,22 @@ export function SystemSettingsPage() {
                                     </div>
                                     <div>
                                         <label className="block text-sm font-medium mb-1">SharePoint 站台 URL</label>
-                                        <input
-                                            type="url"
-                                            value={settings.sharePointSiteUrl}
-                                            placeholder="https://yourcompany.sharepoint.com/sites/PMP"
-                                            onChange={e => setSettings(s => ({ ...s, sharePointSiteUrl: e.target.value }))}
-                                            className="w-full p-2.5 rounded-lg border border-input bg-background/50 focus:bg-background font-mono text-sm"
-                                        />
+                                        <div className="flex gap-2">
+                                            <input
+                                                type="url"
+                                                value={settings.sharePointSiteUrl}
+                                                placeholder="https://yourcompany.sharepoint.com/sites/PMP"
+                                                onChange={e => setSettings(s => ({ ...s, sharePointSiteUrl: e.target.value }))}
+                                                className="flex-1 p-2.5 rounded-lg border border-input bg-background/50 focus:bg-background font-mono text-sm"
+                                            />
+                                            <button
+                                                onClick={() => testSharePoint.mutate()}
+                                                disabled={testSharePoint.isPending || !settings.sharePointSiteUrl}
+                                                className="whitespace-nowrap px-4 py-2 bg-primary/10 text-primary hover:bg-primary/20 rounded-lg text-sm font-medium transition-colors disabled:opacity-50"
+                                            >
+                                                {testSharePoint.isPending ? "建立中..." : "建立測試資料夾"}
+                                            </button>
+                                        </div>
                                     </div>
                                     <div>
                                         <label className="block text-sm font-medium mb-1">Graph API Client Secret</label>
@@ -376,13 +394,22 @@ export function SystemSettingsPage() {
                                     </div>
                                     <div>
                                         <label className="block text-sm font-medium mb-1">SharePoint Site URL</label>
-                                        <input
-                                            type="url"
-                                            value={(settings as any).sharePointSiteUrl || ""}
-                                            placeholder="https://yourdomain.sharepoint.com/sites/PMP"
-                                            onChange={e => setSettings(s => ({ ...s, sharePointSiteUrl: e.target.value }))}
-                                            className="w-full p-2.5 rounded-lg border border-input bg-background/50 focus:bg-background text-sm"
-                                        />
+                                        <div className="flex gap-2">
+                                            <input
+                                                type="url"
+                                                value={(settings as any).sharePointSiteUrl || ""}
+                                                placeholder="https://yourdomain.sharepoint.com/sites/PMP"
+                                                onChange={e => setSettings(s => ({ ...s, sharePointSiteUrl: e.target.value }))}
+                                                className="flex-1 p-2.5 rounded-lg border border-input bg-background/50 focus:bg-background text-sm"
+                                            />
+                                            <button
+                                                onClick={() => testSharePoint.mutate()}
+                                                disabled={testSharePoint.isPending || !settings.sharePointSiteUrl}
+                                                className="whitespace-nowrap px-4 py-2 bg-primary/10 text-primary hover:bg-primary/20 rounded-lg text-sm font-medium transition-colors disabled:opacity-50"
+                                            >
+                                                {testSharePoint.isPending ? "建立中..." : "建立測試資料夾"}
+                                            </button>
+                                        </div>
                                         <p className="text-xs text-muted-foreground mt-1">留空則會停用自動建立目錄功能（mock 模式）</p>
                                     </div>
                                 </div>
