@@ -86,12 +86,12 @@ export class SharePointService {
 
   /**
    * Builds a sanitized SharePoint folder name.
-   * Pattern: YYYYMMDD_[name]_[owner]
+   * Pattern: YYYYMMDD_[name]_[customerName]_[owner]
    */
-  static buildFolderName(name: string, owner: string): string {
+  static buildFolderName(name: string, customerName: string, owner: string): string {
     const today = new Date().toISOString().slice(0, 10).replace(/-/g, "");
     const sanitize = (s: string) => s.replace(/[/\\?<>*|":]/g, "_").trim().slice(0, 60);
-    return `${today}_${sanitize(name)}_${sanitize(owner)}`;
+    return `${today}_${sanitize(name)}_${sanitize(customerName)}_${sanitize(owner)}`;
   }
 
   /**

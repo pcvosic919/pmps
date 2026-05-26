@@ -183,7 +183,7 @@ export const opportunitiesRouter = router({
                 const setting = await SystemSettingModel.findOne({ key: "sharePointSiteUrl" }).lean();
                 if (setting?.value) {
                     const owner = await UserModel.findById(ownerId).select("name").lean();
-                    const folderName = SharePointService.buildFolderName(input.title, owner?.name || "Owner");
+                    const folderName = SharePointService.buildFolderName(input.title, input.customerName || "未知公司", owner?.name || "Owner");
                     const { folderUrl } = await sharePointService.createProjectFolder(setting.value, "商機", folderName);
                     if (folderUrl) {
                         await OpportunityModel.updateOne({ _id: result._id }, { $set: { sharePointFolderUrl: folderUrl } });
@@ -484,7 +484,7 @@ export const opportunitiesRouter = router({
                 const setting = await SystemSettingModel.findOne({ key: "sharePointSiteUrl" }).lean();
                 if (setting?.value) {
                     const pm = input.pmId ? await UserModel.findById(input.pmId).select("name").lean() : null;
-                    const folderName = SharePointService.buildFolderName(input.title, pm?.name || ctx.user.name || "PM");
+                    const folderName = SharePointService.buildFolderName(input.title, input.customerName || opportunity.customerName || "未知公司", pm?.name || ctx.user.name || "PM");
                     const { folderUrl } = await sharePointService.createProjectFolder(setting.value, "專案", folderName);
                     if (folderUrl) {
                         await ServiceRequestModel.updateOne({ _id: result._id }, { $set: { sharePointFolderUrl: folderUrl } });

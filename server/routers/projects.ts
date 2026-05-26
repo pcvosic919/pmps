@@ -227,7 +227,7 @@ export const projectsRouter = router({
                 const setting = await SystemSettingModel.findOne({ key: "sharePointSiteUrl" }).lean();
                 if (setting?.value) {
                     const pm = await UserModel.findById(input.pmId).select("name").lean();
-                    const folderName = SharePointService.buildFolderName(input.title, pm?.name || "PM");
+                    const folderName = SharePointService.buildFolderName(input.title, input.customerName || oppCustomerName || "未知公司", pm?.name || "PM");
                     const { folderUrl } = await sharePointService.createProjectFolder(setting.value, "專案", folderName);
                     if (folderUrl) {
                         await ServiceRequestModel.updateOne({ _id: sr._id }, { $set: { sharePointFolderUrl: folderUrl } });
