@@ -1,5 +1,6 @@
 import { trpc } from "../lib/trpc";
 import { Folder, File, ExternalLink, RefreshCw, AlertTriangle } from "lucide-react";
+import { toast } from "react-hot-toast";
 
 interface SharePointFilesSectionProps {
   category: "商機" | "專案";
@@ -53,9 +54,10 @@ export function SharePointFilesSection({ category, sharePointFolderUrl, title = 
               try {
                 const result = await ensureFolderMutation.mutateAsync({ category, sharePointFolderUrl: sharePointFolderUrl || "" });
                 popup.location.href = result.folderUrl;
-              } catch (err) {
+              } catch (err: any) {
                 popup.close();
                 console.error(err);
+                toast.error(err.message || "開啟 SharePoint 資料夾失敗，請確認名稱是否包含特殊字元或網路連線正常");
               }
             }}
             disabled={ensureFolderMutation.isPending}
