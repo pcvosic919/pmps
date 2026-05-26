@@ -33,6 +33,9 @@ services:
         condition: service_healthy
     networks:
       - pmp_network
+    dns:
+      - 8.8.8.8
+      - 1.1.1.1
 
 volumes:
   mongodb_data:
