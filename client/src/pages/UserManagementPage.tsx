@@ -26,6 +26,7 @@ const editableRoles = ["admin", "manager", "pm", "presales", "tech", "user"] as 
 
 const editUserSchema = z.object({
     department: z.string().optional(),
+    managedDepartments: z.array(z.string()).optional(),
     role: z.enum(editableRoles),
     roles: z.array(z.enum(roles)).optional(),
     isActive: z.boolean().default(true)
@@ -98,7 +99,7 @@ export function UserManagementPage() {
 
     const editForm = useForm<any>({
         resolver: zodResolver(editUserSchema) as any,
-        defaultValues: { department: "", role: "user", isActive: true, roles: [] }
+        defaultValues: { department: "", managedDepartments: [], role: "user", isActive: true, roles: [] }
     });
 
     const batchEditForm = useForm<any>({
@@ -109,6 +110,7 @@ export function UserManagementPage() {
         if (editingUser) {
             editForm.reset({
                 department: editingUser.department || "",
+                managedDepartments: editingUser.managedDepartments || [],
                 role: editingUser.role,
                 isActive: editingUser.isActive,
                 roles: (editingUser.roles || []) as Role[]
@@ -127,6 +129,7 @@ export function UserManagementPage() {
         updateUser.mutate({
             id: editingUser.id,
             department: values.department,
+            managedDepartments: values.managedDepartments || [],
             role: values.role,
             isActive: values.isActive,
             roles: (values.roles || []) as Role[]
@@ -282,6 +285,7 @@ export function UserManagementPage() {
                                 <th className="px-6 py-3 font-medium">用戶姓名</th>
                                 <th className="px-6 py-3 font-medium">電子郵件</th>
                                 <th className="px-6 py-3 font-medium">部門</th>
+                                <th className="px-6 py-3 font-medium">管理部門</th>
                                 <th className="px-6 py-3 font-medium">登入來源</th>
                                 <th className="px-6 py-3 font-medium">主角色 (Role)</th>
                                 <th className="px-6 py-3 font-medium">副角色 (Roles)</th>
@@ -292,7 +296,7 @@ export function UserManagementPage() {
                         <tbody className="divide-y divide-border">
                             {filteredUsers?.length === 0 ? (
                                 <tr>
-                                    <td colSpan={8} className="px-6 py-8 text-center text-muted-foreground">找不到符合的人員</td>
+                                    <td colSpan={10} className="px-6 py-8 text-center text-muted-foreground">找不到符合的人員</td>
                                 </tr>
                             ) : (
                                 filteredUsers?.map((user) => (
@@ -308,6 +312,11 @@ export function UserManagementPage() {
                                         <td className="px-6 py-4 font-medium">{user.name}</td>
                                         <td className="px-6 py-4 text-muted-foreground">{user.email}</td>
                                         <td className="px-6 py-4 text-muted-foreground">{user.department || "-"}</td>
+                                        <td className="px-6 py-4 text-muted-foreground text-xs">
+                                            {user.managedDepartments && user.managedDepartments.length > 0
+                                                ? user.managedDepartments.join(", ")
+                                                : "-"}
+                                        </td>
                                         <td className="px-6 py-4">
                                             <span className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-semibold ${user.provider === "entra" ? "bg-blue-100 text-blue-700" : "bg-slate-100 text-slate-700"}`}>
                                                 {user.provider === "entra" ? "Entra ID" : "Manual"}
@@ -489,6 +498,28 @@ export function UserManagementPage() {
                                                     <SelectItem value="business">BUSINESS</SelectItem>
                                                 </SelectContent>
                                             </Select>
+                                            <FormMessage />
+                                        </FormItem>
+                                    )}
+                                />
+                                <FormField
+                                    control={editForm.control}
+                                    name="managedDepartments"
+                                    render={({ field }: any) => (
+                                        <FormItem>
+                                            <FormLabel>管理部門 (Managed Departments)</FormLabel>
+                                            <FormControl>
+                                                <Input
+                                                    placeholder="輸入部門代碼，以逗號分隔，例如: IE0C00, IE0C30"
+                                                    value={(field.value || []).join(", ")}
+                                                    onChange={(e) => {
+                                                        const raw = e.target.value;
+                                                        const depts = raw.split(",").map((s: string) => s.trim()).filter(Boolean);
+                                                        field.onChange(depts);
+                                                    }}
+                                                />
+                                            </FormControl>
+                                            <p className="text-xs text-muted-foreground">僅 manager 角色需要設定。設定後該主管可看到指定部門的所有案件與報表</p>
                                             <FormMessage />
                                         </FormItem>
                                     )}

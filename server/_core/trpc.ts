@@ -12,6 +12,7 @@ export type UserSession = {
     email: string;
     name: string;
     department?: string;
+    managedDepartments: string[];
     role: Role;
     roles: Role[];
     isActive: boolean;
@@ -36,6 +37,7 @@ export const createContext = async ({ req, res }: CreateExpressContextOptions) =
                     id: BREAKGLASS_CONFIG.user.id,
                     email: BREAKGLASS_CONFIG.user.email,
                     name: BREAKGLASS_CONFIG.user.name,
+                    managedDepartments: [],
                     role: BREAKGLASS_CONFIG.user.role,
                     roles: BREAKGLASS_CONFIG.user.roles,
                     isActive: true
@@ -51,6 +53,7 @@ export const createContext = async ({ req, res }: CreateExpressContextOptions) =
                             email: dbUser.email,
                             name: dbUser.name,
                             department: dbUser.department,
+                            managedDepartments: (dbUser as any).managedDepartments || [],
                             role: dbUser.role as Role,
                             roles: (dbUser.roles || []) as Role[],
                             isActive: dbUser.isActive

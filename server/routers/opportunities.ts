@@ -15,6 +15,7 @@ import {
     canAccessOpportunity,
     canManageOpportunity,
     canManageTimesheet,
+    getManagedDepartments,
     hasAnyRole,
     isOpportunityBusinessOwner,
 } from "../_core/authorization";
@@ -348,8 +349,11 @@ export const opportunitiesRouter = router({
     getPresalesTimesheetOverview: roleProcedure(["admin", "manager", "pm"])
         .query(async ({ ctx }) => {
             let userQuery: any = {};
-            if (!hasAnyRole(ctx.user as any, ["admin"]) && hasAnyRole(ctx.user as any, ["manager"]) && ctx.user.department) {
-                const deptUsers = await UserModel.find({ department: ctx.user.department }, { _id: 1 }).lean();
+            const depts = getManagedDepartments(ctx.user as any);
+            if (depts !== null) {
+                // depts is an array of departments (null = admin, no restriction)
+                if (depts.length === 0) return [];
+                const deptUsers = await UserModel.find({ department: { $in: depts } }, { _id: 1 }).lean();
                 const deptUserIds = deptUsers.map(u => u._id);
                 if (deptUserIds.length > 0) {
                     userQuery = { techId: { $in: deptUserIds } };

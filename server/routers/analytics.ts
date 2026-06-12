@@ -8,7 +8,7 @@ import { SettlementLockModel } from "../models/SettlementLock";
 import { SystemSettingModel } from "../models/Settings";
 import { z } from "zod";
 import { settlementTypes } from "../../shared/types";
-import { hasAnyRole } from "../_core/authorization";
+import { getManagedDepartments, hasAnyRole } from "../_core/authorization";
 
 const toIdMap = (items: Array<{ _id: unknown; totalHours?: number; totalCost?: number; totalRevenue?: number }>, key: "totalHours" | "totalCost" | "totalRevenue") =>
     new Map(items.map((item) => [item._id?.toString(), item[key] ?? 0]));
@@ -605,9 +605,12 @@ export const analyticsRouter = router({
 
             if (input.reportType === "timesheets") {
                 let tsMatch: any = { workDate: { $gte: start, $lte: end } };
-                if (!hasAnyRole(ctx.user as any, ["admin"]) && hasAnyRole(ctx.user as any, ["manager"]) && ctx.user.department) {
-                    const deptUsers = await UserModel.find({ department: ctx.user.department }, { _id: 1 }).lean();
-                    tsMatch.techId = { $in: deptUsers.map(u => u._id) };
+                if (!hasAnyRole(ctx.user as any, ["admin"])) {
+                    const depts = getManagedDepartments(ctx.user as any);
+                    if (depts !== null && depts.length > 0) {
+                        const deptUsers = await UserModel.find({ department: { $in: depts } }, { _id: 1 }).lean();
+                        tsMatch.techId = { $in: deptUsers.map(u => u._id) };
+                    }
                 } else if (input.department) {
                     const deptUsers = await UserModel.find({ department: input.department }, { _id: 1 }).lean();
                     tsMatch.techId = { $in: deptUsers.map(u => u._id) };
@@ -654,8 +657,11 @@ export const analyticsRouter = router({
                 });
             } else if (input.reportType === "utilization") {
                 let userMatch: any = {};
-                if (!hasAnyRole(ctx.user as any, ["admin"]) && hasAnyRole(ctx.user as any, ["manager"]) && ctx.user.department) {
-                    userMatch.department = ctx.user.department;
+                if (!hasAnyRole(ctx.user as any, ["admin"])) {
+                    const depts = getManagedDepartments(ctx.user as any);
+                    if (depts !== null && depts.length > 0) {
+                        userMatch.department = { $in: depts };
+                    }
                 } else if (input.department) {
                     userMatch.department = input.department;
                 }
@@ -698,11 +704,14 @@ export const analyticsRouter = router({
                 let srMatch: any = {};
                 let oppMatch: any = {};
                 
-                if (!hasAnyRole(ctx.user as any, ["admin"]) && hasAnyRole(ctx.user as any, ["manager"]) && ctx.user.department) {
-                    const deptUsers = await UserModel.find({ department: ctx.user.department }, { _id: 1 }).lean();
-                    const deptIds = deptUsers.map(u => u._id);
-                    srMatch.pmId = { $in: deptIds };
-                    oppMatch.ownerId = { $in: deptIds };
+                if (!hasAnyRole(ctx.user as any, ["admin"])) {
+                    const depts = getManagedDepartments(ctx.user as any);
+                    if (depts !== null && depts.length > 0) {
+                        const deptUsers = await UserModel.find({ department: { $in: depts } }, { _id: 1 }).lean();
+                        const deptIds = deptUsers.map(u => u._id);
+                        srMatch.pmId = { $in: deptIds };
+                        oppMatch.ownerId = { $in: deptIds };
+                    }
                 } else if (input.department) {
                     const deptUsers = await UserModel.find({ department: input.department }, { _id: 1 }).lean();
                     const deptIds = deptUsers.map(u => u._id);

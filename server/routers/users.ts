@@ -67,7 +67,7 @@ export const usersRouter = router({
             }
 
             const items = await UserModel.find(query)
-                .select("name email department title role roles isActive provider createdAt")
+                .select("name email department managedDepartments title role roles isActive provider createdAt")
                 .sort({ [sortBy]: direction })
                 .limit(limit + 1)
                 .lean();
@@ -82,6 +82,7 @@ export const usersRouter = router({
                     name: u.name,
                     email: u.email,
                     department: u.department,
+                    managedDepartments: (u as any).managedDepartments || [],
                     title: u.title,
                     role: u.role,
                     roles: u.roles,
@@ -284,6 +285,7 @@ export const usersRouter = router({
         .input(z.object({
             id: z.string(),
             department: z.string().optional(),
+            managedDepartments: z.array(z.string()).optional(),
             title: z.string().optional(),
             role: z.enum(roles).optional(),
             roles: z.array(z.enum(roles)).optional(),

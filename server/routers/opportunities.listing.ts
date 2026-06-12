@@ -1,4 +1,4 @@
-import { hasAnyRole } from "../_core/authorization";
+import { getManagedDepartments, hasAnyRole } from "../_core/authorization";
 import { toObjectId, type CursorValue } from "../_core/cursor";
 import { UserModel } from "../models/User";
 
@@ -54,16 +54,15 @@ export const getAccessibleOpportunityQuery = async (ctxUser: OpportunityListUser
         return {};
     }
 
-    if (hasAnyRole(ctxUser as any, ["manager"]) && ctxUser.department) {
-        const deptUsers = await UserModel.find({ department: ctxUser.department }, { _id: 1 }).lean();
+    const depts = getManagedDepartments(ctxUser as any);
+    if (depts !== null && depts.length > 0) {
+        const deptUsers = await UserModel.find({ department: { $in: depts } }, { _id: 1 }).lean();
         const deptUserIds = deptUsers.map(u => u._id);
         const departmentApprovalMap: Record<string, Record<string, boolean>> = {
             IE0C00: { approvedSecurity: true },
             IE0C30: { approvedM365: true },
             IE0C50: { approvedAzure: true }
         };
-
-        const approvalClause = departmentApprovalMap[ctxUser.department];
 
         const accessOrClauses: Record<string, unknown>[] = [
             ...baseAccess
@@ -77,8 +76,12 @@ export const getAccessibleOpportunityQuery = async (ctxUser: OpportunityListUser
             );
         }
 
-        if (approvalClause) {
-            accessOrClauses.push(approvalClause);
+        // 對每個管理的部門，加入對應的 approval flag 過濾
+        for (const dept of depts) {
+            const approvalClause = departmentApprovalMap[dept];
+            if (approvalClause) {
+                accessOrClauses.push(approvalClause);
+            }
         }
 
         return {

@@ -227,6 +227,7 @@ export const profileUpdateSchema = z.object({
     name: z.string().min(1),
     email: z.string().email(),
     department: z.string().optional(),
+    managedDepartments: z.array(z.string()).optional(),
     title: z.string().optional(),
     role: z.enum(roles),
     roles: z.array(z.enum(roles)),

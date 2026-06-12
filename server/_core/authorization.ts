@@ -155,3 +155,24 @@ export const canManageTimesheet = (
     idsMatch(timesheet.techId, user.id) ||
     (!!options?.opportunity && canManageOpportunity(user, options.opportunity)) ||
     (!!options?.serviceRequest && isResponsiblePm(user, options.serviceRequest));
+
+/**
+ * 取得主管可管理的部門列表。
+ * - admin → 回傳 null（代表不限制）
+ * - manager 且有 managedDepartments → 回傳那些部門
+ * - manager 但沒設定 managedDepartments → 退回到自己的 department（向下相容）
+ * - 其他角色 → 回傳空陣列（代表不看部門層級資料）
+ */
+export const getManagedDepartments = (user: UserSession): string[] | null => {
+    if (hasAnyRole(user, ["admin"])) return null; // null = 無限制
+
+    if (hasAnyRole(user, ["manager"])) {
+        if (user.managedDepartments?.length > 0) {
+            return user.managedDepartments;
+        }
+        // 向下相容：沒設定 managedDepartments 就用原本的 department
+        return user.department ? [user.department] : [];
+    }
+
+    return []; // 非主管，不能看部門層級資料
+};

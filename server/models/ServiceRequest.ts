@@ -64,7 +64,9 @@ const WbsItemSchema = new Schema<IWbsItem>({
     completionPercentage: { type: Number, default: 0, min: 0, max: 100 },
     colorCode: { type: String, default: "#E2E8F0" },
     level: { type: Number, default: 0 },
-    description: { type: String }
+    description: { type: String },
+    code: { type: String },
+    remarks: { type: String }
 });
 
 const AuditLogSchema = new Schema({
