@@ -168,22 +168,25 @@ export const usersRouter = router({
 
     updateBatchRoles: roleProcedure(["admin"])
         .input(z.object({
-            userIds: z.array(z.string()),
+            userIds: z.array(z.string()).min(1),
             department: z.string().optional(),
-            role: z.enum(roles),
-            roles: z.array(z.enum(roles))
+            role: z.enum(roles).optional(),
+            roles: z.array(z.enum(roles)).optional()
         }))
         .mutation(async ({ input }) => {
-            const { userIds, role, roles, department } = input;
-            const updatePayload: any = { role, roles };
-            if (department !== undefined) {
-                updatePayload.department = department;
-            }
+            const { userIds, ...data } = input;
+            if (Object.keys(data).length === 0) return { success: true };
             await UserModel.updateMany(
                 { _id: { $in: userIds } },
-                { $set: updatePayload }
+                { $set: data }
             );
-            return { success: true, count: userIds.length };
+            return { success: true };
+        }),
+
+    getDepartments: protectedProcedure
+        .query(async () => {
+            const departments = await UserModel.distinct("department", { department: { $nin: [null, ""] } });
+            return departments as string[];
         }),
 
     deleteManual: roleProcedure(["admin"])

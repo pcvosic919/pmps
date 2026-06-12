@@ -358,10 +358,21 @@ export const analyticsRouter = router({
 
             // 取得年度系統設定（目標業績）
             const settingsRecords = await SystemSettingModel.find({ 
-                key: { $in: ["pcPresalesHourlyRate", "pcKpiTarget"] } 
+                key: { $in: ["pcPresalesHourlyRate", "pcKpiTarget", "pcDeptKpiTargets"] } 
             }).lean();
             const settingsMap = new Map(settingsRecords.map((s: any) => [s.key, s.value]));
             const globalKpiTarget = Number(settingsMap.get("pcKpiTarget") || 5000000);
+            
+            let deptKpiTargets: Record<string, number> = {};
+            try {
+                const rawDeptTargets = settingsMap.get("pcDeptKpiTargets");
+                if (rawDeptTargets) {
+                    deptKpiTargets = JSON.parse(rawDeptTargets);
+                }
+            } catch (e) {
+                console.error("Failed to parse pcDeptKpiTargets:", e);
+            }
+
             const presalesRate = Number(settingsMap.get("pcPresalesHourlyRate") || 2000);
 
             // 按部門分組
@@ -369,7 +380,8 @@ export const analyticsRouter = router({
             for (const u of allUsers as any[]) {
                 const dept = u.department || "未指定";
                 if (!deptMap.has(dept)) {
-                    deptMap.set(dept, { users: [], revenue: 0, presalesRevenue: 0, target: globalKpiTarget });
+                    const target = deptKpiTargets[dept] ?? globalKpiTarget;
+                    deptMap.set(dept, { users: [], revenue: 0, presalesRevenue: 0, target });
                 }
                 deptMap.get(dept)!.users.push(u);
             }

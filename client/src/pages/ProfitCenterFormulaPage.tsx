@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { TrendingUp, Save } from "lucide-react";
+import { TrendingUp, Save, Plus, Trash2 } from "lucide-react";
 import { toast } from "react-hot-toast";
 import { trpc } from "../lib/trpc";
 
@@ -11,11 +11,17 @@ const defaultSettings = {
     pcUtilizationTarget: 80,
     pcPresalesHourlyRate: 2000,
     pcMaintenancePointValue: 500,
+    pcKpiTarget: 5000000,
+    pcDeptKpiTargets: {} as Record<string, number>,
 };
 
 export default function ProfitCenterFormulaPage() {
     const [settings, setSettings] = useState(defaultSettings);
+    const [selectedDept, setSelectedDept] = useState("");
+    const [customTarget, setCustomTarget] = useState("");
+    
     const utils = trpc.useUtils();
+    const { data: departments } = trpc.users.getDepartments.useQuery();
 
     const { data, isLoading } = trpc.system.getSettings.useQuery();
     const updateSettings = trpc.system.updateSettings.useMutation({
@@ -38,6 +44,8 @@ export default function ProfitCenterFormulaPage() {
                 pcUtilizationTarget: data.pcUtilizationTarget,
                 pcPresalesHourlyRate: data.pcPresalesHourlyRate ?? 2000,
                 pcMaintenancePointValue: data.pcMaintenancePointValue ?? 500,
+                pcKpiTarget: (data as any).pcKpiTarget ?? 5000000,
+                pcDeptKpiTargets: (data as any).pcDeptKpiTargets ?? {},
             });
         }
     }, [data]);
@@ -182,6 +190,94 @@ export default function ProfitCenterFormulaPage() {
                                 className="w-full p-2.5 rounded-lg border border-input bg-background/50 focus:bg-background transition-colors"
                             />
                             <p className="text-xs text-muted-foreground mt-1.5">各部門年度業績目標基準，用於 KPI 儀表板的達成率與 Gap 計算。</p>
+                        </div>
+                    </div>
+
+                    <div className="grid md:grid-cols-1 gap-8 border-t border-border/50 pt-8">
+                        <div>
+                            <label className="block text-sm font-bold mb-2">各部門個別 KPI 目標 (Department Override)</label>
+                            <p className="text-xs text-muted-foreground mb-4">若有特別設定，KPI 儀表板會優先使用這裡的金額；若無設定，則自動套用上方的全域預設目標。</p>
+                            
+                            <div className="flex gap-3 mb-4">
+                                <select 
+                                    className="p-2.5 rounded-lg border border-input bg-background/50 focus:bg-background"
+                                    value={selectedDept}
+                                    onChange={e => setSelectedDept(e.target.value)}
+                                >
+                                    <option value="">選擇部門...</option>
+                                    {departments?.map(d => (
+                                        <option key={d} value={d}>{d}</option>
+                                    ))}
+                                </select>
+                                <input
+                                    type="number"
+                                    min={0}
+                                    placeholder="目標金額"
+                                    value={customTarget}
+                                    onChange={e => setCustomTarget(e.target.value)}
+                                    className="p-2.5 rounded-lg border border-input bg-background/50 focus:bg-background"
+                                />
+                                <button
+                                    type="button"
+                                    onClick={() => {
+                                        if (selectedDept && customTarget) {
+                                            setSettings(s => ({
+                                                ...s,
+                                                pcDeptKpiTargets: {
+                                                    ...(s.pcDeptKpiTargets || {}),
+                                                    [selectedDept]: Number(customTarget)
+                                                }
+                                            }));
+                                            setSelectedDept("");
+                                            setCustomTarget("");
+                                        }
+                                    }}
+                                    className="bg-secondary text-secondary-foreground px-4 py-2 rounded-lg hover:bg-secondary/80 flex items-center"
+                                >
+                                    <Plus className="w-4 h-4 mr-1" /> 新增 / 更新
+                                </button>
+                            </div>
+
+                            <div className="bg-muted/20 border border-border/50 rounded-lg overflow-hidden">
+                                <table className="w-full text-sm text-left">
+                                    <thead className="bg-muted/50">
+                                        <tr>
+                                            <th className="px-4 py-2 font-medium">部門代碼</th>
+                                            <th className="px-4 py-2 font-medium">專屬 KPI 目標 (NT$)</th>
+                                            <th className="px-4 py-2 font-medium w-20 text-center">操作</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody className="divide-y divide-border/50">
+                                        {Object.entries(settings.pcDeptKpiTargets || {}).length === 0 ? (
+                                            <tr>
+                                                <td colSpan={3} className="px-4 py-6 text-center text-muted-foreground">尚未設定個別部門目標</td>
+                                            </tr>
+                                        ) : (
+                                            Object.entries(settings.pcDeptKpiTargets || {}).map(([dept, target]) => (
+                                                <tr key={dept} className="hover:bg-muted/10">
+                                                    <td className="px-4 py-2.5 font-medium">{dept}</td>
+                                                    <td className="px-4 py-2.5">{(target as number).toLocaleString()}</td>
+                                                    <td className="px-4 py-2.5 text-center">
+                                                        <button
+                                                            type="button"
+                                                            onClick={() => {
+                                                                setSettings(s => {
+                                                                    const newTargets = { ...s.pcDeptKpiTargets };
+                                                                    delete newTargets[dept];
+                                                                    return { ...s, pcDeptKpiTargets: newTargets };
+                                                                });
+                                                            }}
+                                                            className="text-red-500 hover:bg-red-50 p-1.5 rounded"
+                                                        >
+                                                            <Trash2 className="w-4 h-4" />
+                                                        </button>
+                                                    </td>
+                                                </tr>
+                                            ))
+                                        )}
+                                    </tbody>
+                                </table>
+                            </div>
                         </div>
                     </div>
                 </div>

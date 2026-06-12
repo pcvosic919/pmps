@@ -32,6 +32,7 @@ const settingsPayloadSchema = z.object({
     pcPresalesHourlyRate: z.number().min(0).default(2000),
     pcMaintenancePointValue: z.number().min(0).default(500),
     pcKpiTarget: z.number().min(0).default(5000000),
+    pcDeptKpiTargets: z.record(z.number().min(0)).default({}),
     sharePointSiteUrl: z.string().trim().default("")
 });
 
@@ -61,6 +62,7 @@ const defaultSettings = {
     pcPresalesHourlyRate: 2000,
     pcMaintenancePointValue: 500,
     pcKpiTarget: 5000000,
+    pcDeptKpiTargets: {},
     sharePointSiteUrl: ""
 };
 
@@ -97,6 +99,7 @@ const settingDefinitions: Record<SettingsKey, SettingDefinition> = {
     pcPresalesHourlyRate: { category: "general", valueType: "number" },
     pcMaintenancePointValue: { category: "general", valueType: "number" },
     pcKpiTarget: { category: "general", valueType: "number" },
+    pcDeptKpiTargets: { category: "general", valueType: "json" },
     sharePointSiteUrl: { category: "integrations", valueType: "string" }
 };
 
