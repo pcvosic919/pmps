@@ -153,6 +153,9 @@ export async function syncEntraUsersJob() {
         let created = 0;
         let updated = 0;
         let disabled = 0;
+        
+        // Track the provider IDs of all valid users fetched from Entra ID
+        const validProviderIds = syncCandidates.map((user) => user.id);
 
         for (const directoryUser of syncCandidates) {
             const email = (directoryUser.mail || directoryUser.userPrincipalName || "").trim().toLowerCase();
@@ -186,12 +189,20 @@ export async function syncEntraUsersJob() {
             }
         }
 
+        // Identify and delete orphaned Entra users
+        // An orphaned user is a user with provider "entra" whose providerId is not in the current sync batch
+        const deleteResult = await UserModel.deleteMany({
+            provider: "entra",
+            providerId: { $nin: validProviderIds }
+        });
+
         return {
             totalFetched: directoryUsers.length,
             totalSynced: syncCandidates.length,
             created,
             updated,
-            disabled
+            disabled,
+            deleted: deleteResult.deletedCount
         };
     } catch (error) {
         console.error("syncEntraUsersJob failed:", error);
