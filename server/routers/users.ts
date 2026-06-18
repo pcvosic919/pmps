@@ -166,6 +166,12 @@ export const usersRouter = router({
             return result;
         }),
 
+    clearAllEntraUsers: roleProcedure(["admin"])
+        .mutation(async () => {
+            const result = await UserModel.deleteMany({ provider: "entra" });
+            return { deletedCount: result.deletedCount };
+        }),
+
     updateBatchRoles: roleProcedure(["admin"])
         .input(z.object({
             userIds: z.array(z.string()).min(1),

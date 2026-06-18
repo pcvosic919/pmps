@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from "react";
 import { trpc } from "../lib/trpc";
-import { Users as UsersIcon, Edit, UserX, UserPlus, Search, Loader2, RefreshCw, Settings2 } from "lucide-react";
+import { Users as UsersIcon, Edit, UserX, UserPlus, Search, Loader2, RefreshCw, Settings2, Trash2 } from "lucide-react";
 import { z } from "zod";
 import { roles, type Role } from "../../../shared/types";
 import { useForm } from "react-hook-form";
@@ -11,6 +11,7 @@ import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useDebounce } from "../lib/useDebounce";
+import { toast } from "react-hot-toast";
 
 const userSchema = z.object({
     name: z.string().min(1, "姓名不可為空"),
@@ -73,9 +74,23 @@ export function UserManagementPage() {
     const updateUser = trpc.users.updateUser.useMutation({ onSuccess: () => { setEditingUser(null); void refreshUsers(); } });
     const deleteUser = trpc.users.deleteManual.useMutation({ onSuccess: () => { void refreshUsers(); } });
     const createUser = trpc.users.createManual.useMutation({ onSuccess: () => { setIsCreatingUser(false); createForm.reset(); void refreshUsers(); } });
+    
     const syncEntraUsers = trpc.users.syncEntraUsers.useMutation({
-        onSuccess: () => {
-            void refreshUsers();
+        onSuccess: async () => {
+            await utils.users.list.invalidate();
+        },
+        onError: (err) => {
+            toast.error(err.message || "Entra ID 同步失敗");
+        }
+    });
+
+    const clearAllEntraUsers = trpc.users.clearAllEntraUsers.useMutation({
+        onSuccess: async (data) => {
+            toast.success(`成功清除 ${data.deletedCount} 筆 Entra ID 帳號`);
+            await utils.users.list.invalidate();
+        },
+        onError: (err) => {
+            toast.error(err.message || "清除失敗");
         }
     });
 
@@ -155,7 +170,17 @@ export function UserManagementPage() {
     };
 
     const handleSyncEntraUsers = () => {
-        syncEntraUsers.mutate();
+        toast.promise(syncEntraUsers.mutateAsync(), {
+            loading: "正在與 Microsoft Entra ID 同步...",
+            success: "同步完成",
+            error: "同步失敗"
+        });
+    };
+
+    const handleClearEntraUsers = () => {
+        if (confirm("警告：此操作將永久刪除所有由 Entra ID 同步而來的帳號。\n如果您的 Tenant ID 變更或想要重新抓取乾淨的資料，請按「確定」。\n\n確定要清除嗎？")) {
+            clearAllEntraUsers.mutate();
+        }
     };
 
     const handleRoleToggle = (roleName: Role, currentRoles: Role[], onChange: (roles: Role[]) => void) => {
@@ -217,11 +242,20 @@ export function UserManagementPage() {
                     <button
                         type="button"
                         onClick={handleSyncEntraUsers}
-                        disabled={syncEntraUsers.isPending}
+                        disabled={syncEntraUsers.isPending || clearAllEntraUsers.isPending}
                         className="border border-border bg-background hover:bg-muted/60 px-5 py-2.5 rounded-lg inline-flex items-center text-sm font-medium transition-all shadow-sm disabled:opacity-50"
                     >
                         <RefreshCw className={`w-4 h-4 mr-2 ${syncEntraUsers.isPending ? "animate-spin" : ""}`} />
                         {syncEntraUsers.isPending ? "同步中..." : "同步 Entra ID"}
+                    </button>
+                    <button
+                        type="button"
+                        onClick={handleClearEntraUsers}
+                        disabled={clearAllEntraUsers.isPending || syncEntraUsers.isPending}
+                        className="border border-destructive/20 text-destructive bg-destructive/5 hover:bg-destructive/10 px-5 py-2.5 rounded-lg inline-flex items-center text-sm font-medium transition-all shadow-sm disabled:opacity-50"
+                    >
+                        <Trash2 className="w-4 h-4 mr-2" />
+                        {clearAllEntraUsers.isPending ? "清除中..." : "清查無效帳號"}
                     </button>
                     <button
                         onClick={() => setIsCreatingUser(true)}
