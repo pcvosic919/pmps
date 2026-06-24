@@ -7,6 +7,7 @@ import { TimesheetModel } from "../models/Timesheet";
 import { UserModel } from "../models/User";
 import { SystemSettingModel } from "../models/Settings";
 import { OpportunityModel } from "../models/Opportunity";
+import { CalendarTaskModel } from "../models/CalendarTask";
 import mongoose from "mongoose";
 import { TRPCError } from "@trpc/server";
 import { approvalActions, srStatuses } from "../../shared/types";
@@ -44,6 +45,33 @@ const buildSrMembers = (creatorId: string, pmId: string, joinPmAsMember: boolean
         members.push({ userId: toObjectId(pmId), memberRole: "assignee" as const });
     }
     return members;
+};
+
+const addMonths = (value: Date, months: number) => {
+    const next = new Date(value);
+    next.setMonth(next.getMonth() + months);
+    return next;
+};
+
+const getProjectScheduleWindow = (sr: any) => {
+    const plannedStart = sr.plannedStartDate || sr.startDate || sr.createdAt;
+    const plannedEnd = sr.plannedEndDate || sr.closeDate || sr.completedAt || sr.updatedAt || sr.createdAt;
+    if (!plannedStart || !plannedEnd) return null;
+    return {
+        start: addMonths(new Date(plannedStart), -1),
+        end: addMonths(new Date(plannedEnd), 1)
+    };
+};
+
+const assertWithinProjectScheduleWindow = (sr: any, startDate: Date, endDate: Date) => {
+    const window = getProjectScheduleWindow(sr);
+    if (!window) return;
+    if (startDate < window.start || endDate > window.end) {
+        throw new TRPCError({
+            code: "BAD_REQUEST",
+            message: `任務排程需落在專案起訖日前後一個月內（${window.start.toISOString().slice(0, 10)} ~ ${window.end.toISOString().slice(0, 10)}）`
+        });
+    }
 };
 
 const getEffectiveWbsVersion = (sr: any) => {
@@ -724,17 +752,20 @@ export const projectsRouter = router({
     getMyProjectAssignments: protectedProcedure
         .query(async ({ ctx }) => {
             const userId = new mongoose.Types.ObjectId(ctx.user.id);
-            const srs = await ServiceRequestModel.find({
-                $or: [
-                    { "wbsVersions.items.assigneeId": userId },
-                    { pmId: userId }
-                ]
-            })
-                .select("title pmId wbsVersions")
-                .populate("wbsVersions.items.assigneeId", "name")
-                .lean();
+            const [srs, manualTasks] = await Promise.all([
+                ServiceRequestModel.find({
+                    $or: [
+                        { "wbsVersions.items.assigneeId": userId },
+                        { pmId: userId }
+                    ]
+                })
+                    .select("title pmId wbsVersions createdAt updatedAt plannedStartDate plannedEndDate closeDate completedAt")
+                    .populate("wbsVersions.items.assigneeId", "name")
+                    .lean(),
+                CalendarTaskModel.find({ assigneeId: userId }).lean()
+            ]);
 
-            return srs.flatMap((sr: any) => {
+            const wbsAssignments = srs.flatMap((sr: any) => {
                 const effectiveVersion = getEffectiveWbsVersion(sr);
                 if (!effectiveVersion) {
                     return [];
@@ -755,9 +786,29 @@ export const projectsRouter = router({
                         srTitle: sr.title,
                         assigneeId: item.assigneeId?._id?.toString() || item.assigneeId?.toString(),
                         assigneeName: item.assigneeId?.name || "未指派",
-                        isPmView: isPm && (item.assigneeId?._id?.toString() || item.assigneeId?.toString()) !== ctx.user.id
+                        isPmView: isPm && (item.assigneeId?._id?.toString() || item.assigneeId?.toString()) !== ctx.user.id,
+                        sourceType: "wbs",
+                        projectWindowStart: getProjectScheduleWindow(sr)?.start,
+                        projectWindowEnd: getProjectScheduleWindow(sr)?.end
                     }));
             });
+
+            const manualAssignments = manualTasks.map((task: any) => ({
+                id: task._id.toString(),
+                calendarTaskId: task._id.toString(),
+                title: task.title,
+                estimatedHours: 1,
+                actualHours: 0,
+                startDate: task.startDate,
+                endDate: task.endDate,
+                srTitle: "自行新增",
+                assigneeId: task.assigneeId?.toString(),
+                assigneeName: ctx.user.name || "我",
+                isPmView: false,
+                sourceType: "manual"
+            }));
+
+            return [...wbsAssignments, ...manualAssignments];
         }),
 
     updateWbsItemSchedule: protectedProcedure
@@ -781,11 +832,65 @@ export const projectsRouter = router({
                 throw new TRPCError({ code: "FORBIDDEN", message: "無權限修改此任務" });
             }
             
-            item.startDate = new Date(input.startDate);
-            item.endDate = new Date(input.endDate);
+            const startDate = new Date(input.startDate);
+            const endDate = new Date(input.endDate);
+            assertWithinProjectScheduleWindow(sr, startDate, endDate);
+            item.startDate = startDate;
+            item.endDate = endDate;
             await sr.save();
             
             return { success: true };
+        }),
+
+    createCalendarTask: protectedProcedure
+        .input(z.object({
+            title: z.string().min(1),
+            description: z.string().optional(),
+            assigneeId: z.string().optional(),
+            startDate: z.string().or(z.date()).optional(),
+            endDate: z.string().or(z.date()).optional()
+        }))
+        .mutation(async ({ ctx, input }) => {
+            const task = await CalendarTaskModel.create({
+                title: input.title,
+                description: input.description,
+                assigneeId: toObjectId(input.assigneeId || ctx.user.id),
+                startDate: input.startDate ? new Date(input.startDate) : undefined,
+                endDate: input.endDate ? new Date(input.endDate) : undefined,
+                sourceType: "manual",
+                createdById: toObjectId(ctx.user.id)
+            });
+            return { id: task._id.toString() };
+        }),
+
+    updateCalendarTaskSchedule: protectedProcedure
+        .input(z.object({ id: z.string(), startDate: z.string().or(z.date()), endDate: z.string().or(z.date()) }))
+        .mutation(async ({ ctx, input }) => {
+            const task = await CalendarTaskModel.findById(input.id);
+            if (!task) throw new TRPCError({ code: "NOT_FOUND", message: "找不到行事曆任務" });
+            if (task.assigneeId.toString() !== ctx.user.id && !hasAnyRole(ctx.user, ["admin", "manager", "pm"])) {
+                throw new TRPCError({ code: "FORBIDDEN", message: "無權限修改此任務" });
+            }
+            task.startDate = new Date(input.startDate);
+            task.endDate = new Date(input.endDate);
+            await task.save();
+            return { success: true };
+        }),
+
+    generateWbsQuote: protectedProcedure
+        .input(z.object({ srId: z.string() }))
+        .query(async ({ input }) => {
+            const sr = await ServiceRequestModel.findById(input.srId).populate("wbsVersions.items.assigneeId", "name email costRate").lean();
+            if (!sr) throw new TRPCError({ code: "NOT_FOUND", message: "找不到專案" });
+            const version = getEffectiveWbsVersion(sr) || [...(sr.wbsVersions || [])].sort((a: any, b: any) => b.versionNumber - a.versionNumber)[0];
+            if (!version) throw new TRPCError({ code: "BAD_REQUEST", message: "沒有可轉報價的 WBS" });
+            const items = (version.items || []).map((item: any) => {
+                const user = item.assigneeId;
+                const days = Number(item.estimatedHours || 0);
+                const dailyRate = Number(user?.costRate?.dailyRate || 0);
+                return { title: item.title, assigneeName: user?.name || "未指派", days, dailyRate, amount: days * dailyRate };
+            });
+            return { srId: sr._id.toString(), title: sr.title, versionNumber: version.versionNumber, items, totalAmount: items.reduce((sum: number, item: any) => sum + item.amount, 0) };
         }),
 
     getMyProjectTimesheets: protectedProcedure
