@@ -1,8 +1,44 @@
 import { z } from "zod";
 import { router, protectedProcedure } from "../_core/trpc";
 import { IssueModel } from "../models/Issue";
+import { ServiceRequestModel } from "../models/ServiceRequest";
+import mongoose from "mongoose";
 import { issueStatuses, issuePriorities } from "../../shared/types";
 import { TRPCError } from "@trpc/server";
+
+const syncIssueAssigneeToWbs = async (issue: any) => {
+    if (!issue?.assigneeId) return;
+    const sr = await ServiceRequestModel.findById(issue.srId);
+    if (!sr) return;
+    const versions = sr.wbsVersions || [];
+    let version = [...versions].sort((a: any, b: any) => b.versionNumber - a.versionNumber)[0];
+    if (!version) {
+        sr.wbsVersions.push({
+            versionNumber: 1,
+            status: "submitted",
+            items: [],
+            createdAt: new Date(),
+            auditLogs: []
+        } as any);
+        version = sr.wbsVersions[sr.wbsVersions.length - 1];
+    }
+    const alreadySynced = version.items?.some((item: any) => item.description === `issue:${issue._id.toString()}`);
+    if (alreadySynced) return;
+    version.items.push({
+        _id: new mongoose.Types.ObjectId(),
+        title: `Issue: ${issue.title}`,
+        estimatedHours: 1,
+        actualHours: 0,
+        assigneeId: new mongoose.Types.ObjectId(issue.assigneeId.toString()),
+        completionPercentage: 0,
+        colorCode: "#FDE68A",
+        level: 0,
+        description: `issue:${issue._id.toString()}`,
+        remarks: "由專案 Issue 指派自動新增"
+    } as any);
+    sr.markModified("wbsVersions");
+    await sr.save();
+};
 
 export const issuesRouter = router({
     listBySr: protectedProcedure
@@ -29,6 +65,7 @@ export const issuesRouter = router({
                 reporterId: ctx.user.id
             });
             await issue.save();
+            await syncIssueAssigneeToWbs(issue);
             return issue;
         }),
 
@@ -52,6 +89,7 @@ export const issuesRouter = router({
                 .populate("assigneeId", "name email role")
                 .populate("reporterId", "name email role");
             if (!issue) throw new TRPCError({ code: "NOT_FOUND" });
+            await syncIssueAssigneeToWbs(issue);
             return issue;
         }),
 

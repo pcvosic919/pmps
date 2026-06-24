@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { trpc } from "../lib/trpc";
 import { useRoute } from "wouter";
-import { ArrowLeft, Plus, FileText, Clock, Trash2, Save, X, CheckCircle2, XCircle, Upload, Paperclip, AlertCircle } from "lucide-react";
+import { ArrowLeft, Plus, FileText, Clock, Trash2, Save, X, CheckCircle2, XCircle, Upload, Paperclip, AlertCircle, Receipt } from "lucide-react";
 import { Link } from "wouter";
 import toast from "react-hot-toast";
 import { useCurrentUser } from "../lib/useCurrentUser";
@@ -42,6 +42,7 @@ export function WbsManagementPage() {
     const { data: techs } = trpc.users.techList.useQuery();
     const { data: allUsers } = trpc.users.list.useQuery({ limit: 500 });
     const { data: attachments, refetch: refetchAttachments } = trpc.projects.srAttachmentsList.useQuery({ srId }, { enabled: !!srId });
+    const { data: wbsQuote, refetch: refetchWbsQuote } = trpc.projects.generateWbsQuote.useQuery({ srId }, { enabled: false });
 
     // Review state...
     
@@ -317,6 +318,27 @@ export function WbsManagementPage() {
         }
     };
 
+    const handleExportQuote = async () => {
+        const result = await refetchWbsQuote();
+        const quote = result.data || wbsQuote;
+        if (!quote) return;
+        let csvContent = "\ufeff項目,指派人員,天數,日費率,小計\n";
+        quote.items.forEach((item: any) => {
+            csvContent += `${String(item.title).replace(/,/g, ' ')},${item.assigneeName},${item.days},${item.dailyRate},${item.amount}\n`;
+        });
+        csvContent += `總計,,,,${quote.totalAmount}\n`;
+        const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement("a");
+        link.href = url;
+        link.download = `WBS_Quote_SR${srId}.csv`;
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        URL.revokeObjectURL(url);
+        toast.success("已依人員日費率產生報價單");
+    };
+
     const handleDrop = (e: React.DragEvent) => {
         e.preventDefault();
         setIsDragging(false);
@@ -337,12 +359,15 @@ export function WbsManagementPage() {
                         <ArrowLeft className="w-5 h-5 text-muted-foreground" />
                     </a>
                 </Link>
-                <div>
+                <div className="flex-1">
                     <h2 className="text-2xl font-bold flex items-center flex-wrap gap-2">
                         SR-#{sr.id} WBS 管理
                         <span className="text-sm font-medium px-2.5 py-0.5 rounded-full bg-primary/10 text-primary border border-primary/20">{sr.title}</span>
                     </h2>
                 </div>
+                <button onClick={handleExportQuote} className="ml-auto inline-flex items-center gap-2 px-3 py-2 rounded-lg bg-emerald-600 text-white text-sm font-semibold hover:bg-emerald-700 transition-colors">
+                    <Receipt className="w-4 h-4" /> WBS 轉報價單
+                </button>
             </div>
 
             <div className="grid md:grid-cols-3 gap-6">

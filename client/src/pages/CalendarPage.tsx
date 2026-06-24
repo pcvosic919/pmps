@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { trpc } from "../lib/trpc";
 import { format, startOfWeek, addDays, startOfMonth, isSameMonth, isSameDay } from "date-fns";
-import { ChevronLeft, ChevronRight, Calendar as CalendarIcon, Clock, X, AlertCircle } from "lucide-react";
+import { ChevronLeft, ChevronRight, Calendar as CalendarIcon, Clock, X, AlertCircle, Plus } from "lucide-react";
 import toast from "react-hot-toast";
 
 export function CalendarPage() {
@@ -16,9 +16,29 @@ export function CalendarPage() {
     const [selectedDay, setSelectedDay] = useState<Date | null>(null);
     const [showDayModal, setShowDayModal] = useState(false);
     const [quickScheduleTaskId, setQuickScheduleTaskId] = useState("");
+    const [projectFilter, setProjectFilter] = useState("");
+    const [newTaskTitle, setNewTaskTitle] = useState("");
 
     // Fetch WBS items assigned to current user
     const { data: assignments, isLoading } = trpc.projects.getMyProjectAssignments.useQuery();
+
+    const createCalendarTaskMutation = trpc.projects.createCalendarTask.useMutation({
+        onSuccess: () => {
+            utils.projects.getMyProjectAssignments.invalidate();
+            setNewTaskTitle("");
+            toast.success("已新增自行排程任務");
+        },
+        onError: (err) => toast.error(`新增失敗: ${err.message}`)
+    });
+
+    const updateManualScheduleMutation = trpc.projects.updateCalendarTaskSchedule.useMutation({
+        onSuccess: () => {
+            utils.projects.getMyProjectAssignments.invalidate();
+            setEditingEvent(null);
+            toast.success("排程已更新");
+        },
+        onError: (err) => toast.error(`更新失敗: ${err.message}`)
+    });
 
     const updateScheduleMutation = trpc.projects.updateWbsItemSchedule.useMutation({
         onSuccess: () => {
@@ -36,11 +56,18 @@ export function CalendarPage() {
             toast.error("請選擇起訖日期");
             return;
         }
+        const payload = {
+            startDate: new Date(editForm.startDate),
+            endDate: new Date(editForm.endDate)
+        };
+        if (editingEvent.sourceType === "manual") {
+            updateManualScheduleMutation.mutate({ id: editingEvent.calendarTaskId || editingEvent.id, ...payload });
+            return;
+        }
         updateScheduleMutation.mutate({
             srId: editingEvent.srId,
             itemId: editingEvent.id,
-            startDate: new Date(editForm.startDate),
-            endDate: new Date(editForm.endDate)
+            ...payload
         });
     };
 
@@ -70,6 +97,10 @@ export function CalendarPage() {
         const startDate = selectedDay;
         const endDate = addDays(selectedDay, daysNeeded - 1);
 
+        if (task.sourceType === "manual") {
+            updateManualScheduleMutation.mutate({ id: task.calendarTaskId || task.id, startDate, endDate });
+            return;
+        }
         updateScheduleMutation.mutate({
             srId: task.srId,
             itemId: task.id,
@@ -133,7 +164,7 @@ export function CalendarPage() {
                 const isToday = isSameDay(dayCursor, new Date());
 
                 // Find assignments falling on this day
-                const dayAssignments = (assignments || []).filter((a: any) => {
+                const dayAssignments = visibleAssignments.filter((a: any) => {
                     if (!a.startDate || !a.endDate) return false;
                     const eventStart = new Date(a.startDate);
                     const eventEnd = new Date(a.endDate);
@@ -189,12 +220,28 @@ export function CalendarPage() {
 
     if (isLoading) return <div className="p-8 text-center animate-pulse">載入中...</div>;
 
-    const unscheduledAssignments = (assignments || []).filter((a: any) => !a.startDate || !a.endDate);
+    const projectOptions = Array.from(new Set((assignments || []).filter((a: any) => a.sourceType !== "manual").map((a: any) => a.srTitle))).sort();
+    const visibleAssignments = (assignments || []).filter((a: any) => !projectFilter || a.srTitle === projectFilter || a.sourceType === "manual");
+    const unscheduledAssignments = visibleAssignments.filter((a: any) => !a.startDate || !a.endDate);
 
     return (
         <div className="max-w-[1400px] mx-auto space-y-4">
             {renderHeader()}
             
+            <div className="bg-card border border-border/50 rounded-xl p-4 flex flex-col md:flex-row gap-3 md:items-end">
+                <div className="flex-1">
+                    <label className="block text-xs font-semibold text-muted-foreground mb-1">先篩選專案，再細選任務</label>
+                    <select value={projectFilter} onChange={(e) => setProjectFilter(e.target.value)} className="w-full md:w-80 text-sm rounded-lg border border-border bg-background px-3 py-2">
+                        <option value="">全部專案與自行任務</option>
+                        {projectOptions.map((name: string) => <option key={name} value={name}>{name}</option>)}
+                    </select>
+                </div>
+                <div className="flex gap-2 flex-1">
+                    <input value={newTaskTitle} onChange={(e) => setNewTaskTitle(e.target.value)} placeholder="自行新增排程任務" className="flex-1 text-sm rounded-lg border border-border bg-background px-3 py-2" />
+                    <button onClick={() => newTaskTitle.trim() && createCalendarTaskMutation.mutate({ title: newTaskTitle.trim() })} className="px-3 py-2 bg-primary text-primary-foreground rounded-lg text-sm font-semibold inline-flex items-center gap-1"><Plus className="w-4 h-4" />新增</button>
+                </div>
+            </div>
+
             <div className="flex flex-col lg:flex-row gap-6">
                 <div className="flex-1 bg-card border border-border/50 shadow-xl rounded-xl">
                     {renderDays()}
@@ -234,10 +281,10 @@ export function CalendarPage() {
                     
                     <div className="bg-card border border-border/50 rounded-xl p-4 shadow-sm">
                         <h3 className="font-bold mb-1 text-sm">排程狀態</h3>
-                        <p className="text-xs text-muted-foreground mb-3 border-b pb-3">總任務：{assignments?.length || 0} 項</p>
+                        <p className="text-xs text-muted-foreground mb-3 border-b pb-3">總任務：{visibleAssignments.length || 0} 項</p>
                         <div className="flex justify-between items-center">
                             <span className="text-xs text-muted-foreground">已完成排程</span>
-                            <span className="font-semibold text-emerald-600 text-sm">{(assignments?.length || 0) - unscheduledAssignments.length} 項</span>
+                            <span className="font-semibold text-emerald-600 text-sm">{visibleAssignments.length - unscheduledAssignments.length} 項</span>
                         </div>
                     </div>
                 </div>
@@ -261,17 +308,25 @@ export function CalendarPage() {
                                 <label className="block text-xs font-semibold text-muted-foreground mb-1">任務項目</label>
                                 <div className="text-sm border border-border/50 rounded p-2 bg-muted/50 font-medium">{editingEvent.title}</div>
                             </div>
+                            {editingEvent.projectWindowStart && editingEvent.projectWindowEnd && (
+                                <div className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg p-2">
+                                    可排程範圍：{new Date(editingEvent.projectWindowStart).toISOString().slice(0, 10)} ~ {new Date(editingEvent.projectWindowEnd).toISOString().slice(0, 10)}
+                                </div>
+                            )}
                             <div className="grid grid-cols-2 gap-4">
                                 <div>
                                     <label className="block text-xs font-semibold text-muted-foreground mb-1">開始日期</label>
                                     <input type="date" value={editForm.startDate} onChange={e => setEditForm({...editForm, startDate: e.target.value})}
+                                        min={editingEvent.projectWindowStart ? new Date(editingEvent.projectWindowStart).toISOString().slice(0, 10) : undefined}
+                                        max={editingEvent.projectWindowEnd ? new Date(editingEvent.projectWindowEnd).toISOString().slice(0, 10) : undefined}
                                         className="w-full text-sm rounded border border-input bg-background px-3 py-2 text-foreground focus:outline-none focus:ring-1 focus:ring-primary"
                                     />
                                 </div>
                                 <div>
                                     <label className="block text-xs font-semibold text-muted-foreground mb-1">結束日期</label>
                                     <input type="date" value={editForm.endDate} onChange={e => setEditForm({...editForm, endDate: e.target.value})}
-                                        min={editForm.startDate}
+                                        min={editForm.startDate || (editingEvent.projectWindowStart ? new Date(editingEvent.projectWindowStart).toISOString().slice(0, 10) : undefined)}
+                                        max={editingEvent.projectWindowEnd ? new Date(editingEvent.projectWindowEnd).toISOString().slice(0, 10) : undefined}
                                         className="w-full text-sm rounded border border-input bg-background px-3 py-2 text-foreground focus:outline-none focus:ring-1 focus:ring-primary"
                                     />
                                 </div>
@@ -280,9 +335,9 @@ export function CalendarPage() {
                                 <button onClick={() => setEditingEvent(null)} className="px-4 py-2 text-sm text-muted-foreground hover:bg-muted rounded-lg transition-colors">
                                     取消
                                 </button>
-                                <button onClick={handleSaveSchedule} disabled={updateScheduleMutation.isPending}
+                                <button onClick={handleSaveSchedule} disabled={updateScheduleMutation.isPending || updateManualScheduleMutation.isPending}
                                     className="px-4 py-2 text-sm bg-primary text-primary-foreground rounded-lg hover:bg-primary/90 transition-colors disabled:opacity-50">
-                                    {updateScheduleMutation.isPending ? "儲存中..." : "儲存設定"}
+                                    {(updateScheduleMutation.isPending || updateManualScheduleMutation.isPending) ? "儲存中..." : "儲存設定"}
                                 </button>
                             </div>
                         </div>
