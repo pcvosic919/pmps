@@ -4,7 +4,7 @@ import { UserModel } from "../models/User";
 import { TRPCError } from "@trpc/server";
 import { roles } from "../../shared/types";
 import { decodeCursor, encodeCursor, toObjectId } from "../_core/cursor";
-import { assertEntraSyncConfigured, getEntraSettings, syncEntraUsersJob } from "../_core/entra";
+import { assertEntraSyncConfigured, getEntraSettings, pruneStaleEntraUsersJob, syncEntraUsersJob } from "../_core/entra";
 import { hashPassword } from "../_core/password";
 
 const userSortFields = ["name", "email", "role", "createdAt"] as const;
@@ -168,8 +168,15 @@ export const usersRouter = router({
 
     clearAllEntraUsers: roleProcedure(["admin"])
         .mutation(async () => {
-            const result = await UserModel.deleteMany({ provider: "entra" });
-            return { deletedCount: result.deletedCount };
+            const settings = await getEntraSettings();
+            assertEntraSyncConfigured(settings);
+
+            const result = await pruneStaleEntraUsersJob();
+            if (!result) {
+                throw new TRPCError({ code: "PRECONDITION_FAILED", message: "Entra ID sync is not configured properly." });
+            }
+
+            return { deletedCount: result.deleted, totalFetched: result.totalFetched, totalValid: result.totalValid };
         }),
 
     updateBatchRoles: roleProcedure(["admin"])
