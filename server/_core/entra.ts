@@ -140,6 +140,28 @@ export async function fetchEntraUsers(settings: EntraSettings): Promise<EntraDir
     return users;
 }
 
+export async function pruneStaleEntraUsersJob() {
+    const settings = await getEntraSettings();
+    if (!settings.enabled || !settings.clientId || !settings.tenantId || !settings.clientSecret) {
+        return null;
+    }
+
+    const directoryUsers = await fetchEntraUsers(settings);
+    const syncCandidates = directoryUsers.filter((user) => !!(user.mail || user.userPrincipalName));
+    const validProviderIds = syncCandidates.map((user) => user.id);
+
+    const deleteResult = await UserModel.deleteMany({
+        provider: "entra",
+        providerId: { $nin: validProviderIds }
+    });
+
+    return {
+        totalFetched: directoryUsers.length,
+        totalValid: syncCandidates.length,
+        deleted: deleteResult.deletedCount
+    };
+}
+
 export async function syncEntraUsersJob() {
     try {
         const settings = await getEntraSettings();
@@ -153,8 +175,6 @@ export async function syncEntraUsersJob() {
         let created = 0;
         let updated = 0;
         let disabled = 0;
-        
-        // Track the provider IDs of all valid users fetched from Entra ID
         const validProviderIds = syncCandidates.map((user) => user.id);
 
         for (const directoryUser of syncCandidates) {
@@ -189,8 +209,6 @@ export async function syncEntraUsersJob() {
             }
         }
 
-        // Identify and delete orphaned Entra users
-        // An orphaned user is a user with provider "entra" whose providerId is not in the current sync batch
         const deleteResult = await UserModel.deleteMany({
             provider: "entra",
             providerId: { $nin: validProviderIds }

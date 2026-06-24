@@ -86,11 +86,11 @@ export function UserManagementPage() {
 
     const clearAllEntraUsers = trpc.users.clearAllEntraUsers.useMutation({
         onSuccess: async (data) => {
-            toast.success(`成功清除 ${data.deletedCount} 筆 Entra ID 帳號`);
+            toast.success(`已刪除 ${data.deletedCount} 筆舊的 Entra ID 帳號`);
             await utils.users.list.invalidate();
         },
         onError: (err) => {
-            toast.error(err.message || "清除失敗");
+            toast.error(err.message || "刪除舊帳號失敗");
         }
     });
 
@@ -178,7 +178,7 @@ export function UserManagementPage() {
     };
 
     const handleClearEntraUsers = () => {
-        if (confirm("警告：此操作將永久刪除所有由 Entra ID 同步而來的帳號。\n如果您的 Tenant ID 變更或想要重新抓取乾淨的資料，請按「確定」。\n\n確定要清除嗎？")) {
+        if (confirm("系統會重新向 Microsoft Entra ID 取得目前帳號清單，並永久刪除本系統中已不存在於 Entra ID 的舊同步帳號。\n手動建立的帳號不會受影響。\n\n確定要刪除舊帳號嗎？")) {
             clearAllEntraUsers.mutate();
         }
     };
@@ -255,7 +255,7 @@ export function UserManagementPage() {
                         className="border border-destructive/20 text-destructive bg-destructive/5 hover:bg-destructive/10 px-5 py-2.5 rounded-lg inline-flex items-center text-sm font-medium transition-all shadow-sm disabled:opacity-50"
                     >
                         <Trash2 className="w-4 h-4 mr-2" />
-                        {clearAllEntraUsers.isPending ? "清除中..." : "清查無效帳號"}
+                        {clearAllEntraUsers.isPending ? "刪除中..." : "刪除舊帳號"}
                     </button>
                     <button
                         onClick={() => setIsCreatingUser(true)}
@@ -268,7 +268,13 @@ export function UserManagementPage() {
 
             {syncEntraUsers.data && (
                 <div className="rounded-xl border border-primary/20 bg-primary/5 px-4 py-3 text-sm text-foreground">
-                    Entra ID 同步完成：共抓取 {syncEntraUsers.data.totalFetched} 筆目錄資料，成功同步 {syncEntraUsers.data.totalSynced} 筆，其中新增 {syncEntraUsers.data.created} 筆、更新 {syncEntraUsers.data.updated} 筆、停用 {syncEntraUsers.data.disabled} 筆。
+                    Entra ID 同步完成：共抓取 {syncEntraUsers.data.totalFetched} 筆目錄資料，成功同步 {syncEntraUsers.data.totalSynced} 筆，其中新增 {syncEntraUsers.data.created} 筆、更新 {syncEntraUsers.data.updated} 筆、停用 {syncEntraUsers.data.disabled} 筆、刪除舊帳號 {syncEntraUsers.data.deleted} 筆。
+                </div>
+            )}
+
+            {clearAllEntraUsers.data && (
+                <div className="rounded-xl border border-destructive/20 bg-destructive/5 px-4 py-3 text-sm text-foreground">
+                    舊帳號清理完成：共比對 {clearAllEntraUsers.data.totalFetched} 筆 Entra ID 目錄資料，刪除 {clearAllEntraUsers.data.deletedCount} 筆已不存在於 Entra ID 的同步帳號。
                 </div>
             )}
 
