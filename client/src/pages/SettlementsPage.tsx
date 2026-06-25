@@ -3,6 +3,7 @@ import { trpc } from "../lib/trpc";
 import { FileText, Search, Download, Lock, CheckCircle, CalendarDays } from "lucide-react";
 
 import { useCurrentUser } from "../lib/useCurrentUser";
+import { exportRowsToXlsx } from "../lib/exportXlsx";
 
 export function SettlementsPage() {
     const { hasRole } = useCurrentUser();
@@ -80,27 +81,27 @@ export function SettlementsPage() {
 
     const handleExport = () => {
         if (!currentData.length) return;
-        let csvContent = "\ufeff"; // BOM for excel
+        let rows: Record<string, unknown>[];
         if (activeTab === "project") {
-            csvContent += "SR單號,名稱,金額,本月時數,收入費用,毛利,狀態\n";
-            currentData.forEach((r: any) => {
-                csvContent += `SR-${r.id.slice(-6)},${r.title.replace(/,/g, ' ')},${r.contractAmount},${r.totalHours?.toFixed(1) || 0},${r.totalCost},${r.margin},${getStatusLabel(r.status)}\n`;
-            });
+            rows = currentData.map((r: any) => ({
+                "SR單號": `SR-${r.id.slice(-6)}`,
+                "名稱": r.title,
+                "金額": r.contractAmount,
+                "本月時數": r.totalHours?.toFixed(1) || 0,
+                "收入費用": r.totalCost,
+                "毛利": r.margin,
+                "狀態": getStatusLabel(r.status)
+            }));
         } else {
-            csvContent += "商機單號,名稱,客戶,本月協銷營收,狀態\n";
-            currentData.forEach((r: any) => {
-                csvContent += `OPP-${r.id.slice(-6)},${r.title.replace(/,/g, ' ')},${r.customerName.replace(/,/g, ' ')},${r.totalCost},${getStatusLabel(r.status)}\n`;
-            });
+            rows = currentData.map((r: any) => ({
+                "商機單號": `OPP-${r.id.slice(-6)}`,
+                "名稱": r.title,
+                "客戶": r.customerName,
+                "本月協銷營收": r.totalCost,
+                "狀態": getStatusLabel(r.status)
+            }));
         }
-        
-        const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
-        const url = URL.createObjectURL(blob);
-        const link = document.createElement("a");
-        link.setAttribute("href", url);
-        link.setAttribute("download", `${activeTab}_settlement_${currentMonth}.csv`);
-        document.body.appendChild(link);
-        link.click();
-        document.body.removeChild(link);
+        exportRowsToXlsx(rows, `${activeTab}_settlement_${currentMonth}.xlsx`, activeTab === "project" ? "Project" : "Presales");
     };
 
     const handleLock = () => {

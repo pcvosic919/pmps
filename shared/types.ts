@@ -160,6 +160,21 @@ export interface ServiceRequestAttachment {
     createdAt: Date;
 }
 
+export interface ServiceRequestExternalAssignment {
+    userId?: string;
+    handlerName: string;
+    handlerDisplayName?: string;
+    department?: string;
+    teamDepartment?: string;
+    roleName?: string;
+    workType?: string;
+    personalStatus?: string;
+    plannedHours: number;
+    assignedHours: number;
+    actualHours: number;
+    remainingHours: number;
+}
+
 export interface WbsItemInput {
     title: string;
     estimatedHours: number;

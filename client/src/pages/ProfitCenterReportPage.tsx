@@ -3,6 +3,7 @@ import { trpc } from "../lib/trpc";
 import { Calculator, Download, Calendar, TrendingUp, TrendingDown } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { exportArraysToXlsx } from "../lib/exportXlsx";
 
 export function ProfitCenterReportPage() {
     const today = new Date();
@@ -18,7 +19,7 @@ export function ProfitCenterReportPage() {
         endDate
     });
 
-    const handleExportCSV = () => {
+    const handleExportXlsx = () => {
         if (!report) return;
         
         const rows = [
@@ -33,16 +34,7 @@ export function ProfitCenterReportPage() {
             ["ROI (%)", "", "", report.total.roi.toFixed(2) + "%"]
         ];
 
-        let csvContent = "data:text/csv;charset=utf-8,\uFEFF" 
-            + rows.map(e => e.join(",")).join("\n");
-
-        const encodedUri = encodeURI(csvContent);
-        const link = document.createElement("a");
-        link.setAttribute("href", encodedUri);
-        link.setAttribute("download", `profit_center_report_${startDate}_to_${endDate}.csv`);
-        document.body.appendChild(link);
-        link.click();
-        document.body.removeChild(link);
+        exportArraysToXlsx(rows, `profit_center_report_${startDate}_to_${endDate}.xlsx`, "Profit Center");
     };
 
     const formatCurrency = (val: number) => `NT$ ${Math.round(val).toLocaleString()}`;
@@ -56,9 +48,9 @@ export function ProfitCenterReportPage() {
                     </h2>
                     <p className="text-muted-foreground mt-1">統一檢視協銷、專案、維運三大收入貢獻與成本效益 (ROI)</p>
                 </div>
-                <Button onClick={handleExportCSV} disabled={!report || isLoading} variant="outline" className="shadow-sm">
+                <Button onClick={handleExportXlsx} disabled={!report || isLoading} variant="outline" className="shadow-sm">
                     <Download className="w-4 h-4 mr-2" />
-                    匯出 CSV
+                    匯出 Excel
                 </Button>
             </div>
 

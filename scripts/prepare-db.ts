@@ -4,8 +4,10 @@ import mongoose from "mongoose";
 import { connectDB, disconnectDB, getMongoDatabaseName, getMongoUri, isCosmosMongoUri } from "../server/db";
 import { CustomFieldModel } from "../server/models/CustomField";
 import { IssueModel } from "../server/models/Issue";
+import { ImportBatchModel } from "../server/models/ImportBatch";
 import { NotificationModel } from "../server/models/Notification";
 import { OpportunityModel } from "../server/models/Opportunity";
+import { RevenueSnapshotModel } from "../server/models/RevenueSnapshot";
 import { ServiceRequestModel } from "../server/models/ServiceRequest";
 import { SettlementLockModel } from "../server/models/SettlementLock";
 import { SystemSettingModel } from "../server/models/Settings";
@@ -33,6 +35,8 @@ const appModels = [
     SettlementLockModel,
     CustomFieldModel,
     SystemSettingModel,
+    ImportBatchModel,
+    RevenueSnapshotModel,
 ];
 
 function shouldSyncIndexes() {
@@ -42,6 +46,8 @@ function shouldSyncIndexes() {
 function getAppCollectionNames() {
     return appModels.map((model) => model.collection.name);
 }
+
+const createMissingCollections = process.env.DB_PREPARE_CREATE_MISSING !== "false";
 
 function stringifyError(error: unknown) {
     if (error instanceof Error) {
@@ -62,6 +68,10 @@ function isCosmosThroughputLimitError(error: unknown) {
         errorText.includes("total throughput limit") ||
         errorText.includes("x-ms-offer-throughput")
     );
+}
+
+function getMissingCollectionHelp(collectionName: string) {
+    return `Missing collection: ${collectionName}. Set DB_PREPARE_CREATE_MISSING=true or omit it to allow pnpm db:prepare to create missing MongoDB collections.`;
 }
 
 function printCosmosThroughputLimitHelp() {
@@ -85,7 +95,7 @@ Cosmos DB RU/s 上限被觸發，這通常表示 collection 正以 dedicated thr
 `);
 }
 
-async function ensureCollection(model: mongoose.Model<unknown>) {
+async function ensureCollection(model: mongoose.Model<unknown>, options = { createMissingCollections }) {
     const collectionName = model.collection.name;
     const existingCollections = await mongoose.connection.db?.listCollections({ name: collectionName }).toArray();
     const exists = Boolean(existingCollections?.length);

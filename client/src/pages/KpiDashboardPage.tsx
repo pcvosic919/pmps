@@ -2,6 +2,7 @@ import { useMemo, useState } from "react";
 import { trpc } from "../lib/trpc";
 import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip as RechartsTooltip, BarChart, Bar, LineChart, Line, XAxis, YAxis, CartesianGrid } from "recharts";
 import { TrendingUp, Users, AlertTriangle, CheckCircle, PieChart as PieChartIcon, Download } from "lucide-react";
+import { exportArraysToXlsx } from "../lib/exportXlsx";
 
 export function KpiDashboardPage() {
     const [filterDepts, setFilterDepts] = useState<string[]>([]);
@@ -22,6 +23,7 @@ export function KpiDashboardPage() {
     const { data: costRevData, isLoading: costRevLoading } = trpc.analytics.getCostVsRevenuePerPerson.useQuery(filterInput);
     const { data: projectStatusData, isLoading: projectStatusLoading } = trpc.analytics.getProjectStatusData.useQuery(filterInput);
     const { data: deptKpiData, isLoading: deptKpiLoading } = trpc.analytics.getDeptKpi.useQuery();
+    const { data: importedRevenueData, isLoading: importedRevenueLoading } = trpc.analytics.getKpiRevenueDashboard.useQuery();
     const [visibleCharts, setVisibleCharts] = useState({
         opportunityMix: true,
         projectStatus: true,
@@ -56,20 +58,18 @@ export function KpiDashboardPage() {
             rows.push([`trend_${item.month}`, String(item.winRate)]);
         });
 
-        return rows.map((cols) => cols.join(",")).join("\n");
-    }, [kpiData, trendData, utData]);
+        rows.push(["imported_target", String(importedRevenueData?.totalTarget || 0)]);
+        rows.push(["imported_recognized", String(importedRevenueData?.totalRecognized || 0)]);
+        rows.push(["imported_pipeline", String(importedRevenueData?.totalPipeline || 0)]);
+        rows.push(["imported_forecast", String(importedRevenueData?.totalForecast || 0)]);
+        return rows;
+    }, [importedRevenueData, kpiData, trendData, utData]);
 
     const handleExport = () => {
-        const blob = new Blob([exportRows], { type: "text/csv;charset=utf-8;" });
-        const url = URL.createObjectURL(blob);
-        const anchor = document.createElement("a");
-        anchor.href = url;
-        anchor.download = `kpi-dashboard-${new Date().toISOString().slice(0, 10)}.csv`;
-        anchor.click();
-        URL.revokeObjectURL(url);
+        exportArraysToXlsx(exportRows, `kpi-dashboard-${new Date().toISOString().slice(0, 10)}.xlsx`, "KPI Dashboard");
     };
 
-    if (kpiLoading || utLoading || trendLoading || costRevLoading || projectStatusLoading || deptKpiLoading) {
+    if (kpiLoading || utLoading || trendLoading || costRevLoading || projectStatusLoading || deptKpiLoading || importedRevenueLoading) {
         return <div className="p-8 text-center text-muted-foreground animate-pulse">載入 KPI 數據中...</div>;
     }
 
@@ -86,7 +86,7 @@ export function KpiDashboardPage() {
                     className="inline-flex items-center gap-2 rounded-lg border border-border px-4 py-2 text-sm font-medium hover:bg-muted"
                 >
                     <Download className="h-4 w-4" />
-                    匯出 CSV
+                    匯出 Excel
                 </button>
             </div>
 
@@ -178,6 +178,30 @@ export function KpiDashboardPage() {
                 </div>
             </div>
 
+            {importedRevenueData?.hasImport && (
+                <div className="grid gap-4 md:grid-cols-4">
+                    <div className="bg-card p-5 border border-border rounded-xl shadow-sm">
+                        <div className="text-sm text-muted-foreground">年度目標</div>
+                        <div className="text-2xl font-bold mt-1">NT$ {importedRevenueData.totalTarget.toLocaleString()}</div>
+                    </div>
+                    <div className="bg-card p-5 border border-border rounded-xl shadow-sm">
+                        <div className="text-sm text-muted-foreground">實際認列收入</div>
+                        <div className="text-2xl font-bold mt-1 text-emerald-600">NT$ {importedRevenueData.totalRecognized.toLocaleString()}</div>
+                        <div className="text-xs text-muted-foreground mt-1">以結案/認列口徑匯入</div>
+                    </div>
+                    <div className="bg-card p-5 border border-border rounded-xl shadow-sm">
+                        <div className="text-sm text-muted-foreground">Pipeline 預估</div>
+                        <div className="text-2xl font-bold mt-1 text-blue-600">NT$ {importedRevenueData.totalPipeline.toLocaleString()}</div>
+                        <div className="text-xs text-muted-foreground mt-1">以商機預估金額口徑</div>
+                    </div>
+                    <div className="bg-card p-5 border border-border rounded-xl shadow-sm">
+                        <div className="text-sm text-muted-foreground">含 Pipeline 達成率</div>
+                        <div className="text-2xl font-bold mt-1">{importedRevenueData.forecastAchievementRate}%</div>
+                        <div className="text-xs text-muted-foreground mt-1">認列 + Pipeline / 目標</div>
+                    </div>
+                </div>
+            )}
+
             {/* Key Metrics */}
             <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
                 <div className="bg-card p-5 border border-border rounded-xl shadow-sm hover:shadow-md transition-shadow">
@@ -246,6 +270,8 @@ export function KpiDashboardPage() {
                                 <th className="px-6 py-3 text-right font-medium">專案業績</th>
                                 <th className="px-6 py-3 text-right font-medium">協銷業績</th>
                                 <th className="px-6 py-3 text-right font-medium">合計業績</th>
+                                <th className="px-6 py-3 text-right font-medium">匯入認列</th>
+                                <th className="px-6 py-3 text-right font-medium">Pipeline</th>
                                 <th className="px-6 py-3 text-right font-medium">年度目標</th>
                                 <th className="px-6 py-3 text-center font-medium">達成率</th>
                                 <th className="px-6 py-3 text-right font-medium">Gap</th>
@@ -253,7 +279,7 @@ export function KpiDashboardPage() {
                         </thead>
                         <tbody className="divide-y divide-border">
                             {(deptKpiData?.departments || []).length === 0 ? (
-                                <tr><td colSpan={8} className="px-6 py-8 text-center text-muted-foreground">無部門資料</td></tr>
+                                <tr><td colSpan={10} className="px-6 py-8 text-center text-muted-foreground">無部門資料</td></tr>
                             ) : (
                                 (deptKpiData?.departments || []).map((dept: any) => {
                                     const isAchieved = dept.achievementRate >= 100;
@@ -265,6 +291,8 @@ export function KpiDashboardPage() {
                                             <td className="px-6 py-4 text-right">NT$ {dept.projectRevenue.toLocaleString()}</td>
                                             <td className="px-6 py-4 text-right">NT$ {dept.presalesRevenue.toLocaleString()}</td>
                                             <td className="px-6 py-4 text-right font-bold">NT$ {dept.totalRevenue.toLocaleString()}</td>
+                                            <td className="px-6 py-4 text-right text-emerald-700">NT$ {(dept.importedRecognizedRevenue || 0).toLocaleString()}</td>
+                                            <td className="px-6 py-4 text-right text-blue-700">NT$ {(dept.pipelineAmount || 0).toLocaleString()}</td>
                                             <td className="px-6 py-4 text-right text-muted-foreground">NT$ {dept.target.toLocaleString()}</td>
                                             <td className="px-6 py-4 text-center">
                                                 <div className="flex items-center justify-center gap-2">

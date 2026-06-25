@@ -36,6 +36,7 @@ export function ProjectManagementPage() {
 
     const { data: srs, isLoading, refetch } = trpc.projects.srList.useQuery(queryInput);
     const { data: allSrs } = trpc.projects.srList.useQuery({ limit: 200 });
+    const { data: openCasesDashboard } = trpc.analytics.getOpenCasesDashboard.useQuery();
     const { data: pendingWbs } = trpc.projects.getWbsPendingReview.useQuery(undefined, { enabled: isManager });
     const updateStatus = trpc.projects.updateSRStatus.useMutation({ onSuccess: () => refetch() });
     const deleteSr = trpc.projects.delete.useMutation({ 
@@ -98,6 +99,22 @@ export function ProjectManagementPage() {
                 ))}
             </div>
 
+            {openCasesDashboard && openCasesDashboard.totalCases > 0 && (
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                    {[
+                        { label: "匯入未結案", value: openCasesDashboard.openCases, suffix: "件", color: "text-blue-600" },
+                        { label: "分配工時", value: openCasesDashboard.assignedHours, suffix: "h", color: "text-slate-700" },
+                        { label: "已累計工時", value: openCasesDashboard.actualHours, suffix: "h", color: "text-emerald-600" },
+                        { label: "剩餘工時", value: openCasesDashboard.remainingHours, suffix: "h", color: "text-amber-600" },
+                    ].map(card => (
+                        <div key={card.label} className="bg-card border border-border/50 rounded-xl p-4 shadow-sm">
+                            <p className="text-sm text-muted-foreground">{card.label}</p>
+                            <p className={`text-2xl font-bold mt-1 ${card.color}`}>{Number(card.value || 0).toLocaleString()}{card.suffix}</p>
+                        </div>
+                    ))}
+                </div>
+            )}
+
             {isManager && (
                 <div className="bg-card border border-border/50 rounded-xl p-4 flex items-center justify-between gap-4">
                     <div>
@@ -142,6 +159,9 @@ export function ProjectManagementPage() {
                                 <div className="flex-1 min-w-0">
                                     <div className="flex items-center gap-3 flex-wrap mb-2">
                                         <span className="text-xs font-mono text-muted-foreground bg-muted px-2 py-0.5 rounded border">SR-#{sr.id}</span>
+                                        {sr.externalProjectCode && (
+                                            <span className="text-xs font-mono text-blue-700 bg-blue-50 px-2 py-0.5 rounded border border-blue-100">{sr.externalProjectCode}</span>
+                                        )}
                                         <span className={`inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-semibold border ${statusInfo.color}`}>
                                             <StatusIcon status={sr.status} />
                                             {statusInfo.label}
@@ -154,11 +174,21 @@ export function ProjectManagementPage() {
                                     </div>
                                     <h3 className="text-base font-bold text-foreground mb-2">{sr.title}</h3>
                                     <div className="flex items-center gap-6 text-sm text-muted-foreground flex-wrap">
+                                        {sr.customerName && <span>客戶: <span className="font-semibold text-foreground">{sr.customerName}</span></span>}
+                                        {sr.externalServiceType && <span>服務類型: <span className="font-semibold text-foreground">{sr.externalServiceType}</span></span>}
                                         {!hasRole("tech") && <span>合約金額: <span className="font-semibold text-foreground">NT$ {sr.contractAmount?.toLocaleString()}</span></span>}
+                                        {sr.externalAssignments?.length > 0 && (
+                                            <span>匯入工時: <span className="font-semibold text-foreground">
+                                                {sr.externalAssignments.reduce((sum: number, a: any) => sum + (a.actualHours || 0), 0).toLocaleString()}
+                                                /
+                                                {sr.externalAssignments.reduce((sum: number, a: any) => sum + (a.assignedHours || 0), 0).toLocaleString()}h
+                                            </span></span>
+                                        )}
                                         <span className="flex items-center gap-1">
                                             <BarChart3 className="w-3.5 h-3.5" />
                                             預估毛利: <span className={`font-semibold ml-1 ${sr.marginWarning ? "text-red-500" : "text-green-600"}`}>{sr.marginEstimate}%</span>
                                         </span>
+                                        {sr.plannedEndDate && <span>預計結束: {new Date(sr.plannedEndDate).toLocaleDateString()}</span>}
                                         <span>建立: {new Date(sr.createdAt).toLocaleDateString()}</span>
                                     </div>
                                 </div>

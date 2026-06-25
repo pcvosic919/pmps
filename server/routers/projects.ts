@@ -182,7 +182,35 @@ export const projectsRouter = router({
 
         const items = await ServiceRequestModel.find(
             query,
-            { _id: 1, title: 1, contractAmount: 1, srType: 1, pmId: 1, status: 1, marginEstimate: 1, marginWarning: 1, createdAt: 1, opportunityId: 1, members: 1, wbsVersions: 1, changeRequests: 1 }
+            {
+                _id: 1,
+                title: 1,
+                customerName: 1,
+                contractAmount: 1,
+                recognizedRevenueAmount: 1,
+                recognitionMonth: 1,
+                srType: 1,
+                pmId: 1,
+                status: 1,
+                marginEstimate: 1,
+                marginWarning: 1,
+                createdAt: 1,
+                opportunityId: 1,
+                members: 1,
+                wbsVersions: 1,
+                changeRequests: 1,
+                externalProjectCode: 1,
+                externalServiceType: 1,
+                externalStatus: 1,
+                salesDepartment: 1,
+                salesRep: 1,
+                plannedStartDate: 1,
+                plannedEndDate: 1,
+                actualStartDate: 1,
+                actualEndDate: 1,
+                completionPercentage: 1,
+                externalAssignments: 1
+            }
         )
             .sort({ createdAt: -1 })
             .limit(input?.limit ?? 200)

@@ -28,23 +28,59 @@ export interface IServiceRequestMember {
     memberRole: MemberRole;
 }
 
+export interface IServiceRequestExternalAssignment {
+    userId?: mongoose.Types.ObjectId;
+    handlerName: string;
+    handlerDisplayName?: string;
+    department?: string;
+    teamDepartment?: string;
+    roleName?: string;
+    workType?: string;
+    personalStatus?: string;
+    plannedHours: number;
+    assignedHours: number;
+    actualHours: number;
+    remainingHours: number;
+}
+
 export interface IServiceRequestAttachment extends Omit<ServiceRequestAttachment, "uploadedById"> {
     uploadedById: mongoose.Types.ObjectId;
 }
 
 export interface IServiceRequest extends Document {
     opportunityId?: mongoose.Types.ObjectId;
+    externalProjectCode?: string;
+    externalServiceType?: string;
+    externalStatus?: string;
+    externalIssueCode?: string;
+    externalWarrantyProjectCode?: string;
+    externalPresalesCaseCode?: string;
     title: string;
     customerName?: string;
     contractAmount: number;
+    recognizedRevenueAmount?: number;
+    recognitionMonth?: string;
     srType: SrType;
     totalPoints?: number;
     pointValue?: number;
     pmId?: mongoose.Types.ObjectId;
     status: SrStatus;
+    salesDepartment?: string;
+    salesRep?: string;
+    plannedStartDate?: Date;
+    plannedEndDate?: Date;
+    actualStartDate?: Date;
+    actualEndDate?: Date;
+    reviewDate?: Date;
+    warrantyExpiresAt?: Date;
+    billingAllocation?: string;
+    totalWorkItems?: number;
+    completedWorkItems?: number;
+    completionPercentage?: number;
     marginEstimate: number;
     marginWarning: boolean;
     members: IServiceRequestMember[];
+    externalAssignments: IServiceRequestExternalAssignment[];
     attachments: IServiceRequestAttachment[];
     wbsVersions: IWbsVersion[];
     changeRequests: IChangeRequest[];
@@ -99,22 +135,58 @@ const ChangeRequestSchema = new Schema<IChangeRequest>({
     createdAt: { type: Date, default: Date.now }
 });
 
+const ExternalAssignmentSchema = new Schema<IServiceRequestExternalAssignment>({
+    userId: { type: Schema.Types.ObjectId, ref: "User" },
+    handlerName: { type: String, required: true },
+    handlerDisplayName: { type: String },
+    department: { type: String },
+    teamDepartment: { type: String },
+    roleName: { type: String },
+    workType: { type: String },
+    personalStatus: { type: String },
+    plannedHours: { type: Number, default: 0 },
+    assignedHours: { type: Number, default: 0 },
+    actualHours: { type: Number, default: 0 },
+    remainingHours: { type: Number, default: 0 }
+}, { _id: false });
+
 const ServiceRequestSchema = new Schema<IServiceRequest>({
     opportunityId: { type: Schema.Types.ObjectId, ref: "Opportunity" },
+    externalProjectCode: { type: String },
+    externalServiceType: { type: String },
+    externalStatus: { type: String },
+    externalIssueCode: { type: String },
+    externalWarrantyProjectCode: { type: String },
+    externalPresalesCaseCode: { type: String },
     title: { type: String, required: true },
     customerName: { type: String },
     contractAmount: { type: Number, required: true, default: 0 },
+    recognizedRevenueAmount: { type: Number },
+    recognitionMonth: { type: String },
     srType: { type: String, enum: srTypes, default: "project", required: true },
     totalPoints: { type: Number },
     pointValue: { type: Number },
     pmId: { type: Schema.Types.ObjectId, ref: "User" },
     status: { type: String, enum: srStatuses, default: "new", required: true },
+    salesDepartment: { type: String },
+    salesRep: { type: String },
+    plannedStartDate: { type: Date },
+    plannedEndDate: { type: Date },
+    actualStartDate: { type: Date },
+    actualEndDate: { type: Date },
+    reviewDate: { type: Date },
+    warrantyExpiresAt: { type: Date },
+    billingAllocation: { type: String },
+    totalWorkItems: { type: Number },
+    completedWorkItems: { type: Number },
+    completionPercentage: { type: Number, min: 0, max: 100 },
     marginEstimate: { type: Number, default: 0 },
     marginWarning: { type: Boolean, default: false },
     members: [{
         userId: { type: Schema.Types.ObjectId, ref: "User", required: true },
         memberRole: { type: String, enum: memberRoles, default: "assignee", required: true }
     }],
+    externalAssignments: [ExternalAssignmentSchema],
     attachments: [{
         fileName: { type: String, required: true },
         fileKey: { type: String, required: true },
@@ -128,14 +200,22 @@ const ServiceRequestSchema = new Schema<IServiceRequest>({
     }],
     sharePointFolderUrl: { type: String },
     wbsVersions: [WbsVersionSchema],
-    changeRequests: [ChangeRequestSchema]
+    changeRequests: [ChangeRequestSchema],
+    customFields: [{
+        fieldId: { type: Schema.Types.ObjectId, ref: "CustomField" },
+        value: { type: String }
+    }]
 }, { timestamps: true });
 
 ServiceRequestSchema.index({ pmId: 1, status: 1, createdAt: -1 });
 ServiceRequestSchema.index({ opportunityId: 1, createdAt: -1 });
 ServiceRequestSchema.index({ "members.userId": 1, createdAt: -1 });
+ServiceRequestSchema.index({ externalProjectCode: 1 }, { sparse: true });
+ServiceRequestSchema.index({ externalServiceType: 1, status: 1 });
+ServiceRequestSchema.index({ recognitionMonth: 1 });
+ServiceRequestSchema.index({ salesDepartment: 1, createdAt: -1 });
 ServiceRequestSchema.index({ "changeRequests.requesterId": 1, createdAt: -1 });
 ServiceRequestSchema.index({ createdAt: -1 });
-ServiceRequestSchema.index({ title: "text" });
+ServiceRequestSchema.index({ title: "text", customerName: "text", externalProjectCode: "text" });
 
 export const ServiceRequestModel = mongoose.models.ServiceRequest || mongoose.model<IServiceRequest>("ServiceRequest", ServiceRequestSchema);

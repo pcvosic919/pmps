@@ -92,6 +92,27 @@ pnpm typecheck     # TypeScript 型別檢查
 pnpm seed:demo     # 寫入 MongoDB demo 資料
 ```
 
+### Excel 匯入：未結案清單與 KPI 認列/Pipeline
+
+本系統支援將既有 Excel 報表匯入 MongoDB，供儀表板與自訂報表使用。Ubuntu Docker 部署時，建議將來源檔掛載到容器內 `/app/imports` 後執行：
+
+```bash
+# 未結案清單：處理人員管理(全)_未結案清單_*.xlsx
+docker compose run --rm web \
+  node server/dist/server/scripts/import-open-dispatch-cases.js \
+  /app/imports/處理人員管理_未結案清單.xlsx
+
+# 年度目標/實際認列/Pipeline：IE0C00 2026年度目標達成狀況_*.xlsx
+docker compose run --rm web \
+  node server/dist/server/scripts/import-kpi-revenue.js \
+  /app/imports/IE0C00_2026年度目標達成狀況.xlsx
+```
+
+匯入後：
+- 「自訂報表」可匯出 `未結案清單` 與 `年度目標/認列/Pipeline` Excel。
+- 「專案管理」會顯示匯入專案編號、服務類型、處理人員工時摘要。
+- 「KPI 儀表板」會合併匯入的實際認列收入與 Pipeline 預估。
+
 ---
 
 ## 🐳 Docker 與 Azure 部署
@@ -431,7 +452,7 @@ pnpm dev
 ### 4️⃣ 結算、視覺化與 KPI (Settlement & Visual Analytics)
 - **情境**：月末或季末，確認交付狀況。
 - **動作**：主管進入「月度結算」，確認毛利與稼動率無誤後「點選月結鎖定 (Settlement Lock)」。
-- **視覺化**：進入「報表產生器 (Report Builder)」，系統會根據資料自動產出 Recharts 視覺化圖表，並支援匯出 PDF/CSV。
+- **視覺化**：進入「報表產生器 (Report Builder)」，系統會根據資料自動產出 Recharts 視覺化圖表，並支援匯出 PDF/Excel。
 - **儀表板**：KPI 與稼動率看板會根據正式費率、成本與實際工作時數，即時動態呈現公司全模組營收概覽。
 
 ### 5️⃣ AI 與文件整合 (AI & SharePoint)
@@ -459,7 +480,7 @@ pnpm dev
 
 ### KPI 儀表板
 - 可切換顯示模組。
-- 支援將目前 KPI 指標匯出為 CSV，方便彙整報表。
+- 支援將目前 KPI 指標匯出為 Excel，方便彙整報表。
 
 ---
 

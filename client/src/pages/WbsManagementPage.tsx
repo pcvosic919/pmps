@@ -7,6 +7,7 @@ import toast from "react-hot-toast";
 import { useCurrentUser } from "../lib/useCurrentUser";
 import * as XLSX from "xlsx";
 import { SharePointFilesSection } from "../components/SharePointFilesSection";
+import { exportArraysToXlsx, exportRowsToXlsx } from "../lib/exportXlsx";
 
 export function WbsManagementPage() {
     const [, params] = useRoute("/service-requests/:id");
@@ -253,7 +254,7 @@ export function WbsManagementPage() {
         submitVersion.mutate({ srId: sr.id, versionNumber: nextVersionNumber, items: draftItems });
     };
 
-    const handleExportCsv = () => {
+    const handleExportXlsx = () => {
         if (!latestVersion || !latestVersion.items?.length) {
             toast.error("沒有可匯出的 WBS 版本資料");
             return;
@@ -267,28 +268,21 @@ export function WbsManagementPage() {
             const internalCost = days * costRate;
             
             return [
-                `"${item.level === 0 ? item.title.replace(/"/g, '""') : ''}"`, // 專案階段
-                `"${itemNumbers[idx]}"`, // 工作項次
-                `"${item.title.replace(/"/g, '""')}"`, // 工作項目
-                `"${(item.code || '').replace(/"/g, '""')}"`, // 工作編號
-                `"${(item.description || '').replace(/"/g, '""')}"`, // 工作說明
+                item.level === 0 ? item.title : "", // 專案階段
+                itemNumbers[idx], // 工作項次
+                item.title, // 工作項目
+                item.code || "", // 工作編號
+                item.description || "", // 工作說明
                 days, // 工作天數(小計)
-                item.assigneeId ? days : '""', // [人員1]天數
-                item.assigneeId ? costRate : '""', // [人員1]單價
-                '""', '""', // [人員2]
-                '""', '""', // [人員3]
+                item.assigneeId ? days : "", // [人員1]天數
+                item.assigneeId ? costRate : "", // [人員1]單價
+                "", "", // [人員2]
+                "", "", // [人員3]
                 internalCost, // 內部成本小計
-                `"${(item.remarks || '').replace(/"/g, '""')}"` // 備註
+                item.remarks || "" // 備註
             ];
         });
-        const csvContent = "data:text/csv;charset=utf-8,\uFEFF" + [headers.join(","), ...rows.map((r: any[]) => r.join(","))].join("\n");
-        const encodedUri = encodeURI(csvContent);
-        const link = document.createElement("a");
-        link.setAttribute("href", encodedUri);
-        link.setAttribute("download", `WBS_Export_SR${sr.id}_v${latestVersion.version}.csv`);
-        document.body.appendChild(link);
-        link.click();
-        document.body.removeChild(link);
+        exportArraysToXlsx([headers, ...rows], `WBS_Export_SR${sr.id}_v${latestVersion.version}.xlsx`, "WBS");
         toast.success("WBS 已成功完整匯出");
     };
 
@@ -322,20 +316,15 @@ export function WbsManagementPage() {
         const result = await refetchWbsQuote();
         const quote = result.data || wbsQuote;
         if (!quote) return;
-        let csvContent = "\ufeff項目,指派人員,天數,日費率,小計\n";
-        quote.items.forEach((item: any) => {
-            csvContent += `${String(item.title).replace(/,/g, ' ')},${item.assigneeName},${item.days},${item.dailyRate},${item.amount}\n`;
-        });
-        csvContent += `總計,,,,${quote.totalAmount}\n`;
-        const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
-        const url = URL.createObjectURL(blob);
-        const link = document.createElement("a");
-        link.href = url;
-        link.download = `WBS_Quote_SR${srId}.csv`;
-        document.body.appendChild(link);
-        link.click();
-        document.body.removeChild(link);
-        URL.revokeObjectURL(url);
+        const rows = quote.items.map((item: any) => ({
+            "項目": item.title,
+            "指派人員": item.assigneeName,
+            "天數": item.days,
+            "日費率": item.dailyRate,
+            "小計": item.amount
+        }));
+        rows.push({ "項目": "總計", "指派人員": "", "天數": "", "日費率": "", "小計": quote.totalAmount });
+        exportRowsToXlsx(rows, `WBS_Quote_SR${srId}.xlsx`, "Quote");
         toast.success("已依人員日費率產生報價單");
     };
 
@@ -479,8 +468,8 @@ export function WbsManagementPage() {
                                 <h3 className="font-bold text-lg flex items-center"><FileText className="w-5 h-5 mr-2 text-primary" />WBS 版本歷史</h3>
                                 <div className="flex items-center gap-3">
 
-                                    <button onClick={handleExportCsv} className="bg-muted text-foreground hover:bg-muted/80 border px-3 py-1.5 rounded-md inline-flex items-center text-sm font-medium transition-colors shadow-sm">
-                                        匯出 CSV
+                                    <button onClick={handleExportXlsx} className="bg-muted text-foreground hover:bg-muted/80 border px-3 py-1.5 rounded-md inline-flex items-center text-sm font-medium transition-colors shadow-sm">
+                                        匯出 Excel
                                     </button>
                                     {(!latestVersion || latestVersion.status !== "submitted") && (hasRole("admin") || hasRole("manager") || hasRole("tech") || hasRole("presales") || user?.id === sr.pmId) && (
                                         <button onClick={handleStartBuild}

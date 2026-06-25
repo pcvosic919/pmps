@@ -6,12 +6,30 @@ import { UserModel } from "../models/User";
 import { NotificationModel } from "../models/Notification";
 import { SettlementLockModel } from "../models/SettlementLock";
 import { SystemSettingModel } from "../models/Settings";
+import { ImportBatchModel } from "../models/ImportBatch";
+import { RevenueSnapshotModel } from "../models/RevenueSnapshot";
 import { z } from "zod";
 import { settlementTypes } from "../../shared/types";
 import { getManagedDepartments, hasAnyRole } from "../_core/authorization";
 
 const toIdMap = (items: Array<{ _id: unknown; totalHours?: number; totalCost?: number; totalRevenue?: number }>, key: "totalHours" | "totalCost" | "totalRevenue") =>
     new Map(items.map((item) => [item._id?.toString(), item[key] ?? 0]));
+
+const buildDepartmentAccessFilter = async (ctxUser: any, explicitDepartment?: string) => {
+    if (hasAnyRole(ctxUser, ["admin"])) {
+        return explicitDepartment ? [explicitDepartment] : null;
+    }
+
+    const managedDepartments = getManagedDepartments(ctxUser);
+    if (managedDepartments === null) return explicitDepartment ? [explicitDepartment] : null;
+    if (explicitDepartment) return managedDepartments.includes(explicitDepartment) ? [explicitDepartment] : [];
+    return managedDepartments;
+};
+
+const getLatestImportBatchId = async (type: "open_cases" | "kpi_revenue") => {
+    const batch = await ImportBatchModel.findOne({ type, status: "completed" }, { _id: 1 }).sort({ createdAt: -1 }).lean();
+    return batch?._id;
+};
 
 export const analyticsRouter = router({
     getUtilization: roleProcedure(["admin", "manager", "pm"])
@@ -344,9 +362,9 @@ export const analyticsRouter = router({
         .input(z.object({
             year: z.number().optional()  // 指定年度，預設今年
         }).optional())
-        .query(async () => {
+        .query(async ({ input }) => {
             const now = new Date();
-            const year = now.getFullYear();
+            const year = input?.year || now.getFullYear();
             const yearStart = new Date(year, 0, 1);
             const yearEnd = new Date(year, 11, 31, 23, 59, 59, 999);
 
@@ -374,13 +392,19 @@ export const analyticsRouter = router({
             }
 
             const presalesRate = Number(settingsMap.get("pcPresalesHourlyRate") || 2000);
+            const latestKpiBatchId = await getLatestImportBatchId("kpi_revenue");
+            const importedDeptSnapshots = latestKpiBatchId
+                ? await RevenueSnapshotModel.find({ importBatchId: latestKpiBatchId, scope: "department", year }).lean()
+                : [];
+            const importedDeptMap = new Map(importedDeptSnapshots.map((snapshot: any) => [snapshot.department, snapshot]));
 
             // 按部門分組
             const deptMap = new Map<string, { users: any[]; revenue: number; presalesRevenue: number; target: number }>();
             for (const u of allUsers as any[]) {
                 const dept = u.department || "未指定";
                 if (!deptMap.has(dept)) {
-                    const target = deptKpiTargets[dept] ?? globalKpiTarget;
+                    const importedTarget = importedDeptMap.get(dept)?.targetAmount;
+                    const target = importedTarget ?? deptKpiTargets[dept] ?? globalKpiTarget;
                     deptMap.set(dept, { users: [], revenue: 0, presalesRevenue: 0, target });
                 }
                 deptMap.get(dept)!.users.push(u);
@@ -416,6 +440,9 @@ export const analyticsRouter = router({
 
             const result = Array.from(deptMap.entries()).map(([dept, data]) => {
                 const totalRevenue = data.revenue + data.presalesRevenue;
+                const imported = importedDeptMap.get(dept);
+                const importedRecognizedRevenue = imported?.recognizedRevenueAmount ?? 0;
+                const pipelineAmount = imported?.pipelineAmount ?? 0;
                 const achievementRate = data.target > 0 ? Math.round((totalRevenue / data.target) * 100) : 0;
                 const gap = totalRevenue - data.target;
                 return {
@@ -424,8 +451,12 @@ export const analyticsRouter = router({
                     projectRevenue: data.revenue,
                     presalesRevenue: data.presalesRevenue,
                     totalRevenue,
+                    importedRecognizedRevenue,
+                    pipelineAmount,
+                    revenueWithPipeline: totalRevenue + pipelineAmount,
                     target: data.target,
                     achievementRate,
+                    importedAchievementRate: imported?.achievementRate ? Math.round(imported.achievementRate * 100) : undefined,
                     gap,  // 正數=超標，負數=缺口
                 };
             }).filter(d => d.memberCount > 0);
@@ -603,9 +634,170 @@ export const analyticsRouter = router({
         return { success: true };
     }),
 
+    getOpenCasesDashboard: roleProcedure(["admin", "manager", "pm"])
+        .input(z.object({
+            department: z.string().optional()
+        }).optional())
+        .query(async ({ ctx, input }) => {
+            const allowedDepartments = await buildDepartmentAccessFilter(ctx.user, input?.department);
+            const match: any = { externalProjectCode: { $exists: true, $ne: "" } };
+            if (allowedDepartments !== null) {
+                if (allowedDepartments.length === 0) {
+                    match._id = null;
+                } else {
+                    match.$or = [
+                        { "externalAssignments.department": { $in: allowedDepartments } },
+                        { salesDepartment: { $in: allowedDepartments } }
+                    ];
+                }
+            }
+
+            const [statusAgg, serviceTypeAgg, departmentAgg, assignmentAgg, overdueItems] = await Promise.all([
+                ServiceRequestModel.aggregate([
+                    { $match: match },
+                    { $group: { _id: "$externalStatus", count: { $sum: 1 }, amount: { $sum: "$contractAmount" } } },
+                    { $sort: { count: -1 } }
+                ]),
+                ServiceRequestModel.aggregate([
+                    { $match: match },
+                    { $addFields: { assignedHoursTotal: { $sum: "$externalAssignments.assignedHours" } } },
+                    { $group: { _id: "$externalServiceType", count: { $sum: 1 }, assignedHours: { $sum: "$assignedHoursTotal" } } },
+                    { $sort: { count: -1 } }
+                ]),
+                ServiceRequestModel.aggregate([
+                    { $match: match },
+                    { $unwind: "$externalAssignments" },
+                    { $group: {
+                        _id: "$externalAssignments.department",
+                        cases: { $addToSet: "$externalProjectCode" },
+                        assignedHours: { $sum: "$externalAssignments.assignedHours" },
+                        actualHours: { $sum: "$externalAssignments.actualHours" },
+                        remainingHours: { $sum: "$externalAssignments.remainingHours" }
+                    } },
+                    { $project: { department: "$_id", caseCount: { $size: "$cases" }, assignedHours: 1, actualHours: 1, remainingHours: 1, _id: 0 } },
+                    { $sort: { assignedHours: -1 } }
+                ]),
+                ServiceRequestModel.aggregate([
+                    { $match: match },
+                    { $unwind: "$externalAssignments" },
+                    { $group: {
+                        _id: "$externalAssignments.handlerDisplayName",
+                        department: { $first: "$externalAssignments.department" },
+                        caseCount: { $sum: 1 },
+                        assignedHours: { $sum: "$externalAssignments.assignedHours" },
+                        actualHours: { $sum: "$externalAssignments.actualHours" },
+                        remainingHours: { $sum: "$externalAssignments.remainingHours" }
+                    } },
+                    { $sort: { remainingHours: -1 } },
+                    { $limit: 10 }
+                ]),
+                ServiceRequestModel.find(
+                    {
+                        ...match,
+                        plannedEndDate: { $lt: new Date() },
+                        status: { $nin: ["completed", "cancelled"] }
+                    },
+                    { title: 1, customerName: 1, externalProjectCode: 1, externalServiceType: 1, plannedEndDate: 1, completionPercentage: 1 }
+                ).sort({ plannedEndDate: 1 }).limit(10).lean()
+            ]);
+
+            const totalCases = statusAgg.reduce((sum, item) => sum + item.count, 0);
+            const openCases = statusAgg
+                .filter(item => !String(item._id || "").includes("結案"))
+                .reduce((sum, item) => sum + item.count, 0);
+            const assignedHours = departmentAgg.reduce((sum, item) => sum + (item.assignedHours || 0), 0);
+            const actualHours = departmentAgg.reduce((sum, item) => sum + (item.actualHours || 0), 0);
+            const remainingHours = departmentAgg.reduce((sum, item) => sum + (item.remainingHours || 0), 0);
+
+            return {
+                totalCases,
+                openCases,
+                assignedHours,
+                actualHours,
+                remainingHours,
+                status: statusAgg.map(item => ({ status: item._id || "未指定", count: item.count, amount: item.amount })),
+                serviceTypes: serviceTypeAgg.map(item => ({ serviceType: item._id || "未指定", count: item.count, assignedHours: item.assignedHours || 0 })),
+                departments: departmentAgg,
+                topAssignees: assignmentAgg.map(item => ({
+                    handlerName: item._id || "未指定",
+                    department: item.department || "未指定",
+                    caseCount: item.caseCount,
+                    assignedHours: item.assignedHours || 0,
+                    actualHours: item.actualHours || 0,
+                    remainingHours: item.remainingHours || 0
+                })),
+                overdueItems: overdueItems.map((item: any) => ({
+                    id: item._id.toString(),
+                    externalProjectCode: item.externalProjectCode,
+                    title: item.title,
+                    customerName: item.customerName,
+                    serviceType: item.externalServiceType,
+                    plannedEndDate: item.plannedEndDate,
+                    completionPercentage: item.completionPercentage || 0
+                }))
+            };
+        }),
+
+    getKpiRevenueDashboard: roleProcedure(["admin", "manager"])
+        .input(z.object({
+            year: z.number().optional(),
+            department: z.string().optional()
+        }).optional())
+        .query(async ({ ctx, input }) => {
+            const year = input?.year || new Date().getFullYear();
+            const latestBatchId = await getLatestImportBatchId("kpi_revenue");
+            if (!latestBatchId) {
+                return { year, hasImport: false, departments: [], people: [], totalTarget: 0, totalRecognized: 0, totalPipeline: 0 };
+            }
+
+            const allowedDepartments = await buildDepartmentAccessFilter(ctx.user, input?.department);
+            const match: any = { importBatchId: latestBatchId, year };
+            if (allowedDepartments !== null) {
+                match.department = allowedDepartments.length > 0 ? { $in: allowedDepartments } : "__NO_ACCESS__";
+            }
+
+            const [departments, people] = await Promise.all([
+                RevenueSnapshotModel.find({ ...match, scope: "department" }).sort({ department: 1 }).lean(),
+                RevenueSnapshotModel.find({ ...match, scope: "person" }).sort({ department: 1, employeeName: 1 }).lean()
+            ]);
+
+            const totalTarget = departments.reduce((sum, item: any) => sum + (item.targetAmount || 0), 0);
+            const totalRecognized = departments.reduce((sum, item: any) => sum + (item.recognizedRevenueAmount || 0), 0);
+            const totalPipeline = departments.reduce((sum, item: any) => sum + (item.pipelineAmount || 0), 0);
+
+            return {
+                year,
+                hasImport: true,
+                totalTarget,
+                totalRecognized,
+                totalPipeline,
+                totalForecast: totalRecognized + totalPipeline,
+                achievementRate: totalTarget > 0 ? Math.round((totalRecognized / totalTarget) * 100) : 0,
+                forecastAchievementRate: totalTarget > 0 ? Math.round(((totalRecognized + totalPipeline) / totalTarget) * 100) : 0,
+                departments: departments.map((item: any) => ({
+                    department: item.department,
+                    targetAmount: item.targetAmount || 0,
+                    recognizedRevenueAmount: item.recognizedRevenueAmount || 0,
+                    pipelineAmount: item.pipelineAmount || 0,
+                    forecastAmount: (item.recognizedRevenueAmount || 0) + (item.pipelineAmount || 0),
+                    achievementRate: item.targetAmount > 0 ? Math.round(((item.recognizedRevenueAmount || 0) / item.targetAmount) * 100) : 0
+                })),
+                people: people.map((item: any) => ({
+                    department: item.department,
+                    employeeName: item.employeeName,
+                    schemeType: item.schemeType,
+                    description: item.description,
+                    targetAmount: item.targetAmount || 0,
+                    recognizedRevenueAmount: item.recognizedRevenueAmount || 0,
+                    pipelineAmount: item.pipelineAmount || 0,
+                    achievementRate: item.targetAmount > 0 ? Math.round(((item.recognizedRevenueAmount || 0) / item.targetAmount) * 100) : 0
+                }))
+            };
+        }),
+
     generateReport: roleProcedure(["admin", "manager"])
         .input(z.object({
-            reportType: z.enum(["utilization", "settlement", "timesheets", "project_profitability", "pm_ranking", "budget_variance", "sla_compliance", "renewal_rate"]),
+            reportType: z.enum(["utilization", "settlement", "timesheets", "project_profitability", "pm_ranking", "budget_variance", "sla_compliance", "renewal_rate", "open_cases", "kpi_revenue"]),
             startDate: z.string(),
             endDate: z.string(),
             department: z.string().optional()
@@ -961,6 +1153,112 @@ export const analyticsRouter = router({
                         "\u9054\u6a19": rate >= renewalTarget ? "\u2705" : "\u26a0\ufe0f"
                     };
                 }).sort((a, b) => b["\u7e8c\u7d04/\u52dd\u7387%"] - a["\u7e8c\u7d04/\u52dd\u7387%"]);
+            } else if (input.reportType === "open_cases") {
+                const allowedDepartments = await buildDepartmentAccessFilter(ctx.user, input.department);
+                const srMatch: any = { externalProjectCode: { $exists: true, $ne: "" } };
+                if (allowedDepartments !== null) {
+                    if (allowedDepartments.length === 0) {
+                        srMatch._id = null;
+                    } else {
+                        srMatch.$or = [
+                            { "externalAssignments.department": { $in: allowedDepartments } },
+                            { salesDepartment: { $in: allowedDepartments } }
+                        ];
+                    }
+                }
+                srMatch.$and = [
+                    {
+                        $or: [
+                            { plannedStartDate: { $lte: end } },
+                            { createdAt: { $lte: end } }
+                        ]
+                    },
+                    {
+                        $or: [
+                            { plannedEndDate: { $gte: start } },
+                            { plannedEndDate: { $exists: false } },
+                            { plannedEndDate: null }
+                        ]
+                    }
+                ];
+
+                const srs = await ServiceRequestModel.find(srMatch).sort({ plannedEndDate: 1, externalProjectCode: 1 }).lean();
+                return srs.flatMap((sr: any) => {
+                    const assignments = sr.externalAssignments?.length ? sr.externalAssignments : [null];
+                    return assignments.map((assignment: any) => ({
+                        "公司名稱": sr.customerName || "",
+                        "案件名稱": sr.title || "",
+                        "專案編號": sr.externalProjectCode || "",
+                        "服務類型": sr.externalServiceType || sr.srType || "",
+                        "建案日期": sr.createdAt ? new Date(sr.createdAt).toISOString().slice(0, 10) : "",
+                        "審核日期": sr.reviewDate ? new Date(sr.reviewDate).toISOString().slice(0, 10) : "",
+                        "預計開始時間": sr.plannedStartDate ? new Date(sr.plannedStartDate).toISOString().slice(0, 10) : "",
+                        "預計結束時間": sr.plannedEndDate ? new Date(sr.plannedEndDate).toISOString().slice(0, 10) : "",
+                        "預計結束時間-歷程": "",
+                        "全案開始時間": sr.actualStartDate ? new Date(sr.actualStartDate).toISOString().slice(0, 10) : "",
+                        "全案結束時間": sr.actualEndDate ? new Date(sr.actualEndDate).toISOString().slice(0, 10) : "",
+                        "業務部門": sr.salesDepartment || "",
+                        "業務代表": sr.salesRep || "",
+                        "全案狀態": sr.externalStatus || "",
+                        "個人案件狀態": assignment?.personalStatus || "",
+                        "技術部門_部級": assignment?.department || "",
+                        "技術部門": assignment?.teamDepartment || "",
+                        "處理人員": assignment?.handlerDisplayName || assignment?.handlerName || "",
+                        "角色": assignment?.roleName || "",
+                        "工時類別": assignment?.workType || "",
+                        "建案工時": assignment?.plannedHours || 0,
+                        "分配工時": assignment?.assignedHours || 0,
+                        "已累計工時": assignment?.actualHours || 0,
+                        "執行工時    2023/11/17 ~ 2026/05/26": assignment?.actualHours || 0,
+                        "剩餘工時": assignment?.remainingHours || 0,
+                        "建案人員部門": "",
+                        "建案人員": "",
+                        "問題代號(客服)": sr.externalIssueCode || "",
+                        "案件編號(保固 / 維護專案)": sr.externalWarrantyProjectCode || "",
+                        "起訖時間(保固 / 維護專案)": "",
+                        "案件編號(協銷)": sr.externalPresalesCaseCode || "",
+                        "更新日期": sr.updatedAt ? new Date(sr.updatedAt).toISOString().slice(0, 10) : "",
+                        "保固到期日期": sr.warrantyExpiresAt ? new Date(sr.warrantyExpiresAt).toISOString().slice(0, 10) : "",
+                        "計費分攤": sr.billingAllocation || "",
+                        "認列月份": sr.recognitionMonth || "",
+                        "工作項目": "",
+                        "總工作項目": sr.totalWorkItems || 0,
+                        "總完成工作項目": sr.completedWorkItems || 0,
+                        "總完成百分比": sr.completionPercentage || 0
+                    }));
+                });
+            } else if (input.reportType === "kpi_revenue") {
+                const year = start.getFullYear();
+                const latestBatchId = await getLatestImportBatchId("kpi_revenue");
+                if (!latestBatchId) return [];
+                const allowedDepartments = await buildDepartmentAccessFilter(ctx.user, input.department);
+                const match: any = { importBatchId: latestBatchId, year };
+                if (allowedDepartments !== null) {
+                    match.department = allowedDepartments.length > 0 ? { $in: allowedDepartments } : "__NO_ACCESS__";
+                }
+
+                const snapshots = await RevenueSnapshotModel.find(match).sort({ scope: 1, department: 1, employeeName: 1 }).lean();
+                return snapshots.map((snapshot: any) => ({
+                    "層級": snapshot.scope === "department" ? "部門" : "個人",
+                    "年度": snapshot.year,
+                    "部門": snapshot.department,
+                    "員工編號": snapshot.employeeCode || "",
+                    "員工姓名": snapshot.employeeName || "",
+                    "制度": snapshot.schemeType || "",
+                    "指標": snapshot.description || "",
+                    "年度目標": snapshot.targetAmount || 0,
+                    "Q1目標": snapshot.q1TargetAmount || 0,
+                    "Q2目標": snapshot.q2TargetAmount || 0,
+                    "Q3目標": snapshot.q3TargetAmount || 0,
+                    "Q4目標": snapshot.q4TargetAmount || 0,
+                    "Q1認列": snapshot.q1RecognizedAmount || 0,
+                    "Q2認列": snapshot.q2RecognizedAmount || 0,
+                    "實際認列收入": snapshot.recognizedRevenueAmount || 0,
+                    "Pipeline預估": snapshot.pipelineAmount || 0,
+                    "含Pipeline預估": (snapshot.recognizedRevenueAmount || 0) + (snapshot.pipelineAmount || 0),
+                    "達成率%": snapshot.targetAmount > 0 ? Math.round(((snapshot.recognizedRevenueAmount || 0) / snapshot.targetAmount) * 100) : 0,
+                    "含Pipeline達成率%": snapshot.targetAmount > 0 ? Math.round((((snapshot.recognizedRevenueAmount || 0) + (snapshot.pipelineAmount || 0)) / snapshot.targetAmount) * 100) : 0
+                }));
             }
             
             return [];

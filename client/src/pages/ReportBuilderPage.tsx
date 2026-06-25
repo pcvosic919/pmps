@@ -3,9 +3,22 @@ import { trpc } from "../lib/trpc";
 import { Download, FileText, Printer, Calendar, BarChart2 } from "lucide-react";
 import toast from "react-hot-toast";
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from "recharts";
+import { exportKpiRevenueWorkbook, exportOpenCasesWorkbook, exportRowsToXlsx } from "../lib/exportXlsx";
+
+type ReportType =
+    | "timesheets"
+    | "utilization"
+    | "settlement"
+    | "project_profitability"
+    | "pm_ranking"
+    | "budget_variance"
+    | "sla_compliance"
+    | "renewal_rate"
+    | "open_cases"
+    | "kpi_revenue";
 
 export function ReportBuilderPage() {
-    const [reportType, setReportType] = useState<"timesheets" | "utilization" | "settlement" | "project_profitability" | "pm_ranking" | "budget_variance" | "sla_compliance" | "renewal_rate">("timesheets");
+    const [reportType, setReportType] = useState<ReportType>("timesheets");
     
     // Default to current month
     const today = new Date();
@@ -25,25 +38,20 @@ export function ReportBuilderPage() {
         enabled: !!startDate && !!endDate
     });
 
-    const exportCsv = () => {
+    const exportXlsx = () => {
         if (!reportData || (reportData as any[]).length === 0) {
             toast.error("無資料可供匯出");
             return;
         }
 
-        const headers = Object.keys((reportData as any[])[0]).join(",");
-        const rows = (reportData as any[]).map((row: any) => Object.values(row).map(v => `"${v}"`).join(","));
-        const csvContent = [headers, ...rows].join("\n");
-        
-        const blob = new Blob(["\uFEFF" + csvContent], { type: "text/csv;charset=utf-8;" });
-        const url = URL.createObjectURL(blob);
-        const link = document.createElement("a");
-        link.setAttribute("href", url);
-        link.setAttribute("download", `report_${reportType}_${startDate}.csv`);
-        document.body.appendChild(link);
-        link.click();
-        document.body.removeChild(link);
-        toast.success("CSV 匯出成功");
+        if (reportType === "open_cases") {
+            exportOpenCasesWorkbook(reportData as any[], `處理人員管理_未結案清單_${startDate}.xlsx`);
+        } else if (reportType === "kpi_revenue") {
+            exportKpiRevenueWorkbook(reportData as any[], `2026年度目標達成狀況_Summary.xlsx`);
+        } else {
+            exportRowsToXlsx(reportData as any[], `report_${reportType}_${startDate}.xlsx`, reportType);
+        }
+        toast.success("Excel 匯出成功");
     };
 
     const handlePrint = () => {
@@ -55,14 +63,14 @@ export function ReportBuilderPage() {
             <div className="flex justify-between items-center bg-card p-6 rounded-xl shadow-sm border border-border/50 print:hidden">
                 <div>
                     <h2 className="text-3xl font-bold tracking-tight bg-clip-text text-transparent bg-gradient-to-r from-primary to-primary/60">自訂報表產生器</h2>
-                    <p className="text-muted-foreground mt-1">建立效能分析報表並匯出為 CSV 檔或 PDF 格式（請運用列印功能）</p>
+                    <p className="text-muted-foreground mt-1">建立效能分析報表並匯出為 Excel 檔或 PDF 格式（請運用列印功能）</p>
                 </div>
                 <div className="flex gap-3">
                     <button onClick={handlePrint} className="px-4 py-2 border border-border text-foreground hover:bg-muted rounded-lg flex items-center transition-colors">
                         <Printer className="w-4 h-4 mr-2" /> 列印 / PDF
                     </button>
-                    <button onClick={exportCsv} disabled={!reportData || reportData.length === 0} className="px-4 py-2 bg-primary text-primary-foreground hover:bg-primary/90 rounded-lg flex items-center transition-colors disabled:opacity-50">
-                        <Download className="w-4 h-4 mr-2" /> 匯出 CSV
+                    <button onClick={exportXlsx} disabled={!reportData || reportData.length === 0} className="px-4 py-2 bg-primary text-primary-foreground hover:bg-primary/90 rounded-lg flex items-center transition-colors disabled:opacity-50">
+                        <Download className="w-4 h-4 mr-2" /> 匯出 Excel
                     </button>
                 </div>
             </div>
@@ -77,6 +85,9 @@ export function ReportBuilderPage() {
                             <option value="timesheets">工時清單報表 (Timesheets)</option>
                             <option value="utilization">人力稼動率報表 (Utilization)</option>
                             <option value="settlement">部門利潤結算報表 (Settlement)</option>
+                            <option disabled>--- 匯入資料報表 ---</option>
+                            <option value="open_cases">未結案清單匯出 (Open Cases)</option>
+                            <option value="kpi_revenue">年度目標/認列/Pipeline 報表</option>
                             <option disabled>--- 利潤中心報表 ---</option>
                             <option value="project_profitability">客戶/專案毛利報表 (Profitability)</option>
                             <option value="pm_ranking">PM 排行榜 (營收與毛利)</option>
