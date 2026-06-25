@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import * as Dialog from "@radix-ui/react-dialog";
-import { Search, FileText, Building2, FolderKanban, Users, Activity, Settings } from "lucide-react";
+import { Search, FileText, Building2, FolderKanban, Users, Activity, Settings, FileSpreadsheet } from "lucide-react";
 import { useLocation } from "wouter";
 import { useCurrentUser } from "../lib/useCurrentUser";
 
@@ -26,7 +26,9 @@ export function GlobalSearch() {
         { href: "/projects", icon: FolderKanban, label: "專案看板 (Projects)" },
         { href: "/service-requests", icon: FileText, label: "查閱單號清單 (SR/WBS)" },
         { href: "/resources", icon: Users, label: "查閱資源池與派工 (Resources)" },
-        { href: "/kpi", icon: Activity, label: "部門 KPI 分析 (KPI Dashboard)" },
+        { href: "/kpi", icon: Activity, label: "KPI 達成儀表板" },
+        { href: "/reports", icon: FileText, label: "自訂報表與 Excel 匯出" },
+        { href: "/settlements", icon: FileSpreadsheet, label: "月度結算與鎖定" },
         { href: "/system-settings", icon: Settings, label: "系統與背景設定 (Settings)" }
     ];
 

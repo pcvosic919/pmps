@@ -18,7 +18,6 @@ import {
     LayoutDashboard,
     LogOut,
     Menu,
-    PieChart,
     Search,
     Settings,
     Settings2,
@@ -93,15 +92,26 @@ const navGroups: NavGroup[] = [
         ],
     },
     {
-        key: "analytics",
-        label: "分析 / 結算",
+        key: "people",
+        label: "人力管理",
         items: [
             { icon: Users, label: "資源池", href: "/resources", roles: ["admin", "manager"] },
             { icon: Activity, label: "稼動率", href: "/utilization", roles: ["admin", "manager"] },
-            { icon: PieChart, label: "KPI 儀表板", href: "/kpi", roles: ["admin", "manager"] },
-            { icon: Activity, label: "利潤中心儀表板", href: "/profit-center-report", roles: ["admin", "manager"] },
-            { icon: FileSpreadsheet, label: "月度結算", href: "/settlements", roles: ["admin", "manager"] },
+        ],
+    },
+    {
+        key: "kpiReports",
+        label: "KPI / 報表",
+        items: [
+            { icon: TrendingUp, label: "KPI 達成儀表板", href: "/kpi", roles: ["admin", "manager"] },
             { icon: FileText, label: "自訂報表", href: "/reports", roles: ["admin", "manager"] },
+        ],
+    },
+    {
+        key: "settlement",
+        label: "結算",
+        items: [
+            { icon: FileSpreadsheet, label: "月度結算", href: "/settlements", roles: ["admin", "manager"] },
         ],
     },
     {
