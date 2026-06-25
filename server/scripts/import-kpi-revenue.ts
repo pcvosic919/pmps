@@ -30,7 +30,7 @@ async function importFile(filePath: string) {
         sourceFilePath: filePath,
         status: "processing",
         warnings: [],
-        errors: []
+        errorMessages: []
     });
 
     try {
@@ -123,7 +123,7 @@ async function importFile(filePath: string) {
         console.log(`Imported KPI revenue snapshots: ${snapshots.length}`);
     } catch (error) {
         batch.status = "failed";
-        batch.errors = [error instanceof Error ? error.message : String(error)];
+        batch.errorMessages = [error instanceof Error ? error.message : String(error)];
         await batch.save();
         throw error;
     } finally {

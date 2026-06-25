@@ -13,7 +13,7 @@ export interface IImportBatch extends Document {
     successRows: number;
     failedRows: number;
     warnings: string[];
-    errors: string[];
+    errorMessages: string[];
     createdAt: Date;
     updatedAt: Date;
 }
@@ -28,7 +28,7 @@ const ImportBatchSchema = new Schema<IImportBatch>({
     successRows: { type: Number, default: 0 },
     failedRows: { type: Number, default: 0 },
     warnings: [{ type: String }],
-    errors: [{ type: String }]
+    errorMessages: [{ type: String }]
 }, { timestamps: true });
 
 ImportBatchSchema.index({ type: 1, createdAt: -1 });

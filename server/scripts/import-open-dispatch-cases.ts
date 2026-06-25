@@ -107,7 +107,7 @@ async function importFile(filePath: string) {
         sourceFilePath: filePath,
         status: "processing",
         warnings: [],
-        errors: []
+        errorMessages: []
     });
 
     const warnings: string[] = [];
@@ -220,7 +220,7 @@ async function importFile(filePath: string) {
         batch.successRows = successRows;
         batch.failedRows = rows.length - successRows;
         batch.warnings = warnings;
-        batch.errors = errors;
+        batch.errorMessages = errors;
         await batch.save();
 
         console.log(`Imported open cases: ${successRows}/${rows.length} rows, projects=${groups.size}`);
@@ -231,7 +231,7 @@ async function importFile(filePath: string) {
         }
     } catch (error) {
         batch.status = "failed";
-        batch.errors = [error instanceof Error ? error.message : String(error)];
+        batch.errorMessages = [error instanceof Error ? error.message : String(error)];
         await batch.save();
         throw error;
     } finally {
