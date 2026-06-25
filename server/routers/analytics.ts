@@ -747,7 +747,18 @@ export const analyticsRouter = router({
             const year = input?.year || new Date().getFullYear();
             const latestBatchId = await getLatestImportBatchId("kpi_revenue");
             if (!latestBatchId) {
-                return { year, hasImport: false, departments: [], people: [], totalTarget: 0, totalRecognized: 0, totalPipeline: 0 };
+                return {
+                    year,
+                    hasImport: false,
+                    departments: [],
+                    people: [],
+                    totalTarget: 0,
+                    totalRecognized: 0,
+                    totalPipeline: 0,
+                    totalForecast: 0,
+                    achievementRate: 0,
+                    forecastAchievementRate: 0
+                };
             }
 
             const allowedDepartments = await buildDepartmentAccessFilter(ctx.user, input?.department);
