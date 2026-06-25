@@ -5,10 +5,14 @@ import { connectDB, disconnectDB, getMongoDatabaseName, getMongoUri, isCosmosMon
 import { CustomFieldModel } from "../server/models/CustomField";
 import { IssueModel } from "../server/models/Issue";
 import { ImportBatchModel } from "../server/models/ImportBatch";
+import { KpiPolicyModel } from "../server/models/KpiPolicy";
+import { KpiTargetModel } from "../server/models/KpiTarget";
 import { NotificationModel } from "../server/models/Notification";
 import { OpportunityModel } from "../server/models/Opportunity";
+import { ReportTemplateModel } from "../server/models/ReportTemplate";
 import { RevenueSnapshotModel } from "../server/models/RevenueSnapshot";
 import { ServiceRequestModel } from "../server/models/ServiceRequest";
+import { SettlementAuditLogModel, SettlementSnapshotModel } from "../server/models/SettlementSnapshot";
 import { SettlementLockModel } from "../server/models/SettlementLock";
 import { SystemSettingModel } from "../server/models/Settings";
 import { TimesheetModel } from "../server/models/Timesheet";
@@ -37,6 +41,11 @@ const appModels = [
     SystemSettingModel,
     ImportBatchModel,
     RevenueSnapshotModel,
+    KpiPolicyModel,
+    KpiTargetModel,
+    ReportTemplateModel,
+    SettlementSnapshotModel,
+    SettlementAuditLogModel,
 ];
 
 function shouldSyncIndexes() {

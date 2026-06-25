@@ -30,8 +30,35 @@ export function ReportBuilderPage() {
     const [department, setDepartment] = useState("");
     const [userId, setUserId] = useState("");
     const { data: usersData } = trpc.users.list.useQuery({ limit: 500 });
+    const { data: reportCatalog } = trpc.analytics.getReportCatalog.useQuery();
     const allUsers = usersData?.items || [];
     const filteredUsers = allUsers.filter((user: any) => !department || user.department === department);
+    const fallbackCatalog = [
+        { reportType: "open_cases", label: "未結案清單匯出", category: "executive", description: "長官檢視格式。", isExecutiveFormat: true },
+        { reportType: "kpi_revenue", label: "年度目標/認列/Pipeline 報表", category: "executive", description: "長官檢視格式。", isExecutiveFormat: true },
+        { reportType: "settlement", label: "部門利潤結算報表", category: "finance", description: "月結與利潤中心結算用。", isExecutiveFormat: false },
+        { reportType: "timesheets", label: "工時清單報表", category: "people", description: "工時明細。", isExecutiveFormat: false },
+        { reportType: "utilization", label: "人力稼動率報表", category: "people", description: "人力負載分析。", isExecutiveFormat: false },
+        { reportType: "project_profitability", label: "客戶/專案毛利報表", category: "project", description: "專案毛利分析。", isExecutiveFormat: false },
+        { reportType: "pm_ranking", label: "PM 排行榜", category: "project", description: "PM 營收與毛利排行。", isExecutiveFormat: false },
+        { reportType: "budget_variance", label: "預算偏差分析", category: "project", description: "預算與實際偏差。", isExecutiveFormat: false },
+        { reportType: "sla_compliance", label: "SLA 達成率報表", category: "project", description: "專案準時狀況。", isExecutiveFormat: false },
+        { reportType: "renewal_rate", label: "客戶續約/勝率報表", category: "project", description: "客戶維度勝率。", isExecutiveFormat: false },
+    ];
+    const catalog = reportCatalog?.length ? reportCatalog : fallbackCatalog;
+    const selectedTemplate = catalog.find((template: any) => template.reportType === reportType);
+    const categoryLabels: Record<string, string> = {
+        executive: "主管檢視報表",
+        finance: "財務結算報表",
+        people: "人力資源報表",
+        project: "專案管理報表",
+        system: "系統報表"
+    };
+    const groupedTemplates = catalog.reduce((groups: Record<string, any[]>, template: any) => {
+        if (!groups[template.category]) groups[template.category] = [];
+        groups[template.category].push(template);
+        return groups;
+    }, {});
 
     const { data: reportData, isLoading } = trpc.analytics.generateReport.useQuery({
         reportType,
@@ -87,19 +114,23 @@ export function ReportBuilderPage() {
                     <div>
                         <label className="block text-sm font-medium mb-1">報表類型</label>
                         <select className="w-full border border-border rounded-lg p-2 bg-background focus:ring-2 focus:ring-primary/50 outline-none" value={reportType} onChange={e => setReportType(e.target.value as any)}>
-                            <option value="timesheets">工時清單報表 (Timesheets)</option>
-                            <option value="utilization">人力稼動率報表 (Utilization)</option>
-                            <option value="settlement">部門利潤結算報表 (Settlement)</option>
-                            <option disabled>--- 匯入資料報表 ---</option>
-                            <option value="open_cases">未結案清單匯出 (Open Cases)</option>
-                            <option value="kpi_revenue">年度目標/認列/Pipeline 報表</option>
-                            <option disabled>--- 利潤中心報表 ---</option>
-                            <option value="project_profitability">客戶/專案毛利報表 (Profitability)</option>
-                            <option value="pm_ranking">PM 排行榜 (營收與毛利)</option>
-                            <option value="budget_variance">預算偏差分析 (Budget Variance)</option>
-                            <option value="sla_compliance">SLA 達成率報表 (SLA Compliance)</option>
-                            <option value="renewal_rate">客戶續約/勝率報表 (Renewal Rate)</option>
+                            {Object.entries(groupedTemplates).map(([category, templates]) => (
+                                <optgroup key={category} label={categoryLabels[category] || category}>
+                                    {(templates as any[]).map((template: any) => (
+                                        <option key={template.reportType} value={template.reportType}>
+                                            {template.label}
+                                        </option>
+                                    ))}
+                                </optgroup>
+                            ))}
                         </select>
+                        {selectedTemplate && (
+                            <div className="mt-2 rounded-lg border border-border bg-muted/30 p-2 text-xs text-muted-foreground">
+                                <div className="font-semibold text-foreground">{categoryLabels[selectedTemplate.category] || selectedTemplate.category}</div>
+                                <div className="mt-0.5">{selectedTemplate.description}</div>
+                                {selectedTemplate.isExecutiveFormat && <div className="mt-1 text-primary font-medium">長官格式：會維持指定 Excel 欄位與工作表。</div>}
+                            </div>
+                        )}
                     </div>
 
                     <div>

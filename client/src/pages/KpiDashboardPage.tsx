@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { trpc } from "../lib/trpc";
 import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip as RechartsTooltip, BarChart, Bar, LineChart, Line, XAxis, YAxis, CartesianGrid } from "recharts";
 import { TrendingUp, Users, AlertTriangle, CheckCircle, PieChart as PieChartIcon, Download } from "lucide-react";
@@ -7,6 +7,15 @@ import { exportArraysToXlsx } from "../lib/exportXlsx";
 export function KpiDashboardPage() {
     const [filterDepts, setFilterDepts] = useState<string[]>([]);
     const [filterUsers, setFilterUsers] = useState<string[]>([]);
+    const [targetForm, setTargetForm] = useState({
+        scope: "department",
+        department: "",
+        userId: "",
+        targetAmount: 0,
+        note: ""
+    });
+    const [pipelineWeights, setPipelineWeights] = useState<Record<string, number>>({});
+    const [importedPipelineWeight, setImportedPipelineWeight] = useState(1);
 
     const filterInput = {
         departments: filterDepts.length > 0 ? filterDepts : undefined,
@@ -24,6 +33,23 @@ export function KpiDashboardPage() {
     const { data: projectStatusData, isLoading: projectStatusLoading } = trpc.analytics.getProjectStatusData.useQuery(filterInput);
     const { data: deptKpiData, isLoading: deptKpiLoading } = trpc.analytics.getDeptKpi.useQuery();
     const { data: importedRevenueData, isLoading: importedRevenueLoading } = trpc.analytics.getKpiRevenueDashboard.useQuery();
+    const { data: governance, refetch: refetchGovernance } = trpc.analytics.getKpiGovernance.useQuery({ year: new Date().getFullYear() });
+    const utils = trpc.useContext();
+    const updatePolicy = trpc.analytics.updateKpiPolicy.useMutation({
+        onSuccess: () => {
+            refetchGovernance();
+            utils.analytics.getKpiData.invalidate();
+            utils.analytics.getDeptKpi.invalidate();
+            utils.analytics.getKpiRevenueDashboard.invalidate();
+        }
+    });
+    const upsertTarget = trpc.analytics.upsertKpiTarget.useMutation({
+        onSuccess: () => {
+            refetchGovernance();
+            utils.analytics.getDeptKpi.invalidate();
+            setTargetForm({ scope: "department", department: "", userId: "", targetAmount: 0, note: "" });
+        }
+    });
     const [visibleCharts, setVisibleCharts] = useState({
         opportunityMix: true,
         projectStatus: true,
@@ -61,9 +87,42 @@ export function KpiDashboardPage() {
         rows.push(["imported_target", String(importedRevenueData?.totalTarget || 0)]);
         rows.push(["imported_recognized", String(importedRevenueData?.totalRecognized || 0)]);
         rows.push(["imported_pipeline", String(importedRevenueData?.totalPipeline || 0)]);
+        rows.push(["imported_weighted_pipeline", String(importedRevenueData?.totalWeightedPipeline || 0)]);
         rows.push(["imported_forecast", String(importedRevenueData?.totalForecast || 0)]);
+        rows.push(["weighted_pipeline", String(kpiData?.weightedPipeline || 0)]);
+        rows.push(["forecast_revenue", String(kpiData?.forecastRevenue || 0)]);
         return rows;
     }, [importedRevenueData, kpiData, trendData, utData]);
+
+    useEffect(() => {
+        if (!governance?.policy) return;
+        setPipelineWeights(governance.policy.pipelineWeights || {});
+        setImportedPipelineWeight(governance.policy.importedPipelineWeight ?? 1);
+    }, [governance]);
+
+    const handleSavePolicy = () => {
+        if (!governance?.policy) return;
+        updatePolicy.mutate({
+            year: governance.year,
+            sourceDefinitions: governance.policy.sourceDefinitions,
+            pipelineWeights,
+            importedPipelineWeight,
+            settlementLinkRule: governance.policy.settlementLinkRule
+        });
+    };
+
+    const handleSaveTarget = () => {
+        if (!targetForm.department || targetForm.targetAmount < 0) return;
+        const selectedUser = allUsers.find((u: any) => u.id === targetForm.userId);
+        upsertTarget.mutate({
+            year: governance?.year || new Date().getFullYear(),
+            scope: targetForm.scope as "department" | "person",
+            department: targetForm.scope === "person" ? selectedUser?.department || targetForm.department : targetForm.department,
+            userId: targetForm.scope === "person" ? targetForm.userId || undefined : undefined,
+            targetAmount: Number(targetForm.targetAmount || 0),
+            note: targetForm.note || undefined
+        });
+    };
 
     const handleExport = () => {
         exportArraysToXlsx(exportRows, `kpi-dashboard-${new Date().toISOString().slice(0, 10)}.xlsx`, "KPI Dashboard");
@@ -195,12 +254,99 @@ export function KpiDashboardPage() {
                         <div className="text-xs text-muted-foreground mt-1">以商機預估金額口徑</div>
                     </div>
                     <div className="bg-card p-5 border border-border rounded-xl shadow-sm">
-                        <div className="text-sm text-muted-foreground">含 Pipeline 達成率</div>
-                        <div className="text-2xl font-bold mt-1">{importedRevenueData.forecastAchievementRate}%</div>
-                        <div className="text-xs text-muted-foreground mt-1">認列 + Pipeline / 目標</div>
+                        <div className="text-sm text-muted-foreground">加權預估達成率</div>
+                        <div className="text-2xl font-bold mt-1">{importedRevenueData.weightedForecastAchievementRate ?? importedRevenueData.forecastAchievementRate}%</div>
+                        <div className="text-xs text-muted-foreground mt-1">認列 + 加權 Pipeline / 目標</div>
                     </div>
                 </div>
             )}
+
+            <div className="grid gap-4 lg:grid-cols-3">
+                <div className="bg-card border border-border rounded-xl p-5 shadow-sm lg:col-span-1">
+                    <h3 className="font-bold mb-3">KPI 資料來源定義</h3>
+                    <div className="space-y-3">
+                        {(governance?.policy?.sourceDefinitions || []).map((source: any) => (
+                            <div key={source.key} className="border border-border rounded-lg p-3">
+                                <div className="text-sm font-semibold">{source.label}</div>
+                                <div className="text-xs text-muted-foreground mt-1">{source.source}</div>
+                                <div className="text-xs mt-1">{source.rule}</div>
+                            </div>
+                        ))}
+                    </div>
+                </div>
+
+                <div className="bg-card border border-border rounded-xl p-5 shadow-sm">
+                    <h3 className="font-bold mb-3">Pipeline 加權</h3>
+                    <div className="space-y-2">
+                        {Object.entries(pipelineWeights).map(([status, value]) => (
+                            <label key={status} className="grid grid-cols-[1fr_90px] items-center gap-3 text-sm">
+                                <span className="text-muted-foreground">{status}</span>
+                                <input
+                                    type="number"
+                                    min="0"
+                                    max="1"
+                                    step="0.05"
+                                    value={value}
+                                    onChange={(e) => setPipelineWeights(current => ({ ...current, [status]: Number(e.target.value) }))}
+                                    className="rounded-md border border-input bg-background px-2 py-1 text-right"
+                                />
+                            </label>
+                        ))}
+                        <label className="grid grid-cols-[1fr_90px] items-center gap-3 text-sm pt-2 border-t border-border">
+                            <span className="text-muted-foreground">匯入 Pipeline 權重</span>
+                            <input
+                                type="number"
+                                min="0"
+                                max="1"
+                                step="0.05"
+                                value={importedPipelineWeight}
+                                onChange={(e) => setImportedPipelineWeight(Number(e.target.value))}
+                                className="rounded-md border border-input bg-background px-2 py-1 text-right"
+                            />
+                        </label>
+                        <button onClick={handleSavePolicy} disabled={updatePolicy.isPending} className="w-full mt-2 rounded-lg bg-primary px-3 py-2 text-sm font-semibold text-primary-foreground disabled:opacity-50">
+                            儲存加權規則
+                        </button>
+                    </div>
+                </div>
+
+                <div className="bg-card border border-border rounded-xl p-5 shadow-sm">
+                    <h3 className="font-bold mb-3">年度目標設定</h3>
+                    <div className="space-y-2">
+                        <select value={targetForm.scope} onChange={(e) => setTargetForm(f => ({ ...f, scope: e.target.value, userId: "" }))} className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm">
+                            <option value="department">部門目標</option>
+                            <option value="person">個人目標</option>
+                        </select>
+                        {targetForm.scope === "person" ? (
+                            <select value={targetForm.userId} onChange={(e) => {
+                                const user = allUsers.find((u: any) => u.id === e.target.value);
+                                setTargetForm(f => ({ ...f, userId: e.target.value, department: user?.department || "" }));
+                            }} className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm">
+                                <option value="">選擇人員</option>
+                                {allUsers.map((u: any) => <option key={u.id} value={u.id}>{u.name} - {u.department || "未指定"}</option>)}
+                            </select>
+                        ) : (
+                            <select value={targetForm.department} onChange={(e) => setTargetForm(f => ({ ...f, department: e.target.value }))} className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm">
+                                <option value="">選擇部門</option>
+                                {departments.map(d => <option key={d} value={d}>{d}</option>)}
+                            </select>
+                        )}
+                        <input type="number" min="0" value={targetForm.targetAmount} onChange={(e) => setTargetForm(f => ({ ...f, targetAmount: Number(e.target.value) }))} placeholder="年度目標金額" className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm" />
+                        <input value={targetForm.note} onChange={(e) => setTargetForm(f => ({ ...f, note: e.target.value }))} placeholder="備註" className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm" />
+                        <button onClick={handleSaveTarget} disabled={upsertTarget.isPending} className="w-full rounded-lg bg-primary px-3 py-2 text-sm font-semibold text-primary-foreground disabled:opacity-50">
+                            儲存年度目標
+                        </button>
+                        <div className="max-h-28 overflow-y-auto pt-2 text-xs text-muted-foreground">
+                            {(governance?.targets || []).slice(0, 8).map((target: any) => (
+                                <div key={target.id} className="flex justify-between border-t border-border py-1">
+                                    <span>{target.scope === "person" ? target.userName : target.department}</span>
+                                    <span>NT$ {Number(target.targetAmount || 0).toLocaleString()}</span>
+                                </div>
+                            ))}
+                        </div>
+                    </div>
+                </div>
+            </div>
 
             {/* Key Metrics */}
             <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
@@ -228,7 +374,7 @@ export function KpiDashboardPage() {
                         <span className="text-sm font-medium">整體累積營收</span>
                     </div>
                     <div className="text-2xl font-bold">${kpiData?.totalRevenue?.toLocaleString() || 0}</div>
-                    <div className="text-xs text-muted-foreground mt-1">毛利率: {kpiData?.marginPercent || 0}%</div>
+                    <div className="text-xs text-muted-foreground mt-1">加權 Pipeline: ${(kpiData?.weightedPipeline || 0).toLocaleString()}</div>
                 </div>
 
                 <div className="bg-card p-5 border border-border rounded-xl shadow-sm hover:shadow-md transition-shadow">
@@ -252,10 +398,11 @@ export function KpiDashboardPage() {
                         <p className="text-sm text-muted-foreground mt-0.5">年度目標 vs 實際業績（專案 + 協銷）</p>
                     </div>
                     <div className="text-right">
-                        <div className="text-xs text-muted-foreground">全公司合計</div>
-                        <div className={`text-2xl font-bold ${(deptKpiData?.grandAchievementRate || 0) >= 100 ? 'text-emerald-600' : 'text-amber-600'}`}>
-                            {deptKpiData?.grandAchievementRate || 0}%
-                        </div>
+                                    <div className="text-xs text-muted-foreground">全公司認列合計</div>
+                                    <div className={`text-2xl font-bold ${(deptKpiData?.grandAchievementRate || 0) >= 100 ? 'text-emerald-600' : 'text-amber-600'}`}>
+                                        {deptKpiData?.grandAchievementRate || 0}%
+                                    </div>
+                                    <div className="text-xs text-muted-foreground">加權預估 {deptKpiData?.grandForecastAchievementRate || 0}%</div>
                         <div className={`text-xs font-medium ${(deptKpiData?.grandGap || 0) >= 0 ? 'text-emerald-600' : 'text-rose-600'}`}>
                             {(deptKpiData?.grandGap || 0) >= 0 ? '+' : ''}NT$ {Math.abs(deptKpiData?.grandGap || 0).toLocaleString()}
                         </div>
@@ -272,6 +419,7 @@ export function KpiDashboardPage() {
                                 <th className="px-6 py-3 text-right font-medium">合計業績</th>
                                 <th className="px-6 py-3 text-right font-medium">匯入認列</th>
                                 <th className="px-6 py-3 text-right font-medium">Pipeline</th>
+                                <th className="px-6 py-3 text-right font-medium">加權 Pipeline</th>
                                 <th className="px-6 py-3 text-right font-medium">年度目標</th>
                                 <th className="px-6 py-3 text-center font-medium">達成率</th>
                                 <th className="px-6 py-3 text-right font-medium">Gap</th>
@@ -279,7 +427,7 @@ export function KpiDashboardPage() {
                         </thead>
                         <tbody className="divide-y divide-border">
                             {(deptKpiData?.departments || []).length === 0 ? (
-                                <tr><td colSpan={10} className="px-6 py-8 text-center text-muted-foreground">無部門資料</td></tr>
+                                <tr><td colSpan={11} className="px-6 py-8 text-center text-muted-foreground">無部門資料</td></tr>
                             ) : (
                                 (deptKpiData?.departments || []).map((dept: any) => {
                                     const isAchieved = dept.achievementRate >= 100;
@@ -291,8 +439,9 @@ export function KpiDashboardPage() {
                                             <td className="px-6 py-4 text-right">NT$ {dept.projectRevenue.toLocaleString()}</td>
                                             <td className="px-6 py-4 text-right">NT$ {dept.presalesRevenue.toLocaleString()}</td>
                                             <td className="px-6 py-4 text-right font-bold">NT$ {dept.totalRevenue.toLocaleString()}</td>
-                                            <td className="px-6 py-4 text-right text-emerald-700">NT$ {(dept.importedRecognizedRevenue || 0).toLocaleString()}</td>
+                                            <td className="px-6 py-4 text-right text-emerald-700">NT$ {(dept.recognizedRevenue || 0).toLocaleString()}</td>
                                             <td className="px-6 py-4 text-right text-blue-700">NT$ {(dept.pipelineAmount || 0).toLocaleString()}</td>
+                                            <td className="px-6 py-4 text-right text-blue-700">NT$ {(dept.weightedPipelineAmount || 0).toLocaleString()}</td>
                                             <td className="px-6 py-4 text-right text-muted-foreground">NT$ {dept.target.toLocaleString()}</td>
                                             <td className="px-6 py-4 text-center">
                                                 <div className="flex items-center justify-center gap-2">

@@ -28,12 +28,19 @@ export function SettlementsPage() {
     const targetMargin = (systemSettings as any)?.pcTargetMargin ?? 30;
 
     const { data: settlements, isLoading, refetch } = trpc.analytics.getSettlements.useQuery(filterInput);
+    const { data: settlementHistory, refetch: refetchHistory } = trpc.analytics.getSettlementHistory.useQuery({ month: currentMonth, type: activeTab });
 
     const lockSettlement = trpc.analytics.lockSettlement.useMutation({
-        onSuccess: () => refetch()
+        onSuccess: () => {
+            refetch();
+            refetchHistory();
+        }
     });
     const unlockSettlement = trpc.analytics.unlockSettlement.useMutation({
-        onSuccess: () => refetch()
+        onSuccess: () => {
+            refetch();
+            refetchHistory();
+        }
     });
 
     if (isLoading) return <div className="p-8 text-center text-muted-foreground">載入中...</div>;
@@ -114,8 +121,9 @@ export function SettlementsPage() {
     };
 
     const handleUnlock = () => {
-        if (confirm(`確認要取消鎖定 ${currentMonth} 的 ${activeTab === "project" ? "專案" : "協銷"} 結算嗎？取消後此月份工時可再次異動。`)) {
-            unlockSettlement.mutate({ month: currentMonth, type: activeTab });
+        const reason = prompt(`請輸入取消鎖定 ${currentMonth} 的原因，之後會保留在稽核紀錄中。`);
+        if (reason && confirm(`確認要取消鎖定 ${currentMonth} 的 ${activeTab === "project" ? "專案" : "協銷"} 結算嗎？取消後此月份工時可再次異動。`)) {
+            unlockSettlement.mutate({ month: currentMonth, type: activeTab, reason });
         }
     };
 
@@ -254,6 +262,59 @@ export function SettlementsPage() {
                     <Download className="w-4 h-4 mr-2" />
                     匯出結算報表
                 </button>
+            </div>
+
+            <div className="grid gap-4 lg:grid-cols-2">
+                <div className="bg-card border border-border rounded-xl p-4 shadow-sm">
+                    <div className="flex items-center justify-between mb-3">
+                        <h3 className="text-sm font-bold">月結快照版本</h3>
+                        <span className="text-xs text-muted-foreground">鎖定時自動保存</span>
+                    </div>
+                    {(settlementHistory?.snapshots || []).length === 0 ? (
+                        <div className="text-sm text-muted-foreground py-4">此月份尚無快照。</div>
+                    ) : (
+                        <div className="space-y-2">
+                            {(settlementHistory?.snapshots || []).slice(0, 3).map((snapshot: any) => (
+                                <div key={snapshot.id} className="border border-border rounded-lg p-3 text-sm">
+                                    <div className="flex items-center justify-between">
+                                        <span className="font-semibold">V{snapshot.version} · {snapshot.type === "project" ? "專案" : "協銷"}</span>
+                                        <span className="text-xs text-muted-foreground">{new Date(snapshot.createdAt).toLocaleString()}</span>
+                                    </div>
+                                    <div className="grid grid-cols-3 gap-2 mt-2 text-xs text-muted-foreground">
+                                        <span>項目 {snapshot.totals.itemCount}</span>
+                                        <span>時數 {Number(snapshot.totals.hours || 0).toLocaleString()}</span>
+                                        <span>毛利 {Number(snapshot.totals.margin || 0).toLocaleString()}</span>
+                                    </div>
+                                </div>
+                            ))}
+                        </div>
+                    )}
+                </div>
+
+                <div className="bg-card border border-border rounded-xl p-4 shadow-sm">
+                    <div className="flex items-center justify-between mb-3">
+                        <h3 className="text-sm font-bold">鎖定 / 解鎖紀錄</h3>
+                        <span className="text-xs text-muted-foreground">稽核追蹤</span>
+                    </div>
+                    {(settlementHistory?.logs || []).length === 0 ? (
+                        <div className="text-sm text-muted-foreground py-4">此月份尚無操作紀錄。</div>
+                    ) : (
+                        <div className="space-y-2">
+                            {(settlementHistory?.logs || []).slice(0, 5).map((log: any) => (
+                                <div key={log.id} className="flex items-start justify-between gap-3 border-b border-border/50 pb-2 last:border-0">
+                                    <div>
+                                        <div className="text-sm font-medium">{log.action === "locked" ? "月結鎖定" : "取消鎖定"}{log.version ? ` V${log.version}` : ""}</div>
+                                        {log.reason && <div className="text-xs text-muted-foreground mt-0.5">原因：{log.reason}</div>}
+                                    </div>
+                                    <div className="text-right text-xs text-muted-foreground whitespace-nowrap">
+                                        <div>{log.userName || "-"}</div>
+                                        <div>{new Date(log.createdAt).toLocaleString()}</div>
+                                    </div>
+                                </div>
+                            ))}
+                        </div>
+                    )}
+                </div>
             </div>
 
             {/* Main List */}

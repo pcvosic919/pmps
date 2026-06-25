@@ -8,9 +8,46 @@ import { SettlementLockModel } from "../models/SettlementLock";
 import { SystemSettingModel } from "../models/Settings";
 import { ImportBatchModel } from "../models/ImportBatch";
 import { RevenueSnapshotModel } from "../models/RevenueSnapshot";
+import { KpiPolicyModel } from "../models/KpiPolicy";
+import { KpiTargetModel, kpiTargetScopes } from "../models/KpiTarget";
+import { ReportTemplateModel, reportTemplateCategories } from "../models/ReportTemplate";
+import { SettlementAuditLogModel, SettlementSnapshotModel } from "../models/SettlementSnapshot";
 import { z } from "zod";
 import { settlementTypes } from "../../shared/types";
 import { getManagedDepartments, hasAnyRole } from "../_core/authorization";
+import { toObjectId } from "../_core/cursor";
+
+const reportTypes = ["utilization", "settlement", "timesheets", "project_profitability", "pm_ranking", "budget_variance", "sla_compliance", "renewal_rate", "open_cases", "kpi_revenue"] as const;
+
+const defaultKpiSourceDefinitions = [
+    { key: "target", label: "年度目標", source: "KPI 目標設定或長官 Excel 匯入", rule: "部門/個人目標以 KPI 目標設定為優先，未設定時使用匯入檔或系統預設值。", isActive: true },
+    { key: "recognizedRevenue", label: "實際認列收入", source: "結案/認列金額與年度目標匯入檔", rule: "以認列月份落在年度內的實際認列收入為 KPI 達成主數字，不以月結成本倒推營收。", isActive: true },
+    { key: "pipeline", label: "Pipeline 預估", source: "商機 estimatedValue 與匯入檔 Pipeline 欄位", rule: "商機金額依狀態加權；匯入檔 Pipeline 依匯入 Pipeline 權重納入預估達成。", isActive: true },
+    { key: "settlement", label: "月度結算", source: "月結快照與工時成本", rule: "月結提供成本、毛利與鎖帳快照；可對照 KPI，但不直接覆蓋認列收入。", isActive: true }
+] as const;
+
+const defaultPipelineWeights: Record<string, number> = {
+    new: 0.2,
+    qualified: 0.4,
+    presales_active: 0.6,
+    under_negotiation: 0.8,
+    won: 1,
+    converted: 1,
+    lost: 0
+};
+
+const defaultReportTemplates = [
+    { reportType: "open_cases", label: "未結案清單匯出", category: "executive", description: "長官檢視格式，依上傳 Excel 欄位順序輸出。", outputFormat: "xlsx", isExecutiveFormat: true, sortOrder: 10 },
+    { reportType: "kpi_revenue", label: "年度目標/認列/Pipeline 報表", category: "executive", description: "長官檢視格式，保留年度目標、實際認列收入與 Pipeline 欄位。", outputFormat: "xlsx", isExecutiveFormat: true, sortOrder: 20 },
+    { reportType: "settlement", label: "部門利潤結算報表", category: "finance", description: "月結與利潤中心結算用。", outputFormat: "xlsx", isExecutiveFormat: false, sortOrder: 30 },
+    { reportType: "timesheets", label: "工時清單報表", category: "people", description: "技術/協銷/專案工時明細。", outputFormat: "xlsx", isExecutiveFormat: false, sortOrder: 40 },
+    { reportType: "utilization", label: "人力稼動率報表", category: "people", description: "人力稼動率與工時負載。", outputFormat: "xlsx", isExecutiveFormat: false, sortOrder: 50 },
+    { reportType: "project_profitability", label: "客戶/專案毛利報表", category: "project", description: "專案營收、成本、管銷與毛利分析。", outputFormat: "xlsx", isExecutiveFormat: false, sortOrder: 60 },
+    { reportType: "pm_ranking", label: "PM 排行榜", category: "project", description: "PM 營收與毛利排行。", outputFormat: "xlsx", isExecutiveFormat: false, sortOrder: 70 },
+    { reportType: "budget_variance", label: "預算偏差分析", category: "project", description: "專案預算與實際花費偏差。", outputFormat: "xlsx", isExecutiveFormat: false, sortOrder: 80 },
+    { reportType: "sla_compliance", label: "SLA 達成率報表", category: "project", description: "專案準時與 SLA 達成狀況。", outputFormat: "xlsx", isExecutiveFormat: false, sortOrder: 90 },
+    { reportType: "renewal_rate", label: "客戶續約/勝率報表", category: "project", description: "客戶維度成交與續約表現。", outputFormat: "xlsx", isExecutiveFormat: false, sortOrder: 100 }
+] as const;
 
 const toIdMap = (items: Array<{ _id: unknown; totalHours?: number; totalCost?: number; totalRevenue?: number }>, key: "totalHours" | "totalCost" | "totalRevenue") =>
     new Map(items.map((item) => [item._id?.toString(), item[key] ?? 0]));
@@ -54,6 +91,121 @@ const applyScopedUserFilter = async (
 const getLatestImportBatchId = async (type: "open_cases" | "kpi_revenue") => {
     const batch = await ImportBatchModel.findOne({ type, status: "completed" }, { _id: 1 }).sort({ createdAt: -1 }).lean();
     return batch?._id;
+};
+
+const getOrCreateKpiPolicy = async (year: number) => {
+    const policy = await KpiPolicyModel.findOne({ year }).lean();
+    if (policy) return policy as any;
+
+    const created = await KpiPolicyModel.create({
+        year,
+        sourceDefinitions: defaultKpiSourceDefinitions,
+        pipelineWeights: defaultPipelineWeights,
+        importedPipelineWeight: 1,
+        settlementLinkRule: "KPI 營收達成以認列收入與 Pipeline 為主；月結僅提供工時成本、毛利與鎖帳依據，不直接覆蓋 KPI 認列收入。"
+    });
+    return created.toObject();
+};
+
+const seedReportTemplatesIfNeeded = async () => {
+    const existingCount = await ReportTemplateModel.countDocuments();
+    if (existingCount > 0) return;
+    await ReportTemplateModel.insertMany(defaultReportTemplates);
+};
+
+const getWeightedPipelineAmount = (amount: number, status: string | undefined, weights: Record<string, number>) => {
+    const weight = weights[status || ""] ?? 0;
+    return Math.round((amount || 0) * weight);
+};
+
+const buildSettlementSnapshotPayload = async (month: string, type: "project" | "presales") => {
+    const startDate = new Date(`${month}-01T00:00:00.000Z`);
+    const endDate = new Date(startDate.getUTCFullYear(), startDate.getUTCMonth() + 1, 0, 23, 59, 59, 999);
+    const settingsRecords = await SystemSettingModel.find({ key: { $in: ["pcOverheadRate"] } }).lean();
+    const settingsMap = new Map(settingsRecords.map((s: any) => [s.key, s.value]));
+    const overheadRate = Number(settingsMap.get("pcOverheadRate") || 15);
+
+    if (type === "project") {
+        const [srs, timesheets] = await Promise.all([
+            ServiceRequestModel.find({}, { _id: 1, title: 1, pmId: 1, contractAmount: 1, status: 1 }).populate("pmId", "name department").lean(),
+            TimesheetModel.find({ type: "project", workDate: { $gte: startDate, $lte: endDate } }).populate("techId", "name department costRate").lean()
+        ]);
+        const costMap = new Map<string, { cost: number; hours: number }>();
+        for (const ts of timesheets as any[]) {
+            const srId = ts.srId?.toString();
+            if (!srId) continue;
+            const cost = ts.hours * (ts.techId?.costRate?.hourlyRate || 0);
+            const current = costMap.get(srId) || { cost: 0, hours: 0 };
+            costMap.set(srId, { cost: current.cost + cost, hours: current.hours + (ts.hours || 0) });
+        }
+        const rows = (srs as any[]).map((sr) => {
+            const cost = costMap.get(sr._id.toString()) || { cost: 0, hours: 0 };
+            const overhead = Math.round(cost.cost * (overheadRate / 100));
+            return {
+                id: sr._id.toString(),
+                title: sr.title,
+                owner: sr.pmId?.name || "",
+                department: sr.pmId?.department || "",
+                status: sr.status,
+                revenue: sr.contractAmount || 0,
+                hours: cost.hours,
+                directCost: cost.cost,
+                overhead,
+                margin: (sr.contractAmount || 0) - cost.cost - overhead
+            };
+        });
+        return {
+            rows,
+            totals: {
+                revenue: rows.reduce((sum, row) => sum + Number(row.revenue || 0), 0),
+                directCost: rows.reduce((sum, row) => sum + Number(row.directCost || 0), 0),
+                overhead: rows.reduce((sum, row) => sum + Number(row.overhead || 0), 0),
+                margin: rows.reduce((sum, row) => sum + Number(row.margin || 0), 0),
+                hours: rows.reduce((sum, row) => sum + Number(row.hours || 0), 0),
+                itemCount: rows.length
+            }
+        };
+    }
+
+    const [opps, timesheets] = await Promise.all([
+        OpportunityModel.find({}, { _id: 1, title: 1, customerName: 1, ownerId: 1, status: 1 }).populate("ownerId", "name department").lean(),
+        TimesheetModel.find({ type: "presales", workDate: { $gte: startDate, $lte: endDate } }).populate("techId", "name department costRate").lean()
+    ]);
+    const costMap = new Map<string, { cost: number; hours: number }>();
+    for (const ts of timesheets as any[]) {
+        const oppId = ts.opportunityId?.toString();
+        if (!oppId) continue;
+        const cost = ts.hours * (ts.techId?.costRate?.hourlyRate || 0);
+        const current = costMap.get(oppId) || { cost: 0, hours: 0 };
+        costMap.set(oppId, { cost: current.cost + cost, hours: current.hours + (ts.hours || 0) });
+    }
+    const rows = (opps as any[]).map((opp) => {
+        const cost = costMap.get(opp._id.toString()) || { cost: 0, hours: 0 };
+        return {
+            id: opp._id.toString(),
+            title: opp.title,
+            customerName: opp.customerName,
+            owner: opp.ownerId?.name || "",
+            department: opp.ownerId?.department || "",
+            status: opp.status,
+            revenue: cost.cost,
+            hours: cost.hours,
+            directCost: cost.cost,
+            overhead: 0,
+            margin: cost.cost
+        };
+    });
+    return {
+        rows,
+        totals: {
+            revenue: rows.reduce((sum, row) => sum + Number(row.revenue || 0), 0),
+            directCost: rows.reduce((sum, row) => sum + Number(row.directCost || 0), 0),
+            overhead: 0,
+            margin: rows.reduce((sum, row) => sum + Number(row.margin || 0), 0),
+            hours: rows.reduce((sum, row) => sum + Number(row.hours || 0), 0),
+            itemCount: rows.length
+        }
+    };
 };
 
 export const analyticsRouter = router({
@@ -263,20 +415,235 @@ export const analyticsRouter = router({
     lockSettlement: roleProcedure(["admin", "manager"])
         .input(z.object({ month: z.string(), type: z.enum(settlementTypes) }))
         .mutation(async ({ ctx, input }) => {
+            const latestSnapshot = await SettlementSnapshotModel.findOne(
+                { month: input.month, type: input.type },
+                { version: 1 }
+            ).sort({ version: -1 }).lean();
+            const version = (latestSnapshot?.version || 0) + 1;
+            const snapshotPayload = await buildSettlementSnapshotPayload(input.month, input.type);
+            await SettlementSnapshotModel.create({
+                month: input.month,
+                type: input.type,
+                version,
+                totals: snapshotPayload.totals,
+                rows: snapshotPayload.rows,
+                createdById: toObjectId(ctx.user.id)
+            });
             await SettlementLockModel.updateOne(
                 { month: input.month, type: input.type },
                 { $set: { isLocked: true, lockedBy: ctx.user.id } },
                 { upsert: true }
             );
+            await SettlementAuditLogModel.create({
+                month: input.month,
+                type: input.type,
+                action: "locked",
+                version,
+                userId: toObjectId(ctx.user.id)
+            });
             return { success: true };
         }),
 
     unlockSettlement: roleProcedure(["admin"])
-        .input(z.object({ month: z.string(), type: z.enum(settlementTypes) }))
-        .mutation(async ({ input }) => {
+        .input(z.object({ month: z.string(), type: z.enum(settlementTypes), reason: z.string().optional() }))
+        .mutation(async ({ ctx, input }) => {
             await SettlementLockModel.updateOne(
                 { month: input.month, type: input.type },
                 { $set: { isLocked: false }, $unset: { lockedBy: "" } }
+            );
+            await SettlementAuditLogModel.create({
+                month: input.month,
+                type: input.type,
+                action: "unlocked",
+                reason: input.reason,
+                userId: toObjectId(ctx.user.id)
+            });
+            return { success: true };
+        }),
+
+    getSettlementHistory: roleProcedure(["admin", "manager"])
+        .input(z.object({ month: z.string(), type: z.enum(settlementTypes).optional() }))
+        .query(async ({ input }) => {
+            const match: any = { month: input.month };
+            if (input.type) match.type = input.type;
+            const [snapshots, logs] = await Promise.all([
+                SettlementSnapshotModel.find(match).sort({ type: 1, version: -1 }).populate("createdById", "name").lean(),
+                SettlementAuditLogModel.find(match).sort({ createdAt: -1 }).populate("userId", "name").lean()
+            ]);
+            return {
+                snapshots: snapshots.map((snapshot: any) => ({
+                    id: snapshot._id.toString(),
+                    month: snapshot.month,
+                    type: snapshot.type,
+                    version: snapshot.version,
+                    totals: snapshot.totals,
+                    createdBy: snapshot.createdById?.name || "",
+                    createdAt: snapshot.createdAt
+                })),
+                logs: logs.map((log: any) => ({
+                    id: log._id.toString(),
+                    month: log.month,
+                    type: log.type,
+                    action: log.action,
+                    version: log.version,
+                    reason: log.reason,
+                    userName: log.userId?.name || "",
+                    createdAt: log.createdAt
+                }))
+            };
+        }),
+
+    getKpiGovernance: roleProcedure(["admin", "manager"])
+        .input(z.object({ year: z.number().optional() }).optional())
+        .query(async ({ input }) => {
+            const year = input?.year || new Date().getFullYear();
+            const [policy, targets] = await Promise.all([
+                getOrCreateKpiPolicy(year),
+                KpiTargetModel.find({ year }).sort({ scope: 1, department: 1, userName: 1 }).lean()
+            ]);
+            return {
+                year,
+                policy,
+                targets: targets.map((target: any) => ({
+                    id: target._id.toString(),
+                    year: target.year,
+                    scope: target.scope,
+                    department: target.department,
+                    userId: target.userId?.toString(),
+                    userName: target.userName,
+                    targetAmount: target.targetAmount || 0,
+                    q1TargetAmount: target.q1TargetAmount || 0,
+                    q2TargetAmount: target.q2TargetAmount || 0,
+                    q3TargetAmount: target.q3TargetAmount || 0,
+                    q4TargetAmount: target.q4TargetAmount || 0,
+                    note: target.note || ""
+                }))
+            };
+        }),
+
+    updateKpiPolicy: roleProcedure(["admin", "manager"])
+        .input(z.object({
+            year: z.number(),
+            sourceDefinitions: z.array(z.object({
+                key: z.enum(["target", "recognizedRevenue", "pipeline", "settlement"]),
+                label: z.string(),
+                source: z.string(),
+                rule: z.string(),
+                isActive: z.boolean()
+            })),
+            pipelineWeights: z.record(z.number().min(0).max(1)),
+            importedPipelineWeight: z.number().min(0).max(1),
+            settlementLinkRule: z.string()
+        }))
+        .mutation(async ({ ctx, input }) => {
+            await KpiPolicyModel.updateOne(
+                { year: input.year },
+                {
+                    $set: {
+                        sourceDefinitions: input.sourceDefinitions,
+                        pipelineWeights: input.pipelineWeights,
+                        importedPipelineWeight: input.importedPipelineWeight,
+                        settlementLinkRule: input.settlementLinkRule,
+                        updatedById: toObjectId(ctx.user.id)
+                    }
+                },
+                { upsert: true }
+            );
+            return { success: true };
+        }),
+
+    upsertKpiTarget: roleProcedure(["admin", "manager"])
+        .input(z.object({
+            id: z.string().optional(),
+            year: z.number(),
+            scope: z.enum(kpiTargetScopes),
+            department: z.string().min(1),
+            userId: z.string().optional(),
+            targetAmount: z.number().min(0),
+            q1TargetAmount: z.number().min(0).optional(),
+            q2TargetAmount: z.number().min(0).optional(),
+            q3TargetAmount: z.number().min(0).optional(),
+            q4TargetAmount: z.number().min(0).optional(),
+            note: z.string().optional()
+        }))
+        .mutation(async ({ ctx, input }) => {
+            const user = input.userId ? await UserModel.findById(input.userId, { name: 1 }).lean() : null;
+            const payload = {
+                year: input.year,
+                scope: input.scope,
+                department: input.department,
+                userId: input.userId ? toObjectId(input.userId) : undefined,
+                userName: user?.name,
+                targetAmount: input.targetAmount,
+                q1TargetAmount: input.q1TargetAmount ?? 0,
+                q2TargetAmount: input.q2TargetAmount ?? 0,
+                q3TargetAmount: input.q3TargetAmount ?? 0,
+                q4TargetAmount: input.q4TargetAmount ?? 0,
+                note: input.note,
+                updatedById: toObjectId(ctx.user.id)
+            };
+
+            if (input.id) {
+                await KpiTargetModel.findByIdAndUpdate(input.id, payload);
+            } else {
+                await KpiTargetModel.updateOne(
+                    {
+                        year: input.year,
+                        scope: input.scope,
+                        department: input.department,
+                        userId: input.userId ? toObjectId(input.userId) : { $exists: false }
+                    },
+                    { $set: payload },
+                    { upsert: true }
+                );
+            }
+            return { success: true };
+        }),
+
+    deleteKpiTarget: roleProcedure(["admin", "manager"])
+        .input(z.object({ id: z.string() }))
+        .mutation(async ({ input }) => {
+            await KpiTargetModel.findByIdAndDelete(input.id);
+            return { success: true };
+        }),
+
+    getReportCatalog: roleProcedure(["admin", "manager"])
+        .query(async () => {
+            await seedReportTemplatesIfNeeded();
+            const templates = await ReportTemplateModel.find({ isActive: true }).sort({ category: 1, sortOrder: 1 }).lean();
+            return templates.map((template: any) => ({
+                id: template._id.toString(),
+                reportType: template.reportType,
+                label: template.label,
+                category: template.category,
+                description: template.description,
+                outputFormat: template.outputFormat,
+                isExecutiveFormat: template.isExecutiveFormat,
+                sortOrder: template.sortOrder
+            }));
+        }),
+
+    updateReportTemplate: roleProcedure(["admin", "manager"])
+        .input(z.object({
+            reportType: z.enum(reportTypes),
+            label: z.string().min(1),
+            category: z.enum(reportTemplateCategories),
+            description: z.string().optional(),
+            isExecutiveFormat: z.boolean(),
+            isActive: z.boolean(),
+            sortOrder: z.number()
+        }))
+        .mutation(async ({ ctx, input }) => {
+            await ReportTemplateModel.updateOne(
+                { reportType: input.reportType },
+                {
+                    $set: {
+                        ...input,
+                        outputFormat: "xlsx",
+                        updatedById: toObjectId(ctx.user.id)
+                    }
+                },
+                { upsert: true }
             );
             return { success: true };
         }),
@@ -324,8 +691,9 @@ export const analyticsRouter = router({
                 tsMatch = { ...tsMatch, techId: null };
             }
         }
+        const policy = await getOrCreateKpiPolicy(new Date().getFullYear());
 
-        const [srTotals, recentSrs, oppStats, totalCostAgg] = await Promise.all([
+        const [srTotals, recentSrs, oppStats, totalCostAgg, pipelineOpps] = await Promise.all([
             ServiceRequestModel.aggregate([
                 { $match: srMatch },
                 {
@@ -367,17 +735,24 @@ export const analyticsRouter = router({
             TimesheetModel.aggregate([
                 { $match: tsMatch },
                 { $group: { _id: null, totalCost: { $sum: "$costAmount" } } }
-            ])
+            ]),
+            OpportunityModel.find(oppMatch, { estimatedValue: 1, status: 1 }).lean()
         ]);
 
         const totals = srTotals[0] ?? { activeProjects: 0, totalRevenue: 0 };
         const oppSummary = oppStats[0] ?? { wonOpps: 0, pendingOpps: 0, lostOpps: 0, totalOpps: 0 };
         const totalCost = totalCostAgg[0]?.totalCost || 0;
         const totalMargin = totals.totalRevenue - totalCost;
+        const weightedPipeline = (pipelineOpps as any[]).reduce(
+            (sum, opp) => sum + getWeightedPipelineAmount(opp.estimatedValue || 0, opp.status, policy.pipelineWeights || defaultPipelineWeights),
+            0
+        );
 
         return {
             activeProjects: totals.activeProjects,
             totalRevenue: totals.totalRevenue,
+            weightedPipeline,
+            forecastRevenue: totals.totalRevenue + weightedPipeline,
             totalMargin,
             marginPercent: totals.totalRevenue > 0 ? Math.round((totalMargin / totals.totalRevenue) * 100) : 0,
             winRate: oppSummary.totalOpps > 0 ? Math.round((oppSummary.wonOpps / oppSummary.totalOpps) * 100) : 0,
@@ -428,19 +803,25 @@ export const analyticsRouter = router({
 
             const presalesRate = Number(settingsMap.get("pcPresalesHourlyRate") || 2000);
             const latestKpiBatchId = await getLatestImportBatchId("kpi_revenue");
-            const importedDeptSnapshots = latestKpiBatchId
-                ? await RevenueSnapshotModel.find({ importBatchId: latestKpiBatchId, scope: "department", year }).lean()
-                : [];
+            const [importedDeptSnapshots, kpiTargets, policy] = await Promise.all([
+                latestKpiBatchId
+                    ? RevenueSnapshotModel.find({ importBatchId: latestKpiBatchId, scope: "department", year }).lean()
+                    : [],
+                KpiTargetModel.find({ year, scope: "department" }).lean(),
+                getOrCreateKpiPolicy(year)
+            ]);
             const importedDeptMap = new Map(importedDeptSnapshots.map((snapshot: any) => [snapshot.department, snapshot]));
+            const targetMap = new Map((kpiTargets as any[]).map((target: any) => [target.department, target]));
 
             // 按部門分組
-            const deptMap = new Map<string, { users: any[]; revenue: number; presalesRevenue: number; target: number }>();
+            const deptMap = new Map<string, { users: any[]; revenue: number; presalesRevenue: number; recognizedRevenue: number; pipelineAmount: number; weightedPipelineAmount: number; target: number }>();
             for (const u of allUsers as any[]) {
                 const dept = u.department || "未指定";
                 if (!deptMap.has(dept)) {
                     const importedTarget = importedDeptMap.get(dept)?.targetAmount;
-                    const target = importedTarget ?? deptKpiTargets[dept] ?? globalKpiTarget;
-                    deptMap.set(dept, { users: [], revenue: 0, presalesRevenue: 0, target });
+                    const configuredTarget = targetMap.get(dept)?.targetAmount;
+                    const target = configuredTarget ?? importedTarget ?? deptKpiTargets[dept] ?? globalKpiTarget;
+                    deptMap.set(dept, { users: [], revenue: 0, presalesRevenue: 0, recognizedRevenue: 0, pipelineAmount: 0, weightedPipelineAmount: 0, target });
                 }
                 deptMap.get(dept)!.users.push(u);
             }
@@ -456,6 +837,38 @@ export const analyticsRouter = router({
                 const dept = pmUser.department || "未指定";
                 if (deptMap.has(dept)) {
                     deptMap.get(dept)!.revenue += (sr.contractAmount || 0);
+                }
+            }
+
+            const recognizedSrs = await ServiceRequestModel.find(
+                {
+                    $or: [
+                        { recognitionMonth: { $regex: `^${year}-` } },
+                        { status: "completed", updatedAt: { $gte: yearStart, $lte: yearEnd } }
+                    ]
+                },
+                { recognizedRevenueAmount: 1, contractAmount: 1, pmId: 1 }
+            ).lean();
+            for (const sr of recognizedSrs as any[]) {
+                const pmUser = (allUsers as any[]).find(u => u._id.toString() === sr.pmId?.toString());
+                if (!pmUser) continue;
+                const dept = pmUser.department || "未指定";
+                if (deptMap.has(dept)) {
+                    deptMap.get(dept)!.recognizedRevenue += (sr.recognizedRevenueAmount ?? sr.contractAmount ?? 0);
+                }
+            }
+
+            const pipelineOpps = await OpportunityModel.find(
+                { createdAt: { $gte: yearStart, $lte: yearEnd }, status: { $nin: ["lost"] } },
+                { estimatedValue: 1, status: 1, ownerId: 1 }
+            ).lean();
+            for (const opp of pipelineOpps as any[]) {
+                const owner = (allUsers as any[]).find(u => u._id.toString() === opp.ownerId?.toString());
+                if (!owner) continue;
+                const dept = owner.department || "未指定";
+                if (deptMap.has(dept)) {
+                    deptMap.get(dept)!.pipelineAmount += opp.estimatedValue || 0;
+                    deptMap.get(dept)!.weightedPipelineAmount += getWeightedPipelineAmount(opp.estimatedValue || 0, opp.status, policy.pipelineWeights || defaultPipelineWeights);
                 }
             }
 
@@ -476,35 +889,47 @@ export const analyticsRouter = router({
             const result = Array.from(deptMap.entries()).map(([dept, data]) => {
                 const totalRevenue = data.revenue + data.presalesRevenue;
                 const imported = importedDeptMap.get(dept);
-                const importedRecognizedRevenue = imported?.recognizedRevenueAmount ?? 0;
-                const pipelineAmount = imported?.pipelineAmount ?? 0;
-                const achievementRate = data.target > 0 ? Math.round((totalRevenue / data.target) * 100) : 0;
-                const gap = totalRevenue - data.target;
+                const importedRecognizedRevenue = imported?.recognizedRevenueAmount;
+                const recognizedRevenue = importedRecognizedRevenue ?? data.recognizedRevenue;
+                const importedPipelineAmount = imported?.pipelineAmount;
+                const pipelineAmount = importedPipelineAmount ?? data.pipelineAmount;
+                const weightedPipelineAmount = importedPipelineAmount !== undefined
+                    ? Math.round(importedPipelineAmount * (policy.importedPipelineWeight ?? 1))
+                    : data.weightedPipelineAmount;
+                const achievementRate = data.target > 0 ? Math.round((recognizedRevenue / data.target) * 100) : 0;
+                const forecastAchievementRate = data.target > 0 ? Math.round(((recognizedRevenue + weightedPipelineAmount) / data.target) * 100) : 0;
+                const gap = recognizedRevenue - data.target;
                 return {
                     department: dept,
                     memberCount: data.users.length,
                     projectRevenue: data.revenue,
                     presalesRevenue: data.presalesRevenue,
                     totalRevenue,
-                    importedRecognizedRevenue,
+                    recognizedRevenue,
+                    importedRecognizedRevenue: importedRecognizedRevenue ?? 0,
                     pipelineAmount,
-                    revenueWithPipeline: totalRevenue + pipelineAmount,
+                    weightedPipelineAmount,
+                    revenueWithPipeline: recognizedRevenue + weightedPipelineAmount,
                     target: data.target,
                     achievementRate,
+                    forecastAchievementRate,
                     importedAchievementRate: imported?.achievementRate ? Math.round(imported.achievementRate * 100) : undefined,
                     gap,  // 正數=超標，負數=缺口
                 };
             }).filter(d => d.memberCount > 0);
 
-            const grandTotal = result.reduce((acc, d) => acc + d.totalRevenue, 0);
+            const grandTotal = result.reduce((acc, d) => acc + d.recognizedRevenue, 0);
             const grandTarget = result.reduce((acc, d) => acc + d.target, 0);
+            const grandForecast = result.reduce((acc, d) => acc + d.revenueWithPipeline, 0);
 
             return {
                 year,
                 departments: result,
                 grandTotal,
+                grandForecast,
                 grandTarget,
                 grandAchievementRate: grandTarget > 0 ? Math.round((grandTotal / grandTarget) * 100) : 0,
+                grandForecastAchievementRate: grandTarget > 0 ? Math.round((grandForecast / grandTarget) * 100) : 0,
                 grandGap: grandTotal - grandTarget
             };
         }),
@@ -781,6 +1206,7 @@ export const analyticsRouter = router({
         .query(async ({ ctx, input }) => {
             const year = input?.year || new Date().getFullYear();
             const latestBatchId = await getLatestImportBatchId("kpi_revenue");
+            const policy = await getOrCreateKpiPolicy(year);
             if (!latestBatchId) {
                 return {
                     year,
@@ -790,9 +1216,11 @@ export const analyticsRouter = router({
                     totalTarget: 0,
                     totalRecognized: 0,
                     totalPipeline: 0,
+                    totalWeightedPipeline: 0,
                     totalForecast: 0,
                     achievementRate: 0,
-                    forecastAchievementRate: 0
+                    forecastAchievementRate: 0,
+                    weightedForecastAchievementRate: 0
                 };
             }
 
@@ -810,6 +1238,7 @@ export const analyticsRouter = router({
             const totalTarget = departments.reduce((sum, item: any) => sum + (item.targetAmount || 0), 0);
             const totalRecognized = departments.reduce((sum, item: any) => sum + (item.recognizedRevenueAmount || 0), 0);
             const totalPipeline = departments.reduce((sum, item: any) => sum + (item.pipelineAmount || 0), 0);
+            const totalWeightedPipeline = Math.round(totalPipeline * (policy.importedPipelineWeight ?? 1));
 
             return {
                 year,
@@ -817,14 +1246,18 @@ export const analyticsRouter = router({
                 totalTarget,
                 totalRecognized,
                 totalPipeline,
+                totalWeightedPipeline,
                 totalForecast: totalRecognized + totalPipeline,
+                totalWeightedForecast: totalRecognized + totalWeightedPipeline,
                 achievementRate: totalTarget > 0 ? Math.round((totalRecognized / totalTarget) * 100) : 0,
                 forecastAchievementRate: totalTarget > 0 ? Math.round(((totalRecognized + totalPipeline) / totalTarget) * 100) : 0,
+                weightedForecastAchievementRate: totalTarget > 0 ? Math.round(((totalRecognized + totalWeightedPipeline) / totalTarget) * 100) : 0,
                 departments: departments.map((item: any) => ({
                     department: item.department,
                     targetAmount: item.targetAmount || 0,
                     recognizedRevenueAmount: item.recognizedRevenueAmount || 0,
                     pipelineAmount: item.pipelineAmount || 0,
+                    weightedPipelineAmount: Math.round((item.pipelineAmount || 0) * (policy.importedPipelineWeight ?? 1)),
                     forecastAmount: (item.recognizedRevenueAmount || 0) + (item.pipelineAmount || 0),
                     achievementRate: item.targetAmount > 0 ? Math.round(((item.recognizedRevenueAmount || 0) / item.targetAmount) * 100) : 0
                 })),
@@ -836,6 +1269,7 @@ export const analyticsRouter = router({
                     targetAmount: item.targetAmount || 0,
                     recognizedRevenueAmount: item.recognizedRevenueAmount || 0,
                     pipelineAmount: item.pipelineAmount || 0,
+                    weightedPipelineAmount: Math.round((item.pipelineAmount || 0) * (policy.importedPipelineWeight ?? 1)),
                     achievementRate: item.targetAmount > 0 ? Math.round(((item.recognizedRevenueAmount || 0) / item.targetAmount) * 100) : 0
                 }))
             };
