@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { trpc } from "../lib/trpc";
-import { FileText, Search, Download, Lock, CheckCircle, CalendarDays } from "lucide-react";
+import { FileText, Search, Download, Lock, CheckCircle, CalendarDays, Unlock } from "lucide-react";
 
 import { useCurrentUser } from "../lib/useCurrentUser";
 import { exportRowsToXlsx } from "../lib/exportXlsx";
@@ -30,6 +30,9 @@ export function SettlementsPage() {
     const { data: settlements, isLoading, refetch } = trpc.analytics.getSettlements.useQuery(filterInput);
 
     const lockSettlement = trpc.analytics.lockSettlement.useMutation({
+        onSuccess: () => refetch()
+    });
+    const unlockSettlement = trpc.analytics.unlockSettlement.useMutation({
         onSuccess: () => refetch()
     });
 
@@ -107,6 +110,12 @@ export function SettlementsPage() {
     const handleLock = () => {
         if (confirm(`確認要鎖定 ${currentMonth} 的 ${activeTab === "project" ? "專案" : "協銷"} 結算嗎？鎖定後將無法再異動此月份的工時時數。`)) {
             lockSettlement.mutate({ month: currentMonth, type: activeTab });
+        }
+    };
+
+    const handleUnlock = () => {
+        if (confirm(`確認要取消鎖定 ${currentMonth} 的 ${activeTab === "project" ? "專案" : "協銷"} 結算嗎？取消後此月份工時可再次異動。`)) {
+            unlockSettlement.mutate({ month: currentMonth, type: activeTab });
         }
     };
 
@@ -200,9 +209,20 @@ export function SettlementsPage() {
                 </div>
                 <div className="pb-2">
                     {isLocked ? (
-                        <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-100 text-xs font-semibold shadow-sm">
-                            <Lock className="w-3.5 h-3.5" /> 本月已確認結結
-                        </span>
+                        <div className="flex items-center gap-2">
+                            <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-100 text-xs font-semibold shadow-sm">
+                                <Lock className="w-3.5 h-3.5" /> 本月已確認結算
+                            </span>
+                            {hasRole("admin") && (
+                                <button
+                                    onClick={handleUnlock}
+                                    disabled={unlockSettlement.isPending}
+                                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-rose-200 bg-rose-50 text-rose-700 hover:bg-rose-100 text-xs font-semibold transition-colors disabled:opacity-50"
+                                >
+                                    <Unlock className="w-3.5 h-3.5" /> 取消鎖定
+                                </button>
+                            )}
+                        </div>
                     ) : (
                         <button 
                             onClick={handleLock}

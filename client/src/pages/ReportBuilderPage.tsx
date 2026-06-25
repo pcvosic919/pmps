@@ -28,12 +28,17 @@ export function ReportBuilderPage() {
     const [startDate, setStartDate] = useState(firstDay);
     const [endDate, setEndDate] = useState(lastDay);
     const [department, setDepartment] = useState("");
+    const [userId, setUserId] = useState("");
+    const { data: usersData } = trpc.users.list.useQuery({ limit: 500 });
+    const allUsers = usersData?.items || [];
+    const filteredUsers = allUsers.filter((user: any) => !department || user.department === department);
 
     const { data: reportData, isLoading } = trpc.analytics.generateReport.useQuery({
         reportType,
         startDate,
         endDate,
-        department: department || undefined
+        department: department || undefined,
+        userId: userId || undefined
     }, {
         enabled: !!startDate && !!endDate
     });
@@ -109,7 +114,19 @@ export function ReportBuilderPage() {
 
                     <div>
                         <label className="block text-sm font-medium mb-1">部門過濾</label>
-                        <input type="text" placeholder="留空白表示全部..." value={department} onChange={e => setDepartment(e.target.value)} className="w-full border border-border rounded-lg p-2 bg-background focus:ring-2 outline-none"/>
+                        <input type="text" placeholder="留空白表示全部..." value={department} onChange={e => { setDepartment(e.target.value); setUserId(""); }} className="w-full border border-border rounded-lg p-2 bg-background focus:ring-2 outline-none"/>
+                    </div>
+
+                    <div>
+                        <label className="block text-sm font-medium mb-1">人員過濾</label>
+                        <select value={userId} onChange={e => setUserId(e.target.value)} className="w-full border border-border rounded-lg p-2 bg-background focus:ring-2 outline-none">
+                            <option value="">留空白表示全部...</option>
+                            {filteredUsers.map((user: any) => (
+                                <option key={user.id} value={user.id}>
+                                    {user.name}{user.department ? ` - ${user.department}` : ""}
+                                </option>
+                            ))}
+                        </select>
                     </div>
                 </div>
 

@@ -50,6 +50,17 @@ export function CalendarPage() {
             toast.error(`更新失敗: ${err.message}`);
         }
     });
+    const createWbsScheduleMutation = trpc.projects.scheduleWbsItem.useMutation({
+        onSuccess: () => {
+            utils.projects.getMyProjectAssignments.invalidate();
+            setEditingEvent(null);
+            setQuickScheduleTaskId("");
+            toast.success("已加入 WBS 排程");
+        },
+        onError: (err) => {
+            toast.error(`排程失敗: ${err.message}`);
+        }
+    });
 
     const handleSaveSchedule = () => {
         if (!editForm.startDate || !editForm.endDate) {
@@ -60,8 +71,16 @@ export function CalendarPage() {
             startDate: new Date(editForm.startDate),
             endDate: new Date(editForm.endDate)
         };
-        if (editingEvent.sourceType === "manual") {
+        if (editingEvent.calendarTaskId || editingEvent.sourceType === "manual") {
             updateManualScheduleMutation.mutate({ id: editingEvent.calendarTaskId || editingEvent.id, ...payload });
+            return;
+        }
+        if (editingEvent.sourceType === "wbs") {
+            createWbsScheduleMutation.mutate({
+                srId: editingEvent.srId,
+                itemId: editingEvent.wbsItemId || editingEvent.id,
+                ...payload
+            });
             return;
         }
         updateScheduleMutation.mutate({
@@ -89,21 +108,17 @@ export function CalendarPage() {
     const handleQuickSchedule = (taskId: string) => {
         const task = (assignments || []).find((a: any) => a.id === taskId);
         if (!task || !selectedDay) return;
-
-        const remainingHours = Math.max(0, task.estimatedHours - (task.actualHours || 0));
-        // Calculate days needed based on 8 hours/day
-        const daysNeeded = Math.max(1, Math.ceil(remainingHours / 8));
         
         const startDate = selectedDay;
-        const endDate = addDays(selectedDay, daysNeeded - 1);
+        const endDate = selectedDay;
 
         if (task.sourceType === "manual") {
             updateManualScheduleMutation.mutate({ id: task.calendarTaskId || task.id, startDate, endDate });
             return;
         }
-        updateScheduleMutation.mutate({
+        createWbsScheduleMutation.mutate({
             srId: task.srId,
-            itemId: task.id,
+            itemId: task.wbsItemId || task.id,
             startDate,
             endDate
         });
@@ -199,7 +214,7 @@ export function CalendarPage() {
                                         <Clock className="w-3 h-3" />
                                         <span>{event.estimatedHours} 天</span>
                                         <span className="opacity-40">|</span>
-                                        <span>已報 {event.actualHours}h</span>
+                                        <span>{event.remainingDays ? `剩 ${event.remainingDays}天` : `已報 ${event.actualHours}h`}</span>
                                     </div>
                                 </div>
                             ))}
@@ -222,7 +237,7 @@ export function CalendarPage() {
 
     const projectOptions = Array.from(new Set((assignments || []).filter((a: any) => a.sourceType !== "manual").map((a: any) => a.srTitle))).sort();
     const visibleAssignments = (assignments || []).filter((a: any) => !projectFilter || a.srTitle === projectFilter || a.sourceType === "manual");
-    const unscheduledAssignments = visibleAssignments.filter((a: any) => !a.startDate || !a.endDate);
+    const unscheduledAssignments = visibleAssignments.filter((a: any) => a.isBacklog || !a.startDate || !a.endDate);
 
     return (
         <div className="max-w-[1400px] mx-auto space-y-4">
@@ -270,7 +285,7 @@ export function CalendarPage() {
                                             </div>
                                         )}
                                         <div className="text-xs text-muted-foreground flex items-center justify-between">
-                                            <span className="flex items-center"><Clock className="w-3 h-3 mr-1" /> {event.estimatedHours} 天</span>
+                                            <span className="flex items-center"><Clock className="w-3 h-3 mr-1" /> 剩 {event.remainingDays ?? event.estimatedHours} 天</span>
                                             <span className="text-[10px] bg-muted px-1.5 rounded">點擊排程</span>
                                         </div>
                                     </div>
@@ -335,9 +350,9 @@ export function CalendarPage() {
                                 <button onClick={() => setEditingEvent(null)} className="px-4 py-2 text-sm text-muted-foreground hover:bg-muted rounded-lg transition-colors">
                                     取消
                                 </button>
-                                <button onClick={handleSaveSchedule} disabled={updateScheduleMutation.isPending || updateManualScheduleMutation.isPending}
+                                <button onClick={handleSaveSchedule} disabled={updateScheduleMutation.isPending || updateManualScheduleMutation.isPending || createWbsScheduleMutation.isPending}
                                     className="px-4 py-2 text-sm bg-primary text-primary-foreground rounded-lg hover:bg-primary/90 transition-colors disabled:opacity-50">
-                                    {(updateScheduleMutation.isPending || updateManualScheduleMutation.isPending) ? "儲存中..." : "儲存設定"}
+                                    {(updateScheduleMutation.isPending || updateManualScheduleMutation.isPending || createWbsScheduleMutation.isPending) ? "儲存中..." : "儲存設定"}
                                 </button>
                             </div>
                         </div>
@@ -388,7 +403,7 @@ export function CalendarPage() {
                                                                 <div className="text-sm font-bold truncate">{t.title}</div>
                                                                 <div className="flex items-center gap-2 mt-1">
                                                                     <span className="text-[10px] text-primary bg-primary/5 px-1.5 rounded">{i === 0 ? "早上 (AM) 4h" : "下午 (PM) 4h"}</span>
-                                                                    <span className="text-[10px] text-muted-foreground">總預估: {t.estimatedHours} 天</span>
+                                                                    <span className="text-[10px] text-muted-foreground">本次: {t.estimatedHours} 天</span>
                                                                 </div>
                                                             </div>
                                                             <button onClick={() => openEditModal(t)} className="p-2 opacity-0 group-hover:opacity-100 text-muted-foreground hover:text-primary transition-all">
@@ -422,7 +437,7 @@ export function CalendarPage() {
                                             <option value="">-- 請選擇 --</option>
                                             {unscheduledAssignments.map(a => (
                                                 <option key={a.id} value={a.id}>
-                                                    [{a.srTitle.slice(0, 8)}...] {a.title} (餘 {a.estimatedHours - (a.actualHours || 0)} 天)
+                                                    [{a.srTitle.slice(0, 8)}...] {a.title} (餘 {a.remainingDays ?? a.estimatedHours} 天)
                                                 </option>
                                             ))}
                                         </select>
@@ -431,13 +446,12 @@ export function CalendarPage() {
                                     {quickScheduleTaskId && (
                                         <div className="bg-primary/5 rounded-lg p-3 border border-primary/10 animate-in fade-in slide-in-from-top-2">
                                             <div className="flex justify-between items-center mb-2">
-                                                <span className="text-xs font-medium text-muted-foreground">預計工期預覽:</span>
+                                                <span className="text-xs font-medium text-muted-foreground">本次排程預覽:</span>
                                                 <span className="text-xs font-bold text-primary bg-primary/10 px-2 py-0.5 rounded-full">
                                                     {(() => {
                                                         const t = (assignments || []).find(a => a.id === quickScheduleTaskId);
                                                         if (!t) return "";
-                                                        const rem = Math.max(0, t.estimatedHours - (t.actualHours || 0));
-                                                        return `共 ${Math.ceil(rem / 8)} 天 (${rem}h)`;
+                                                        return `排 1 天，剩 ${Math.max(0, (t.remainingDays ?? t.estimatedHours) - 1)} 天`;
                                                     })()}
                                                 </span>
                                             </div>
@@ -447,25 +461,19 @@ export function CalendarPage() {
                                                 </div>
                                                 <ChevronRight className="w-4 h-4 text-muted-foreground" />
                                                 <div className="flex-1 bg-background border border-border p-2 rounded text-center">
-                                                    {(() => {
-                                                        const t = (assignments || []).find(a => a.id === quickScheduleTaskId);
-                                                        if (!t) return "";
-                                                        const rem = Math.max(0, t.estimatedHours - (t.actualHours || 0));
-                                                        const days = Math.max(1, Math.ceil(rem / 8));
-                                                        return format(addDays(selectedDay, days - 1), "MM/dd");
-                                                    })()}
+                                                    {format(selectedDay, "MM/dd")}
                                                 </div>
                                             </div>
                                         </div>
                                     )}
 
                                     <button 
-                                        disabled={!quickScheduleTaskId || updateScheduleMutation.isPending}
+                                        disabled={!quickScheduleTaskId || updateScheduleMutation.isPending || createWbsScheduleMutation.isPending}
                                         onClick={() => handleQuickSchedule(quickScheduleTaskId)}
                                         className="w-full flex justify-center items-center gap-2 px-4 py-3 bg-primary text-primary-foreground rounded-xl text-sm font-bold hover:bg-primary/90 disabled:opacity-50 transition-all shadow-lg shadow-primary/20 active:scale-95"
                                     >
                                         <CalendarIcon className="w-4 h-4" />
-                                        {updateScheduleMutation.isPending ? "儲存中..." : "儲存排程設定"}
+                                        {(updateScheduleMutation.isPending || createWbsScheduleMutation.isPending) ? "儲存中..." : "排入選取日期"}
                                     </button>
                                 </div>
                             </div>

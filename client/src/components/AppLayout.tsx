@@ -81,9 +81,15 @@ const navGroups: NavGroup[] = [
         items: [
             { icon: LayoutDashboard, label: "專案總表", href: "/pm-dashboard", roles: ["admin", "manager", "pm"] },
             { icon: FolderKanban, label: "專案管理", href: "/projects", roles: ["admin", "manager", "pm", "tech"] },
-            { icon: CalendarDays, label: "排程行事曆", href: "/calendar", roles: ["admin", "manager", "pm", "tech"] },
             { icon: Clock, label: "專案工時", href: "/project-timesheets", roles: ["admin", "manager", "pm", "tech"] },
             { icon: FileCheck, label: "變更單 (CR)", href: "/change-requests", roles: ["admin", "manager", "pm", "tech"] },
+        ],
+    },
+    {
+        key: "schedule",
+        label: "排程",
+        items: [
+            { icon: CalendarDays, label: "排程行事曆", href: "/calendar", roles: ["admin", "manager", "pm", "tech"] },
         ],
     },
     {

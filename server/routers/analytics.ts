@@ -26,6 +26,31 @@ const buildDepartmentAccessFilter = async (ctxUser: any, explicitDepartment?: st
     return managedDepartments;
 };
 
+const getScopedReportUsers = async (ctxUser: any, explicitDepartment?: string, explicitUserId?: string) => {
+    const query: any = {};
+    const allowedDepartments = await buildDepartmentAccessFilter(ctxUser, explicitDepartment);
+    if (allowedDepartments !== null) {
+        if (allowedDepartments.length === 0) return [];
+        query.department = { $in: allowedDepartments };
+    }
+    if (explicitUserId) {
+        query._id = explicitUserId;
+    }
+    return UserModel.find(query, { _id: 1, name: 1, email: 1, department: 1, role: 1 }).lean();
+};
+
+const applyScopedUserFilter = async (
+    ctxUser: any,
+    match: any,
+    fieldName: string,
+    explicitDepartment?: string,
+    explicitUserId?: string
+) => {
+    if (hasAnyRole(ctxUser, ["admin"]) && !explicitDepartment && !explicitUserId) return;
+    const scopedUsers = await getScopedReportUsers(ctxUser, explicitDepartment, explicitUserId);
+    match[fieldName] = { $in: scopedUsers.map((user: any) => user._id) };
+};
+
 const getLatestImportBatchId = async (type: "open_cases" | "kpi_revenue") => {
     const batch = await ImportBatchModel.findOne({ type, status: "completed" }, { _id: 1 }).sort({ createdAt: -1 }).lean();
     return batch?._id;
@@ -242,6 +267,16 @@ export const analyticsRouter = router({
                 { month: input.month, type: input.type },
                 { $set: { isLocked: true, lockedBy: ctx.user.id } },
                 { upsert: true }
+            );
+            return { success: true };
+        }),
+
+    unlockSettlement: roleProcedure(["admin"])
+        .input(z.object({ month: z.string(), type: z.enum(settlementTypes) }))
+        .mutation(async ({ input }) => {
+            await SettlementLockModel.updateOne(
+                { month: input.month, type: input.type },
+                { $set: { isLocked: false }, $unset: { lockedBy: "" } }
             );
             return { success: true };
         }),
@@ -811,7 +846,8 @@ export const analyticsRouter = router({
             reportType: z.enum(["utilization", "settlement", "timesheets", "project_profitability", "pm_ranking", "budget_variance", "sla_compliance", "renewal_rate", "open_cases", "kpi_revenue"]),
             startDate: z.string(),
             endDate: z.string(),
-            department: z.string().optional()
+            department: z.string().optional(),
+            userId: z.string().optional()
         }))
         .query(async ({ ctx, input }) => {
             const start = new Date(input.startDate);
@@ -820,16 +856,7 @@ export const analyticsRouter = router({
 
             if (input.reportType === "timesheets") {
                 let tsMatch: any = { workDate: { $gte: start, $lte: end } };
-                if (!hasAnyRole(ctx.user as any, ["admin"])) {
-                    const depts = getManagedDepartments(ctx.user as any);
-                    if (depts !== null && depts.length > 0) {
-                        const deptUsers = await UserModel.find({ department: { $in: depts } }, { _id: 1 }).lean();
-                        tsMatch.techId = { $in: deptUsers.map(u => u._id) };
-                    }
-                } else if (input.department) {
-                    const deptUsers = await UserModel.find({ department: input.department }, { _id: 1 }).lean();
-                    tsMatch.techId = { $in: deptUsers.map(u => u._id) };
-                }
+                await applyScopedUserFilter(ctx.user, tsMatch, "techId", input.department, input.userId);
                 const data = await TimesheetModel.find(tsMatch)
                     .populate("techId", "name department")
                     .populate({
@@ -872,13 +899,9 @@ export const analyticsRouter = router({
                 });
             } else if (input.reportType === "utilization") {
                 let userMatch: any = {};
-                if (!hasAnyRole(ctx.user as any, ["admin"])) {
-                    const depts = getManagedDepartments(ctx.user as any);
-                    if (depts !== null && depts.length > 0) {
-                        userMatch.department = { $in: depts };
-                    }
-                } else if (input.department) {
-                    userMatch.department = input.department;
+                if (!hasAnyRole(ctx.user as any, ["admin"]) || input.department || input.userId) {
+                    const scopedUsers = await getScopedReportUsers(ctx.user, input.department, input.userId);
+                    userMatch._id = scopedUsers.length > 0 ? { $in: scopedUsers.map((user: any) => user._id) } : null;
                 }
                 
                 const users = await UserModel.find(userMatch).lean();
@@ -919,17 +942,9 @@ export const analyticsRouter = router({
                 let srMatch: any = {};
                 let oppMatch: any = {};
                 
-                if (!hasAnyRole(ctx.user as any, ["admin"])) {
-                    const depts = getManagedDepartments(ctx.user as any);
-                    if (depts !== null && depts.length > 0) {
-                        const deptUsers = await UserModel.find({ department: { $in: depts } }, { _id: 1 }).lean();
-                        const deptIds = deptUsers.map(u => u._id);
-                        srMatch.pmId = { $in: deptIds };
-                        oppMatch.ownerId = { $in: deptIds };
-                    }
-                } else if (input.department) {
-                    const deptUsers = await UserModel.find({ department: input.department }, { _id: 1 }).lean();
-                    const deptIds = deptUsers.map(u => u._id);
+                if (!hasAnyRole(ctx.user as any, ["admin"]) || input.department || input.userId) {
+                    const scopedUsers = await getScopedReportUsers(ctx.user, input.department, input.userId);
+                    const deptIds = scopedUsers.map((user: any) => user._id);
                     srMatch.pmId = { $in: deptIds };
                     oppMatch.ownerId = { $in: deptIds };
                 }
@@ -940,8 +955,10 @@ export const analyticsRouter = router({
                 ]);
 
                 // Query timesheets spanning the selected period mapped to projects/opportunities
-                const tsMatchProject = { type: "project", workDate: { $gte: start, $lte: end } };
-                const tsMatchPresales = { type: "presales", workDate: { $gte: start, $lte: end } };
+                const tsMatchProject: any = { type: "project", workDate: { $gte: start, $lte: end } };
+                const tsMatchPresales: any = { type: "presales", workDate: { $gte: start, $lte: end } };
+                await applyScopedUserFilter(ctx.user, tsMatchProject, "techId", input.department, input.userId);
+                await applyScopedUserFilter(ctx.user, tsMatchPresales, "techId", input.department, input.userId);
 
                 const [projCosts, preCosts] = await Promise.all([
                     TimesheetModel.aggregate([
@@ -994,10 +1011,7 @@ export const analyticsRouter = router({
                 const targetMargin = Number(settingsMap.get("pcTargetMargin") || 30);
 
                 let srMatch: any = {};
-                if (input.department) {
-                    const deptUsers = await UserModel.find({ department: input.department }, { _id: 1 }).lean();
-                    srMatch.pmId = { $in: deptUsers.map(u => u._id) };
-                }
+                await applyScopedUserFilter(ctx.user, srMatch, "pmId", input.department, input.userId);
 
                 const srs = await ServiceRequestModel.find(srMatch).populate("pmId", "name department").populate("opportunityId", "title customerName").lean();
                 const costAgg = await TimesheetModel.aggregate([
@@ -1025,8 +1039,13 @@ export const analyticsRouter = router({
                 });
             } else if (input.reportType === "pm_ranking") {
                 // PM Ranking by Revenue & Margin
+                const pmUserMatch: any = { role: { $in: ["pm"] } };
+                if (!hasAnyRole(ctx.user as any, ["admin"]) || input.department || input.userId) {
+                    const scopedUsers = await getScopedReportUsers(ctx.user, input.department, input.userId);
+                    pmUserMatch._id = scopedUsers.length > 0 ? { $in: scopedUsers.map((user: any) => user._id) } : null;
+                }
                 const users = await UserModel.find(
-                    input.department ? { department: input.department, role: { $in: ["pm"] } } : { role: { $in: ["pm"] } },
+                    pmUserMatch,
                     { _id: 1, name: 1, department: 1 }
                 ).lean();
 
@@ -1061,10 +1080,7 @@ export const analyticsRouter = router({
             } else if (input.reportType === "budget_variance") {
                 // Budget Variance Analysis
                 let srMatch: any = {};
-                if (input.department) {
-                    const deptUsers = await UserModel.find({ department: input.department }, { _id: 1 }).lean();
-                    srMatch.pmId = { $in: deptUsers.map(u => u._id) };
-                }
+                await applyScopedUserFilter(ctx.user, srMatch, "pmId", input.department, input.userId);
                 const srs = await ServiceRequestModel.find(srMatch).populate("pmId", "name").lean();
                 const costAgg = await TimesheetModel.aggregate([
                     { $match: { type: "project", workDate: { $gte: start, $lte: end } } },
@@ -1092,10 +1108,7 @@ export const analyticsRouter = router({
             } else if (input.reportType === "sla_compliance") {
                 // SLA Compliance - based on project on-time completion
                 let srMatch: any = {};
-                if (input.department) {
-                    const deptUsers = await UserModel.find({ department: input.department }, { _id: 1 }).lean();
-                    srMatch.pmId = { $in: deptUsers.map(u => u._id) };
-                }
+                await applyScopedUserFilter(ctx.user, srMatch, "pmId", input.department, input.userId);
                 const srs = await ServiceRequestModel.find(srMatch).populate("pmId", "name department").lean();
 
                 const settingsRecords = await SystemSettingModel.find({ key: "pcSlaTarget" }).lean();
@@ -1132,10 +1145,7 @@ export const analyticsRouter = router({
             } else if (input.reportType === "renewal_rate") {
                 // Renewal/Win Rate by Customer
                 let oppMatch: any = {};
-                if (input.department) {
-                    const deptUsers = await UserModel.find({ department: input.department }, { _id: 1 }).lean();
-                    oppMatch.ownerId = { $in: deptUsers.map(u => u._id) };
-                }
+                await applyScopedUserFilter(ctx.user, oppMatch, "ownerId", input.department, input.userId);
 
                 const settingsRecords = await SystemSettingModel.find({ key: "pcRenewalTarget" }).lean();
                 const renewalTarget = Number((settingsRecords[0] as any)?.value || 85);
@@ -1166,6 +1176,9 @@ export const analyticsRouter = router({
                 }).sort((a, b) => b["\u7e8c\u7d04/\u52dd\u7387%"] - a["\u7e8c\u7d04/\u52dd\u7387%"]);
             } else if (input.reportType === "open_cases") {
                 const allowedDepartments = await buildDepartmentAccessFilter(ctx.user, input.department);
+                const scopedUser = input.userId
+                    ? (await getScopedReportUsers(ctx.user, input.department, input.userId))[0]
+                    : null;
                 const srMatch: any = { externalProjectCode: { $exists: true, $ne: "" } };
                 if (allowedDepartments !== null) {
                     if (allowedDepartments.length === 0) {
@@ -1177,7 +1190,7 @@ export const analyticsRouter = router({
                         ];
                     }
                 }
-                srMatch.$and = [
+                const andClauses: any[] = [
                     {
                         $or: [
                             { plannedStartDate: { $lte: end } },
@@ -1192,6 +1205,19 @@ export const analyticsRouter = router({
                         ]
                     }
                 ];
+                if (scopedUser) {
+                    andClauses.push({
+                        $or: [
+                            { "externalAssignments.userId": scopedUser._id },
+                            { "externalAssignments.handlerName": scopedUser.name },
+                            { "externalAssignments.handlerDisplayName": scopedUser.name },
+                            { "externalAssignments.handlerEmail": (scopedUser as any).email }
+                        ]
+                    });
+                } else if (input.userId) {
+                    andClauses.push({ _id: null });
+                }
+                srMatch.$and = andClauses;
 
                 const srs = await ServiceRequestModel.find(srMatch).sort({ plannedEndDate: 1, externalProjectCode: 1 }).lean();
                 return srs.flatMap((sr: any) => {
@@ -1249,7 +1275,12 @@ export const analyticsRouter = router({
                 }
 
                 const snapshots = await RevenueSnapshotModel.find(match).sort({ scope: 1, department: 1, employeeName: 1 }).lean();
-                return snapshots.map((snapshot: any) => ({
+                const scopedUser = input.userId
+                    ? (await getScopedReportUsers(ctx.user, input.department, input.userId))[0]
+                    : null;
+                return snapshots
+                .filter((snapshot: any) => !scopedUser || (snapshot.scope === "person" && snapshot.employeeName === (scopedUser as any).name))
+                .map((snapshot: any) => ({
                     "層級": snapshot.scope === "department" ? "部門" : "個人",
                     "年度": snapshot.year,
                     "部門": snapshot.department,

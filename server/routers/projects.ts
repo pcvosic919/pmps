@@ -87,6 +87,15 @@ const getEffectiveWbsVersion = (sr: any) => {
     return approvedVersions.sort((left: any, right: any) => right.versionNumber - left.versionNumber)[0];
 };
 
+const getScheduledDayCount = (startDate?: Date | string, endDate?: Date | string) => {
+    if (!startDate || !endDate) return 0;
+    const start = new Date(startDate);
+    const end = new Date(endDate);
+    start.setHours(0, 0, 0, 0);
+    end.setHours(0, 0, 0, 0);
+    return Math.max(1, Math.floor((end.getTime() - start.getTime()) / (1000 * 60 * 60 * 24)) + 1);
+};
+
 const buildServiceRequestSearchQuery = (search?: string) => {
     const keyword = search?.trim();
     if (!keyword) {
@@ -780,18 +789,34 @@ export const projectsRouter = router({
     getMyProjectAssignments: protectedProcedure
         .query(async ({ ctx }) => {
             const userId = new mongoose.Types.ObjectId(ctx.user.id);
-            const [srs, manualTasks] = await Promise.all([
-                ServiceRequestModel.find({
+            const srs = await ServiceRequestModel.find({
+                $or: [
+                    { "wbsVersions.items.assigneeId": userId },
+                    { pmId: userId }
+                ]
+            })
+                .select("title pmId wbsVersions createdAt updatedAt plannedStartDate plannedEndDate closeDate completedAt")
+                .populate("wbsVersions.items.assigneeId", "name")
+                .lean();
+
+            const srIds = srs.map((sr: any) => sr._id);
+            const [manualTasks, wbsCalendarTasks] = await Promise.all([
+                CalendarTaskModel.find({ assigneeId: userId, sourceType: "manual" }).lean(),
+                CalendarTaskModel.find({
+                    sourceType: "wbs",
                     $or: [
-                        { "wbsVersions.items.assigneeId": userId },
-                        { pmId: userId }
+                        { assigneeId: userId },
+                        { srId: { $in: srIds } }
                     ]
-                })
-                    .select("title pmId wbsVersions createdAt updatedAt plannedStartDate plannedEndDate closeDate completedAt")
-                    .populate("wbsVersions.items.assigneeId", "name")
-                    .lean(),
-                CalendarTaskModel.find({ assigneeId: userId }).lean()
+                }).lean()
             ]);
+
+            const wbsTaskMap = new Map<string, any[]>();
+            for (const task of wbsCalendarTasks) {
+                const key = `${task.srId?.toString()}:${task.wbsItemId?.toString()}`;
+                if (!wbsTaskMap.has(key)) wbsTaskMap.set(key, []);
+                wbsTaskMap.get(key)!.push(task);
+            }
 
             const wbsAssignments = srs.flatMap((sr: any) => {
                 const effectiveVersion = getEffectiveWbsVersion(sr);
@@ -803,22 +828,55 @@ export const projectsRouter = router({
 
                 return (effectiveVersion.items || [])
                     .filter((item: any) => isPm || item.assigneeId?._id?.toString() === ctx.user.id || item.assigneeId?.toString() === ctx.user.id)
-                    .map((item: any) => ({
-                        id: item._id.toString(),
-                        srId: sr._id.toString(),
-                        title: item.title,
-                        estimatedHours: item.estimatedHours,
-                        actualHours: item.actualHours || 0,
-                        startDate: item.startDate,
-                        endDate: item.endDate,
-                        srTitle: sr.title,
-                        assigneeId: item.assigneeId?._id?.toString() || item.assigneeId?.toString(),
-                        assigneeName: item.assigneeId?.name || "未指派",
-                        isPmView: isPm && (item.assigneeId?._id?.toString() || item.assigneeId?.toString()) !== ctx.user.id,
-                        sourceType: "wbs",
-                        projectWindowStart: getProjectScheduleWindow(sr)?.start,
-                        projectWindowEnd: getProjectScheduleWindow(sr)?.end
-                    }));
+                    .flatMap((item: any) => {
+                        const assigneeId = item.assigneeId?._id?.toString() || item.assigneeId?.toString();
+                        const key = `${sr._id.toString()}:${item._id.toString()}`;
+                        const scheduledTasks = wbsTaskMap.get(key) || [];
+                        const scheduledDays = scheduledTasks.reduce((sum, task) => sum + getScheduledDayCount(task.startDate, task.endDate), 0);
+                        const totalDays = Number(item.estimatedHours || 0);
+                        const remainingDays = Math.max(0, totalDays - scheduledDays);
+                        const projectWindow = getProjectScheduleWindow(sr);
+                        const base = {
+                            srId: sr._id.toString(),
+                            wbsItemId: item._id.toString(),
+                            title: item.title,
+                            totalEstimatedHours: totalDays,
+                            scheduledDays,
+                            remainingDays,
+                            actualHours: item.actualHours || 0,
+                            srTitle: sr.title,
+                            assigneeId,
+                            assigneeName: item.assigneeId?.name || "未指派",
+                            isPmView: isPm && assigneeId !== ctx.user.id,
+                            sourceType: "wbs",
+                            projectWindowStart: projectWindow?.start,
+                            projectWindowEnd: projectWindow?.end
+                        };
+
+                        const scheduledEvents = scheduledTasks.map((task: any) => ({
+                            ...base,
+                            id: task._id.toString(),
+                            calendarTaskId: task._id.toString(),
+                            estimatedHours: getScheduledDayCount(task.startDate, task.endDate),
+                            startDate: task.startDate,
+                            endDate: task.endDate,
+                            isBacklog: false
+                        }));
+
+                        if (remainingDays <= 0) return scheduledEvents;
+
+                        return [
+                            ...scheduledEvents,
+                            {
+                                ...base,
+                                id: item._id.toString(),
+                                estimatedHours: remainingDays,
+                                startDate: undefined,
+                                endDate: undefined,
+                                isBacklog: true
+                            }
+                        ];
+                    });
             });
 
             const manualAssignments = manualTasks.map((task: any) => ({
@@ -870,6 +928,64 @@ export const projectsRouter = router({
             return { success: true };
         }),
 
+    scheduleWbsItem: protectedProcedure
+        .input(z.object({
+            srId: z.string(),
+            itemId: z.string(),
+            startDate: z.string().or(z.date()),
+            endDate: z.string().or(z.date())
+        }))
+        .mutation(async ({ ctx, input }) => {
+            const sr = await ServiceRequestModel.findById(input.srId);
+            if (!sr) throw new TRPCError({ code: "NOT_FOUND", message: "找不到專案" });
+
+            const effectiveVersion = getEffectiveWbsVersion(sr);
+            if (!effectiveVersion) throw new TRPCError({ code: "BAD_REQUEST", message: "沒有生效的 WBS 版本" });
+
+            const item = effectiveVersion.items.find((i: any) => i._id.toString() === input.itemId);
+            if (!item) throw new TRPCError({ code: "NOT_FOUND", message: "找不到任務項目" });
+            const assigneeId = item.assigneeId?._id?.toString() || item.assigneeId?.toString();
+            if (!assigneeId) {
+                throw new TRPCError({ code: "BAD_REQUEST", message: "此 WBS 項目尚未指派處理人員，無法排程" });
+            }
+
+            if (assigneeId !== ctx.user.id && !hasAnyRole(ctx.user, ["admin", "manager", "pm"])) {
+                throw new TRPCError({ code: "FORBIDDEN", message: "無權限修改此任務" });
+            }
+
+            const startDate = new Date(input.startDate);
+            const endDate = new Date(input.endDate);
+            assertWithinProjectScheduleWindow(sr, startDate, endDate);
+
+            const existingTasks = await CalendarTaskModel.find({
+                sourceType: "wbs",
+                srId: toObjectId(input.srId),
+                wbsItemId: toObjectId(input.itemId)
+            }).lean();
+            const existingDays = existingTasks.reduce((sum, task) => sum + getScheduledDayCount(task.startDate, task.endDate), 0);
+            const newDays = getScheduledDayCount(startDate, endDate);
+            const totalDays = Number(item.estimatedHours || 0);
+            if (totalDays > 0 && existingDays + newDays > totalDays) {
+                throw new TRPCError({
+                    code: "BAD_REQUEST",
+                    message: `此 WBS 尚餘 ${Math.max(0, totalDays - existingDays)} 天可排程，請縮短日期或改選其他 WBS`
+                });
+            }
+
+            const task = await CalendarTaskModel.create({
+                title: item.title,
+                assigneeId: toObjectId(assigneeId),
+                startDate,
+                endDate,
+                sourceType: "wbs",
+                srId: toObjectId(input.srId),
+                wbsItemId: toObjectId(input.itemId),
+                createdById: toObjectId(ctx.user.id)
+            });
+
+            return { id: task._id.toString() };
+        }),
+
     createCalendarTask: protectedProcedure
         .input(z.object({
             title: z.string().min(1),
@@ -899,8 +1015,34 @@ export const projectsRouter = router({
             if (task.assigneeId.toString() !== ctx.user.id && !hasAnyRole(ctx.user, ["admin", "manager", "pm"])) {
                 throw new TRPCError({ code: "FORBIDDEN", message: "無權限修改此任務" });
             }
-            task.startDate = new Date(input.startDate);
-            task.endDate = new Date(input.endDate);
+            const startDate = new Date(input.startDate);
+            const endDate = new Date(input.endDate);
+            if (task.sourceType === "wbs" && task.srId && task.wbsItemId) {
+                const sr = await ServiceRequestModel.findById(task.srId);
+                if (!sr) throw new TRPCError({ code: "NOT_FOUND", message: "找不到專案" });
+                const effectiveVersion = getEffectiveWbsVersion(sr);
+                const item = effectiveVersion?.items.find((i: any) => i._id.toString() === task.wbsItemId?.toString());
+                if (!item) throw new TRPCError({ code: "NOT_FOUND", message: "找不到任務項目" });
+                assertWithinProjectScheduleWindow(sr, startDate, endDate);
+
+                const siblingTasks = await CalendarTaskModel.find({
+                    _id: { $ne: task._id },
+                    sourceType: "wbs",
+                    srId: task.srId,
+                    wbsItemId: task.wbsItemId
+                }).lean();
+                const siblingDays = siblingTasks.reduce((sum, itemTask) => sum + getScheduledDayCount(itemTask.startDate, itemTask.endDate), 0);
+                const newDays = getScheduledDayCount(startDate, endDate);
+                const totalDays = Number(item.estimatedHours || 0);
+                if (totalDays > 0 && siblingDays + newDays > totalDays) {
+                    throw new TRPCError({
+                        code: "BAD_REQUEST",
+                        message: `此 WBS 尚餘 ${Math.max(0, totalDays - siblingDays)} 天可排程，請縮短日期`
+                    });
+                }
+            }
+            task.startDate = startDate;
+            task.endDate = endDate;
             await task.save();
             return { success: true };
         }),
