@@ -16,8 +16,6 @@ jobs:
 
     - name: Setup pnpm
       uses: pnpm/action-setup@v4
-      with:
-        version: 9 # 或指定具體版號如 9.0.0
 
     - name: Setup Node.js
       uses: actions/setup-node@v4
