@@ -7,7 +7,7 @@ import toast from "react-hot-toast";
 import { useCurrentUser } from "../lib/useCurrentUser";
 import * as XLSX from "xlsx";
 import { SharePointFilesSection } from "../components/SharePointFilesSection";
-import { exportArraysToXlsx, exportRowsToXlsx } from "../lib/exportXlsx";
+import { exportRowsToXlsx, exportWbsCostWorkbook } from "../lib/exportXlsx";
 
 export function WbsManagementPage() {
     const [, params] = useRoute("/service-requests/:id");
@@ -259,31 +259,28 @@ export function WbsManagementPage() {
             toast.error("沒有可匯出的 WBS 版本資料");
             return;
         }
-        const itemNumbers = computeItemNumbers(latestVersion.items);
-        const headers = ["專案階段", "工作項次", "工作項目", "工作編號", "工作說明", "工作天數(小計)", "[人員1]天數", "[人員1]單價", "[人員2]天數", "[人員2]單價", "[人員3]天數", "[人員3]單價", "內部成本小計", "備註"];
-        const rows = latestVersion.items.map((item: any, idx: number) => {
-            const assignee = techs?.find(t => t.id === item.assigneeId);
-            const costRate = assignee?.costRate?.dailyRate || 0;
-            const days = item.estimatedHours || 0; // Using estimatedHours as Days based on user preference
-            const internalCost = days * costRate;
-            
-            return [
-                item.level === 0 ? item.title : "", // 專案階段
-                itemNumbers[idx], // 工作項次
-                item.title, // 工作項目
-                item.code || "", // 工作編號
-                item.description || "", // 工作說明
-                days, // 工作天數(小計)
-                item.assigneeId ? days : "", // [人員1]天數
-                item.assigneeId ? costRate : "", // [人員1]單價
-                "", "", // [人員2]
-                "", "", // [人員3]
-                internalCost, // 內部成本小計
-                item.remarks || "" // 備註
-            ];
+        const assignedIds = Array.from(new Set(latestVersion.items.map((item: any) => item.assigneeId).filter(Boolean)));
+        const people = (techs || [])
+            .filter((tech: any) => assignedIds.includes(tech.id))
+            .map((tech: any) => ({
+                id: tech.id,
+                name: tech.name,
+                department: tech.department,
+                dailyRate: tech.costRate?.dailyRate || 0,
+            }));
+
+        exportWbsCostWorkbook({
+            fileName: `WBS_Export_SR${sr.id}_v${latestVersion.version}.xlsx`,
+            projectTitle: sr.title,
+            customerName: sr.customerName,
+            salesDepartment: sr.salesDepartment,
+            salesRep: sr.salesRep,
+            technicalDepartment: people[0]?.department,
+            version: latestVersion.version,
+            items: latestVersion.items,
+            people,
         });
-        exportArraysToXlsx([headers, ...rows], `WBS_Export_SR${sr.id}_v${latestVersion.version}.xlsx`, "WBS");
-        toast.success("WBS 已成功完整匯出");
+        toast.success("WBS 已依專案成本表範本匯出");
     };
 
     // File upload (Mock implementation)

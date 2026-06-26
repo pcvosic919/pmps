@@ -110,7 +110,7 @@ export const usersRouter = router({
         const users = await UserModel.find({
             $or: [{ role: "tech" }, { roles: "tech" }]
         })
-            .select("name email department title role roles isActive provider")
+            .select("name email department title role roles isActive provider costRate")
             .lean();
         return users.map(u => ({ ...u, id: u._id.toString() }));
     }),
