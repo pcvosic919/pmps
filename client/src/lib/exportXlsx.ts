@@ -139,7 +139,7 @@ const buildWbsRows = (
         }
 
         const assignee = item.assigneeId ? peopleById.get(item.assigneeId) : undefined;
-        const personSlots = sheetPeople.flatMap((person, personIndex) => {
+        const personSlots: Array<number | string> = sheetPeople.flatMap((person, personIndex) => {
             const isOverflowSlot = overflowToLastSlot && personIndex === 2 && !!item.assigneeId && !sheetPersonIds.has(item.assigneeId);
             const assigned = item.assigneeId === person.id || isOverflowSlot;
             const dailyRate = isOverflowSlot ? assignee?.dailyRate || 0 : person.dailyRate || 0;
