@@ -109,7 +109,7 @@ const setFormula = (sheet: XLSX.WorkSheet, row: number, col: number, formula: st
 const normalizeDateText = (value?: string | Date) => {
     if (!value) return "";
     const date = value instanceof Date ? value : new Date(value);
-    return Number.isNaN(date.getTime()) ? "" : date.toLocaleDateString();
+    return Number.isNaN(date.getTime()) ? "" : date.toISOString().slice(0, 10);
 };
 
 const makeItemNumbers = (items: WbsWorkbookItem[]) => {
@@ -305,6 +305,8 @@ export function exportWbsCostWorkbook(input: WbsWorkbookInput) {
         "工作項目",
         "工作編號",
         "工作說明",
+        "起始時間",
+        "起訖時間",
         "工作天數\n(小計)",
         `${people[0]?.name || "人員1"}\n人天`,
         `${people[0]?.name || "人員1"}\n單價`,
@@ -319,7 +321,7 @@ export function exportWbsCostWorkbook(input: WbsWorkbookInput) {
     const totalRow = costDataStartRow + rows.length;
     const costAoa: unknown[][] = [
         [`${projectTitle}　專案成本表${input.version ? ` v${input.version}` : ""}`],
-        [`客戶：${customerName}　　業務：${salesInfo}`, "", "", "", "", "", "", `技術：${technicalDepartment} / ${techLead}　　費率：NT$${defaultRate.toLocaleString()}/人天`],
+        [`客戶：${customerName}　　業務：${salesInfo}`, "", "", "", "", "", "", "", `技術：${technicalDepartment} / ${techLead}　　費率：NT$${defaultRate.toLocaleString()}/人天`],
         costHeaders,
         ...rows.map((row, index) => [
             index === 0 || rows[index - 1].phase !== row.phase ? row.phase : "",
@@ -327,19 +329,21 @@ export function exportWbsCostWorkbook(input: WbsWorkbookInput) {
             row.title,
             row.code,
             row.description,
+            row.startDate,
+            row.endDate,
             null,
             ...row.personSlots,
             null,
             row.remarks,
         ]),
-        ["總計", "", "", "", "", null, null, "", null, "", null, "", null, ""],
+        ["總計", "", "", "", "", "", "", null, null, "", null, "", null, "", null, ""],
     ];
     const costSheet = XLSX.utils.aoa_to_sheet(costAoa);
     costSheet["!merges"] = [
-        { s: { r: 0, c: 0 }, e: { r: 0, c: 13 } },
-        { s: { r: 1, c: 0 }, e: { r: 1, c: 6 } },
-        { s: { r: 1, c: 7 }, e: { r: 1, c: 13 } },
-        { s: { r: totalRow - 1, c: 0 }, e: { r: totalRow - 1, c: 4 } },
+        { s: { r: 0, c: 0 }, e: { r: 0, c: 15 } },
+        { s: { r: 1, c: 0 }, e: { r: 1, c: 7 } },
+        { s: { r: 1, c: 8 }, e: { r: 1, c: 15 } },
+        { s: { r: totalRow - 1, c: 0 }, e: { r: totalRow - 1, c: 6 } },
     ];
     const stageRanges = buildStageRanges(rows, costDataStartRow);
     stageRanges.forEach((range) => {
@@ -353,6 +357,8 @@ export function exportWbsCostWorkbook(input: WbsWorkbookInput) {
         { wch: 28 },
         { wch: 10 },
         { wch: 72 },
+        { wch: 12 },
+        { wch: 12 },
         { wch: 10 },
         { wch: 10 },
         { wch: 10 },
@@ -372,19 +378,19 @@ export function exportWbsCostWorkbook(input: WbsWorkbookInput) {
     ];
     rows.forEach((_, index) => {
         const row = costDataStartRow + index;
-        setFormula(costSheet, row, 6, `G${row}+I${row}+K${row}`);
-        setFormula(costSheet, row, 13, `G${row}*H${row}+I${row}*J${row}+K${row}*L${row}`);
-        [8, 10, 12, 13].forEach((col) => {
+        setFormula(costSheet, row, 8, `I${row}+K${row}+M${row}`);
+        setFormula(costSheet, row, 15, `I${row}*J${row}+K${row}*L${row}+M${row}*N${row}`);
+        [10, 12, 14, 15].forEach((col) => {
             const cell = costSheet[encodeCell(row, col)];
             if (cell) cell.z = "#,##0";
         });
     });
-    setFormula(costSheet, totalRow, 6, `SUM(F${costDataStartRow}:F${totalRow - 1})`);
-    setFormula(costSheet, totalRow, 7, `SUM(G${costDataStartRow}:G${totalRow - 1})`);
+    setFormula(costSheet, totalRow, 8, `SUM(H${costDataStartRow}:H${totalRow - 1})`);
     setFormula(costSheet, totalRow, 9, `SUM(I${costDataStartRow}:I${totalRow - 1})`);
     setFormula(costSheet, totalRow, 11, `SUM(K${costDataStartRow}:K${totalRow - 1})`);
     setFormula(costSheet, totalRow, 13, `SUM(M${costDataStartRow}:M${totalRow - 1})`);
-    costSheet["!autofilter"] = { ref: `A3:N${Math.max(totalRow - 1, 3)}` };
+    setFormula(costSheet, totalRow, 15, `SUM(O${costDataStartRow}:O${totalRow - 1})`);
+    costSheet["!autofilter"] = { ref: `A3:P${Math.max(totalRow - 1, 3)}` };
     XLSX.utils.book_append_sheet(workbook, costSheet, "專案成本表");
 
     const quoteStartRow = 8;
@@ -413,8 +419,8 @@ export function exportWbsCostWorkbook(input: WbsWorkbookInput) {
     quoteSheet["!cols"] = [{ wch: 8 }, { wch: 44 }, { wch: 10 }, { wch: 16 }, { wch: 20 }];
     stageRanges.forEach((range, index) => {
         const row = quoteStartRow + index;
-        setFormula(quoteSheet, row, 3, `SUM('專案成本表'!F${range.start}:F${range.end})`);
-        setFormula(quoteSheet, row, 4, `SUM('專案成本表'!M${range.start}:M${range.end})`);
+        setFormula(quoteSheet, row, 3, `SUM('專案成本表'!H${range.start}:H${range.end})`);
+        setFormula(quoteSheet, row, 4, `SUM('專案成本表'!O${range.start}:O${range.end})`);
         const amountCell = quoteSheet[encodeCell(row, 4)];
         if (amountCell) amountCell.z = "#,##0";
     });

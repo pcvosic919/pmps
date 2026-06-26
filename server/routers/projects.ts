@@ -1152,6 +1152,9 @@ export const projectsRouter = router({
             });
 
             wbsItem.actualHours = (wbsItem.actualHours || 0) + input.hours;
+            if (!["in_progress", "completed", "cancelled"].includes(sr.status)) {
+                sr.status = "in_progress";
+            }
             sr.markModified("wbsVersions");
             await sr.save();
             return { success: true };

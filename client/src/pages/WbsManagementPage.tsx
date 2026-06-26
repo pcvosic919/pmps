@@ -260,14 +260,18 @@ export function WbsManagementPage() {
             return;
         }
         const assignedIds = Array.from(new Set(latestVersion.items.map((item: any) => item.assigneeId).filter(Boolean)));
-        const people = (techs || [])
-            .filter((tech: any) => assignedIds.includes(tech.id))
-            .map((tech: any) => ({
-                id: tech.id,
-                name: tech.name,
-                department: tech.department,
-                dailyRate: tech.costRate?.dailyRate || 0,
-            }));
+        const usersById = new Map((allUsers?.items || []).map((item: any) => [item.id, item]));
+        const techsById = new Map((techs || []).map((item: any) => [item.id, item]));
+        const people = assignedIds.map((id: any) => {
+            const user = usersById.get(id) as any;
+            const tech = techsById.get(id) as any;
+            return {
+                id,
+                name: user?.email || tech?.email || user?.name || tech?.name || id,
+                department: user?.department || tech?.department,
+                dailyRate: tech?.costRate?.dailyRate || user?.costRate?.dailyRate || 0,
+            };
+        });
 
         exportWbsCostWorkbook({
             fileName: `WBS_Export_SR${sr.id}_v${latestVersion.version}.xlsx`,

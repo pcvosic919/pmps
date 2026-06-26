@@ -1609,12 +1609,12 @@ export const analyticsRouter = router({
                     };
                 }).sort((a, b) => b["\u7e8c\u7d04/\u52dd\u7387%"] - a["\u7e8c\u7d04/\u52dd\u7387%"]);
             } else if (input.reportType === "open_cases") {
-                const allowedDepartments = await buildDepartmentAccessFilter(ctx.user, input.department);
                 const scopedUser = input.userId
                     ? (await getScopedReportUsers(ctx.user, input.department, input.userId))[0]
                     : null;
                 const srMatch: any = { externalProjectCode: { $exists: true, $ne: "" } };
-                if (allowedDepartments !== null) {
+                if (input.department) {
+                    const allowedDepartments = await buildDepartmentAccessFilter(ctx.user, input.department);
                     if (allowedDepartments.length === 0) {
                         srMatch._id = null;
                     } else {
@@ -1624,34 +1624,18 @@ export const analyticsRouter = router({
                         ];
                     }
                 }
-                const andClauses: any[] = [
-                    {
-                        $or: [
-                            { plannedStartDate: { $lte: end } },
-                            { createdAt: { $lte: end } }
-                        ]
-                    },
-                    {
-                        $or: [
-                            { plannedEndDate: { $gte: start } },
-                            { plannedEndDate: { $exists: false } },
-                            { plannedEndDate: null }
-                        ]
-                    }
-                ];
                 if (scopedUser) {
-                    andClauses.push({
+                    srMatch.$and = [{
                         $or: [
                             { "externalAssignments.userId": scopedUser._id },
                             { "externalAssignments.handlerName": scopedUser.name },
                             { "externalAssignments.handlerDisplayName": scopedUser.name },
                             { "externalAssignments.handlerEmail": (scopedUser as any).email }
                         ]
-                    });
+                    }];
                 } else if (input.userId) {
-                    andClauses.push({ _id: null });
+                    srMatch._id = null;
                 }
-                srMatch.$and = andClauses;
 
                 const srs = await ServiceRequestModel.find(srMatch).sort({ plannedEndDate: 1, externalProjectCode: 1 }).lean();
                 return srs.flatMap((sr: any) => {
@@ -1702,16 +1686,22 @@ export const analyticsRouter = router({
                 const year = start.getFullYear();
                 const latestBatchId = await getLatestImportBatchId("kpi_revenue");
                 if (!latestBatchId) return [];
-                const allowedDepartments = await buildDepartmentAccessFilter(ctx.user, input.department);
                 const match: any = { importBatchId: latestBatchId, year };
-                if (allowedDepartments !== null) {
+                if (input.department) {
+                    const allowedDepartments = await buildDepartmentAccessFilter(ctx.user, input.department);
                     match.department = allowedDepartments.length > 0 ? { $in: allowedDepartments } : "__NO_ACCESS__";
                 }
 
-                const snapshots = await RevenueSnapshotModel.find(match).sort({ scope: 1, department: 1, employeeName: 1 }).lean();
                 const scopedUser = input.userId
                     ? (await getScopedReportUsers(ctx.user, input.department, input.userId))[0]
                     : null;
+                let snapshots = await RevenueSnapshotModel.find(match).sort({ scope: 1, department: 1, employeeName: 1 }).lean();
+                if (snapshots.length === 0 && !input.department && !input.userId) {
+                    const latestSnapshot = await RevenueSnapshotModel.findOne({ importBatchId: latestBatchId }, { year: 1 }).sort({ year: -1 }).lean();
+                    if (latestSnapshot?.year && latestSnapshot.year !== year) {
+                        snapshots = await RevenueSnapshotModel.find({ importBatchId: latestBatchId, year: latestSnapshot.year }).sort({ scope: 1, department: 1, employeeName: 1 }).lean();
+                    }
+                }
                 return snapshots
                 .filter((snapshot: any) => !scopedUser || (snapshot.scope === "person" && snapshot.employeeName === (scopedUser as any).name))
                 .map((snapshot: any) => ({
