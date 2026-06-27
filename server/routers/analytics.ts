@@ -139,11 +139,10 @@ const toDateText = (value?: Date | string | null) => {
     return Number.isNaN(date.getTime()) ? "" : date.toISOString().slice(0, 10);
 };
 
-const getRecognitionDate = (sr: any) => {
-    if (sr.recognitionMonth && /^\d{4}-\d{2}/.test(sr.recognitionMonth)) {
-        return new Date(`${sr.recognitionMonth}-01T00:00:00.000Z`);
-    }
-    return sr.actualEndDate || sr.updatedAt || sr.createdAt;
+const parseMonthDate = (month?: string | null) => {
+    if (!month || !/^\d{4}-\d{2}$/.test(month)) return null;
+    const date = new Date(`${month}-01T00:00:00.000Z`);
+    return Number.isNaN(date.getTime()) ? null : date;
 };
 
 const getQuarterKey = (value?: Date | string | null) => {
@@ -152,8 +151,10 @@ const getQuarterKey = (value?: Date | string | null) => {
     return `q${Math.floor(date.getUTCMonth() / 3) + 1}` as "q1" | "q2" | "q3" | "q4";
 };
 
+type RevenueBucket = { total: number; q1: number; q2: number; q3: number; q4: number };
+
 const addRevenueBucket = (
-    buckets: Map<string, { total: number; q1: number; q2: number; q3: number; q4: number }>,
+    buckets: Map<string, RevenueBucket>,
     key: string,
     amount: number,
     date?: Date | string | null
@@ -164,6 +165,8 @@ const addRevenueBucket = (
     if (quarter) bucket[quarter] += amount;
     buckets.set(key, bucket);
 };
+
+const getEmptyRevenueBucket = (): RevenueBucket => ({ total: 0, q1: 0, q2: 0, q3: 0, q4: 0 });
 
 const getKpiDepartment = (item: any) => item.salesDepartment || item.pmId?.department || item.ownerId?.department || "未指定";
 
@@ -850,7 +853,7 @@ export const analyticsRouter = router({
                 console.error("Failed to parse pcDeptKpiTargets:", e);
             }
 
-            const presalesRate = Number(settingsMap.get("pcPresalesHourlyRate") || 2000);
+            const presalesRate = Number(settingsMap.get("pcPresalesHourlyRate") || 1000);
             const latestKpiBatchId = await getLatestImportBatchId("kpi_revenue");
             const [importedDeptSnapshots, kpiTargets, policy] = await Promise.all([
                 latestKpiBatchId
@@ -1812,6 +1815,7 @@ export const analyticsRouter = router({
                 return Array.from(new Map(projectRows.map((row) => [row["專案編號"], row])).values());
             } else if (input.reportType === "kpi_revenue") {
                 const year = start.getFullYear();
+                const previousYear = year - 1;
                 const policy = await getOrCreateKpiPolicy(year);
                 const allowedDepartments = await buildDepartmentAccessFilter(ctx.user, input.department);
                 const scopedUser = input.userId
@@ -1819,6 +1823,10 @@ export const analyticsRouter = router({
                     : null;
                 const departmentFilter = allowedDepartments && allowedDepartments.length > 0 ? allowedDepartments : null;
                 if (allowedDepartments !== null && allowedDepartments.length === 0) return [];
+                const deptUsers = departmentFilter
+                    ? await UserModel.find({ department: { $in: departmentFilter } }, { _id: 1 }).lean()
+                    : [];
+                const deptUserIds = deptUsers.map((user: any) => user._id);
 
                 const targetMatch: any = { year };
                 if (departmentFilter) targetMatch.department = { $in: departmentFilter };
@@ -1831,22 +1839,34 @@ export const analyticsRouter = router({
 
                 const srMatch: any = {};
                 if (departmentFilter) {
-                    const deptUsers = await UserModel.find({ department: { $in: departmentFilter } }, { _id: 1 }).lean();
                     srMatch.$or = [
                         { salesDepartment: { $in: departmentFilter } },
-                        { pmId: { $in: deptUsers.map((user: any) => user._id) } }
+                        { pmId: { $in: deptUserIds } }
                     ];
                 }
                 if (scopedUser) srMatch.pmId = scopedUser._id;
 
-                const oppMatch: any = { status: { $nin: ["lost", "won", "converted"] } };
+                const oppMatch: any = {
+                    status: { $nin: ["lost", "won", "converted"] },
+                    estimatedValue: { $gt: 0 },
+                    $or: [
+                        { opportunityType: "revenue" },
+                        { opportunityType: { $exists: false } }
+                    ]
+                };
                 if (departmentFilter) {
-                    const deptUsers = await UserModel.find({ department: { $in: departmentFilter } }, { _id: 1 }).lean();
-                    oppMatch.ownerId = { $in: deptUsers.map((user: any) => user._id) };
+                    oppMatch.ownerId = { $in: deptUserIds };
                 }
                 if (scopedUser) oppMatch.ownerId = scopedUser._id;
 
-                const [targets, serviceRequests, opportunities] = await Promise.all([
+                const presalesMatch: any = {
+                    type: "presales",
+                    workDate: { $gte: new Date(previousYear, 0, 1), $lte: end }
+                };
+                if (departmentFilter) presalesMatch.techId = { $in: deptUserIds };
+                if (scopedUser) presalesMatch.techId = scopedUser._id;
+
+                const [targets, serviceRequests, opportunities, presalesTimesheets, settingRecords] = await Promise.all([
                     KpiTargetModel.find(targetMatch).sort({ scope: 1, department: 1, userName: 1 }).lean(),
                     ServiceRequestModel.find(srMatch)
                         .populate("pmId", "name department")
@@ -1854,64 +1874,172 @@ export const analyticsRouter = router({
                         .lean(),
                     OpportunityModel.find(oppMatch)
                         .populate("ownerId", "name department")
-                        .select("title customerName estimatedValue status ownerId")
-                        .lean()
+                        .select("title customerName estimatedValue opportunityType status ownerId")
+                        .lean(),
+                    TimesheetModel.find(presalesMatch)
+                        .populate("techId", "name department")
+                        .select("techId workDate hours opportunityId")
+                        .lean(),
+                    SystemSettingModel.find({ key: "pcPresalesHourlyRate" }).lean()
                 ]);
+                const settingMap = new Map(settingRecords.map((item: any) => [item.key, item.value]));
+                const presalesHourlyRate = Number(settingMap.get("pcPresalesHourlyRate") || 1000);
 
-                const recognizedByDept = new Map<string, { total: number; q1: number; q2: number; q3: number; q4: number }>();
-                const recognizedByPerson = new Map<string, { total: number; q1: number; q2: number; q3: number; q4: number }>();
-                const pipelineByDept = new Map<string, number>();
-                const pipelineByPerson = new Map<string, number>();
+                const projectRecognizedByDept = new Map<string, RevenueBucket>();
+                const projectRecognizedByPerson = new Map<string, RevenueBucket>();
+                const presalesRecognizedByDept = new Map<string, RevenueBucket>();
+                const presalesRecognizedByPerson = new Map<string, RevenueBucket>();
+                const previousProjectByDept = new Map<string, RevenueBucket>();
+                const previousProjectByPerson = new Map<string, RevenueBucket>();
+                const previousPresalesByDept = new Map<string, RevenueBucket>();
+                const previousPresalesByPerson = new Map<string, RevenueBucket>();
+                const openSrPipelineByDept = new Map<string, number>();
+                const openSrPipelineByPerson = new Map<string, number>();
+                const opportunityPipelineByDept = new Map<string, number>();
+                const opportunityPipelineByPerson = new Map<string, number>();
+                const weightedOpportunityPipelineByDept = new Map<string, number>();
+                const weightedOpportunityPipelineByPerson = new Map<string, number>();
+                const anomaliesByDept = new Map<string, Set<string>>();
+                const anomaliesByPerson = new Map<string, Set<string>>();
+
+                const addAnomaly = (map: Map<string, Set<string>>, key: string, message: string) => {
+                    const values = map.get(key) || new Set<string>();
+                    values.add(message);
+                    map.set(key, values);
+                };
+                const mergeBucket = (...buckets: Array<RevenueBucket | undefined>): RevenueBucket =>
+                    buckets.reduce<RevenueBucket>((total, bucket) => ({
+                        total: total.total + (bucket?.total || 0),
+                        q1: total.q1 + (bucket?.q1 || 0),
+                        q2: total.q2 + (bucket?.q2 || 0),
+                        q3: total.q3 + (bucket?.q3 || 0),
+                        q4: total.q4 + (bucket?.q4 || 0),
+                    }), getEmptyRevenueBucket());
+                const addAmount = (map: Map<string, number>, key: string, amount: number) => {
+                    if (amount <= 0) return;
+                    map.set(key, (map.get(key) || 0) + amount);
+                };
 
                 for (const sr of serviceRequests as any[]) {
-                    const recognitionDate = getRecognitionDate(sr);
-                    const recognitionYear = recognitionDate ? new Date(recognitionDate).getUTCFullYear() : year;
-                    const recognizedAmount = Number(sr.recognizedRevenueAmount || 0) > 0
-                        ? Number(sr.recognizedRevenueAmount || 0)
-                        : sr.status === "completed" && recognitionYear === year
-                            ? Number(sr.contractAmount || 0)
-                            : 0;
+                    const recognitionDate = parseMonthDate(sr.recognitionMonth);
+                    const recognitionYear = recognitionDate?.getUTCFullYear();
+                    const recognizedAmount = Number(sr.recognizedRevenueAmount || 0);
                     const department = getKpiDepartment(sr);
                     const personKey = sr.pmId?._id?.toString();
-                    if (recognizedAmount > 0 && recognitionYear === year) {
-                        addRevenueBucket(recognizedByDept, department, recognizedAmount, recognitionDate);
-                        if (personKey) addRevenueBucket(recognizedByPerson, personKey, recognizedAmount, recognitionDate);
+
+                    if (recognizedAmount > 0 && recognitionDate && recognitionYear === year) {
+                        addRevenueBucket(projectRecognizedByDept, department, recognizedAmount, recognitionDate);
+                        if (personKey) addRevenueBucket(projectRecognizedByPerson, personKey, recognizedAmount, recognitionDate);
+                    } else if (recognizedAmount > 0 && recognitionDate && recognitionYear === previousYear) {
+                        addRevenueBucket(previousProjectByDept, department, recognizedAmount, recognitionDate);
+                        if (personKey) addRevenueBucket(previousProjectByPerson, personKey, recognizedAmount, recognitionDate);
                     }
+
+                    if (sr.status === "completed") {
+                        if (!sr.recognitionMonth) {
+                            addAnomaly(anomaliesByDept, department, `已結案缺認列月份：${sr.title}`);
+                            if (personKey) addAnomaly(anomaliesByPerson, personKey, `已結案缺認列月份：${sr.title}`);
+                        }
+                        if (recognizedAmount <= 0) {
+                            addAnomaly(anomaliesByDept, department, `已結案缺認列金額：${sr.title}`);
+                            if (personKey) addAnomaly(anomaliesByPerson, personKey, `已結案缺認列金額：${sr.title}`);
+                        }
+                        if (!personKey) {
+                            addAnomaly(anomaliesByDept, department, `已結案缺 PM 歸屬：${sr.title}`);
+                        }
+                    }
+
                     if (sr.status !== "completed" && sr.status !== "cancelled") {
-                        const openAmount = Math.max(0, Number(sr.contractAmount || 0) - Number(sr.recognizedRevenueAmount || 0));
-                        pipelineByDept.set(department, (pipelineByDept.get(department) || 0) + openAmount);
-                        if (personKey) pipelineByPerson.set(personKey, (pipelineByPerson.get(personKey) || 0) + openAmount);
+                        const openAmount = Math.max(0, Number(sr.contractAmount || 0) - Math.max(0, recognizedAmount));
+                        addAmount(openSrPipelineByDept, department, openAmount);
+                        if (personKey) {
+                            addAmount(openSrPipelineByPerson, personKey, openAmount);
+                        } else if (openAmount > 0) {
+                            addAnomaly(anomaliesByDept, department, `未結案缺 PM 歸屬：${sr.title}`);
+                        }
                     }
                 }
 
                 for (const opportunity of opportunities as any[]) {
                     const department = getKpiDepartment(opportunity);
-                    const amount = getWeightedPipelineAmount(Number(opportunity.estimatedValue || 0), opportunity.status, policy.pipelineWeights || defaultPipelineWeights);
-                    pipelineByDept.set(department, (pipelineByDept.get(department) || 0) + amount);
+                    const rawAmount = Number(opportunity.estimatedValue || 0);
+                    const weightedAmount = getWeightedPipelineAmount(rawAmount, opportunity.status, policy.pipelineWeights || defaultPipelineWeights);
+                    addAmount(opportunityPipelineByDept, department, rawAmount);
+                    addAmount(weightedOpportunityPipelineByDept, department, weightedAmount);
                     const ownerKey = opportunity.ownerId?._id?.toString();
-                    if (ownerKey) pipelineByPerson.set(ownerKey, (pipelineByPerson.get(ownerKey) || 0) + amount);
+                    if (ownerKey) {
+                        addAmount(opportunityPipelineByPerson, ownerKey, rawAmount);
+                        addAmount(weightedOpportunityPipelineByPerson, ownerKey, weightedAmount);
+                    } else {
+                        addAnomaly(anomaliesByDept, department, `商機缺負責人：${opportunity.title}`);
+                    }
+                }
+
+                for (const ts of presalesTimesheets as any[]) {
+                    const workDate = ts.workDate ? new Date(ts.workDate) : null;
+                    if (!workDate || Number.isNaN(workDate.getTime())) continue;
+                    const timesheetYear = workDate.getUTCFullYear();
+                    const amount = Number(ts.hours || 0) * presalesHourlyRate;
+                    const user = ts.techId;
+                    const department = user?.department || "未指定";
+                    const personKey = user?._id?.toString();
+                    if (timesheetYear === year) {
+                        addRevenueBucket(presalesRecognizedByDept, department, amount, workDate);
+                        if (personKey) addRevenueBucket(presalesRecognizedByPerson, personKey, amount, workDate);
+                    } else if (timesheetYear === previousYear) {
+                        addRevenueBucket(previousPresalesByDept, department, amount, workDate);
+                        if (personKey) addRevenueBucket(previousPresalesByPerson, personKey, amount, workDate);
+                    }
                 }
 
                 const departmentTargets = new Map(targets.filter((target: any) => target.scope === "department").map((target: any) => [target.department, target]));
                 const personTargets = targets.filter((target: any) => target.scope === "person");
                 const departmentKeys = new Set([
                     ...departmentTargets.keys(),
-                    ...recognizedByDept.keys(),
-                    ...pipelineByDept.keys()
+                    ...projectRecognizedByDept.keys(),
+                    ...presalesRecognizedByDept.keys(),
+                    ...openSrPipelineByDept.keys(),
+                    ...opportunityPipelineByDept.keys()
                 ]);
+                const personTargetMap = new Map<string, any>();
+                personTargets.forEach((target: any) => {
+                    const key = target.userId?.toString() || target.userName;
+                    if (key) personTargetMap.set(key, target);
+                });
+                const personKeys = new Set([
+                    ...personTargetMap.keys(),
+                    ...projectRecognizedByPerson.keys(),
+                    ...presalesRecognizedByPerson.keys(),
+                    ...openSrPipelineByPerson.keys(),
+                    ...opportunityPipelineByPerson.keys()
+                ]);
+                const usersById = new Map<string, any>();
+                [
+                    ...(serviceRequests as any[]).map((sr: any) => sr.pmId).filter(Boolean),
+                    ...(opportunities as any[]).map((opp: any) => opp.ownerId).filter(Boolean),
+                    ...(presalesTimesheets as any[]).map((ts: any) => ts.techId).filter(Boolean)
+                ].forEach((user: any) => {
+                    const key = user?._id?.toString();
+                    if (key) usersById.set(key, user);
+                });
 
                 const deptRows = Array.from(departmentKeys).sort().map((department) => {
                     const target = departmentTargets.get(department) as any;
-                    const recognized = recognizedByDept.get(department) || { total: 0, q1: 0, q2: 0, q3: 0, q4: 0 };
-                    const pipeline = pipelineByDept.get(department) || 0;
+                    const recognized = mergeBucket(projectRecognizedByDept.get(department), presalesRecognizedByDept.get(department));
+                    const previous = mergeBucket(previousProjectByDept.get(department), previousPresalesByDept.get(department));
+                    const openSrPipeline = openSrPipelineByDept.get(department) || 0;
+                    const opportunityPipeline = opportunityPipelineByDept.get(department) || 0;
+                    const weightedOpportunityPipeline = weightedOpportunityPipelineByDept.get(department) || 0;
+                    const weightedPipeline = openSrPipeline + weightedOpportunityPipeline;
                     const targetAmount = Number(target?.targetAmount || 0);
+                    const forecast = recognized.total + weightedPipeline;
                     return {
                         "層級": "部門",
                         "年度": year,
                         "部門": department,
                         "員工編號": "",
                         "員工姓名": "",
-                        "制度": "系統設定",
+                        "制度": "專案+協銷",
                         "指標": target?.note || "年度目標",
                         "年度目標": targetAmount,
                         "Q1目標": target?.q1TargetAmount || 0,
@@ -1923,44 +2051,101 @@ export const analyticsRouter = router({
                         "Q3認列": recognized.q3,
                         "Q4認列": recognized.q4,
                         "實際認列收入": recognized.total,
-                        "Pipeline預估": pipeline,
-                        "含Pipeline預估": recognized.total + pipeline,
+                        "前一年年度數字": previous.total,
+                        "YoY": previous.total > 0 ? Math.round(((recognized.total - previous.total) / previous.total) * 1000) / 10 : "N/A",
+                        "已建案未認列": openSrPipeline,
+                        "商機Pipeline": opportunityPipeline,
+                        "Pipeline預估": weightedPipeline,
+                        "Pipeline原始金額": openSrPipeline + opportunityPipeline,
+                        "Pipeline加權金額": weightedPipeline,
+                        "含Pipeline預估": forecast,
                         "達成率%": targetAmount > 0 ? Math.round((recognized.total / targetAmount) * 100) : 0,
-                        "含Pipeline達成率%": targetAmount > 0 ? Math.round(((recognized.total + pipeline) / targetAmount) * 100) : 0
+                        "含Pipeline達成率%": targetAmount > 0 ? Math.round((forecast / targetAmount) * 100) : 0,
+                        "預估達成率%": targetAmount > 0 ? Math.round((forecast / targetAmount) * 100) : 0,
+                        "Gap": recognized.total - targetAmount,
+                        "資料異常備註": Array.from(anomaliesByDept.get(department) || []).join("；")
                     };
                 });
 
-                const personRows = personTargets.map((target: any) => {
-                    const personKey = target.userId?.toString() || "";
-                    const recognized = recognizedByPerson.get(personKey) || { total: 0, q1: 0, q2: 0, q3: 0, q4: 0 };
-                    const pipeline = pipelineByPerson.get(personKey) || 0;
-                    const targetAmount = Number(target.targetAmount || 0);
+                const projectPersonRows = Array.from(personKeys).sort().map((personKey) => {
+                    const target = personTargetMap.get(personKey) as any;
+                    const user = usersById.get(personKey);
+                    const recognized = projectRecognizedByPerson.get(personKey) || getEmptyRevenueBucket();
+                    const previous = previousProjectByPerson.get(personKey) || getEmptyRevenueBucket();
+                    const openSrPipeline = openSrPipelineByPerson.get(personKey) || 0;
+                    const opportunityPipeline = opportunityPipelineByPerson.get(personKey) || 0;
+                    const weightedPipeline = openSrPipeline + (weightedOpportunityPipelineByPerson.get(personKey) || 0);
+                    const targetAmount = Number(target?.targetAmount || 0);
                     return {
                         "層級": "個人",
                         "年度": year,
-                        "部門": target.department,
+                        "部門": target?.department || user?.department || "未指定",
                         "員工編號": personKey,
-                        "員工姓名": target.userName || "",
-                        "制度": "系統設定",
-                        "指標": target.note || "年度目標",
+                        "員工姓名": target?.userName || user?.name || "",
+                        "制度": "專案",
+                        "指標": target?.note || "年度目標",
                         "年度目標": targetAmount,
-                        "Q1目標": target.q1TargetAmount || 0,
-                        "Q2目標": target.q2TargetAmount || 0,
-                        "Q3目標": target.q3TargetAmount || 0,
-                        "Q4目標": target.q4TargetAmount || 0,
+                        "Q1目標": target?.q1TargetAmount || 0,
+                        "Q2目標": target?.q2TargetAmount || 0,
+                        "Q3目標": target?.q3TargetAmount || 0,
+                        "Q4目標": target?.q4TargetAmount || 0,
                         "Q1認列": recognized.q1,
                         "Q2認列": recognized.q2,
                         "Q3認列": recognized.q3,
                         "Q4認列": recognized.q4,
                         "實際認列收入": recognized.total,
-                        "Pipeline預估": pipeline,
-                        "含Pipeline預估": recognized.total + pipeline,
+                        "前一年年度數字": previous.total,
+                        "YoY": previous.total > 0 ? Math.round(((recognized.total - previous.total) / previous.total) * 1000) / 10 : "N/A",
+                        "已建案未認列": openSrPipeline,
+                        "商機Pipeline": opportunityPipeline,
+                        "Pipeline預估": weightedPipeline,
+                        "Pipeline原始金額": openSrPipeline + opportunityPipeline,
+                        "Pipeline加權金額": weightedPipeline,
+                        "含Pipeline預估": recognized.total + weightedPipeline,
                         "達成率%": targetAmount > 0 ? Math.round((recognized.total / targetAmount) * 100) : 0,
-                        "含Pipeline達成率%": targetAmount > 0 ? Math.round(((recognized.total + pipeline) / targetAmount) * 100) : 0
+                        "含Pipeline達成率%": targetAmount > 0 ? Math.round(((recognized.total + weightedPipeline) / targetAmount) * 100) : 0,
+                        "Gap": recognized.total - targetAmount,
+                        "資料異常備註": Array.from(anomaliesByPerson.get(personKey) || []).join("；")
+                    };
+                });
+                const presalesRows = Array.from(new Set([...presalesRecognizedByPerson.keys(), ...previousPresalesByPerson.keys()])).sort().map((personKey) => {
+                    const user = usersById.get(personKey);
+                    const recognized = presalesRecognizedByPerson.get(personKey) || getEmptyRevenueBucket();
+                    const previous = previousPresalesByPerson.get(personKey) || getEmptyRevenueBucket();
+                    return {
+                        "層級": "個人",
+                        "年度": year,
+                        "部門": user?.department || "未指定",
+                        "員工編號": personKey,
+                        "員工姓名": user?.name || "",
+                        "制度": "協銷",
+                        "指標": `協銷工時 × ${presalesHourlyRate}`,
+                        "年度目標": 0,
+                        "Q1目標": 0,
+                        "Q2目標": 0,
+                        "Q3目標": 0,
+                        "Q4目標": 0,
+                        "Q1認列": recognized.q1,
+                        "Q2認列": recognized.q2,
+                        "Q3認列": recognized.q3,
+                        "Q4認列": recognized.q4,
+                        "實際認列收入": recognized.total,
+                        "前一年年度數字": previous.total,
+                        "YoY": previous.total > 0 ? Math.round(((recognized.total - previous.total) / previous.total) * 1000) / 10 : "N/A",
+                        "已建案未認列": 0,
+                        "商機Pipeline": 0,
+                        "Pipeline預估": 0,
+                        "Pipeline原始金額": 0,
+                        "Pipeline加權金額": 0,
+                        "含Pipeline預估": recognized.total,
+                        "達成率%": 0,
+                        "含Pipeline達成率%": 0,
+                        "Gap": recognized.total,
+                        "資料異常備註": ""
                     };
                 });
 
-                return [...deptRows, ...personRows];
+                return [...deptRows, ...projectPersonRows, ...presalesRows];
             }
             
             return [];
@@ -1982,7 +2167,7 @@ export const analyticsRouter = router({
                 key: { $in: ["pcPresalesHourlyRate", "pcMaintenancePointValue", "pcOverheadRate"] } 
             }).lean();
             const settingsMap = new Map(settingsRecords.map((s: any) => [s.key, s.value]));
-            const pcPresalesHourlyRate = Number(settingsMap.get("pcPresalesHourlyRate") || 2000);
+            const pcPresalesHourlyRate = Number(settingsMap.get("pcPresalesHourlyRate") || 1000);
             const pcOverheadRate = Number(settingsMap.get("pcOverheadRate") || 15);
 
             let srMatch: any = { createdAt: { $gte: start, $lte: end } };

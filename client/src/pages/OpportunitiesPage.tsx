@@ -17,6 +17,7 @@ const oppSchema = z.object({
     title: z.string().min(1, "商機名稱不可為空"),
     customerName: z.string().min(1, "客戶名稱不可為空"),
     estimatedValue: z.number().min(0, "金額不能為負數"),
+    opportunityType: z.enum(["revenue", "presales"]),
     status: z.enum(["new", "qualified", "presales_active", "won", "converted", "lost"]),
     productNames: z.array(z.string()).optional(),
     description: z.string().optional(),
@@ -24,6 +25,11 @@ const oppSchema = z.object({
     approvedAzure: z.boolean().default(false),
     approvedSecurity: z.boolean().default(false)
 });
+
+const opportunityTypeLabels: Record<string, string> = {
+    revenue: "營收型商機",
+    presales: "協銷"
+};
 
 
 
@@ -79,6 +85,7 @@ export function OpportunitiesPage() {
             title: "",
             customerName: "",
             estimatedValue: 0,
+            opportunityType: "revenue",
             status: "new",
             productNames: [],
             description: "",
@@ -112,6 +119,7 @@ export function OpportunitiesPage() {
             title: values.title,
             customerName: values.customerName,
             estimatedValue: values.estimatedValue,
+            opportunityType: values.opportunityType,
             status: values.status,
             productNames: values.productNames,
             description: values.description,
@@ -187,6 +195,7 @@ export function OpportunitiesPage() {
                             <tr className="bg-muted/50 border-b border-border text-[11px] font-bold text-muted-foreground uppercase tracking-widest">
                                 <th className="px-6 py-4">狀態</th>
                                 <th className="px-6 py-4">ID / 商機名稱</th>
+                                <th className="px-6 py-4">類型</th>
                                 <th className="px-6 py-4">客戶名稱</th>
                                 <th className="px-6 py-4">預估金額 (NT$)</th>
                                 <th className="px-6 py-4">負責人</th>
@@ -207,6 +216,11 @@ export function OpportunitiesPage() {
                                             <span className="text-[10px] font-mono text-muted-foreground mb-0.5">#{opp.id}</span>
                                             <span className="text-sm font-bold text-foreground group-hover:text-primary transition-colors line-clamp-1">{opp.title}</span>
                                         </div>
+                                    </td>
+                                    <td className="px-6 py-4">
+                                        <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold border ${(opp as any).opportunityType === "presales" ? "bg-cyan-100 text-cyan-800 border-cyan-200" : "bg-emerald-100 text-emerald-800 border-emerald-200"}`}>
+                                            {opportunityTypeLabels[(opp as any).opportunityType] || opportunityTypeLabels[Number(opp.estimatedValue || 0) > 0 ? "revenue" : "presales"]}
+                                        </span>
                                     </td>
                                     <td className="px-6 py-4">
                                         <div className="flex items-center text-sm text-foreground/80">
@@ -253,7 +267,7 @@ export function OpportunitiesPage() {
                             ))}
                             {(!opps || opps.length === 0) && (
                                 <tr>
-                                    <td colSpan={7} className="px-6 py-12 text-center text-muted-foreground italic">
+                                                <td colSpan={8} className="px-6 py-12 text-center text-muted-foreground italic">
                                         <div className="flex flex-col items-center justify-center opacity-50">
                                             <Briefcase className="w-10 h-10 mb-2" />
                                             <p>尚無商機資料</p>
@@ -324,6 +338,28 @@ export function OpportunitiesPage() {
                                                 onChange={(e: React.ChangeEvent<HTMLInputElement>) => field.onChange(Number(e.target.value))}
                                             />
                                         </FormControl>
+                                        <FormMessage />
+                                    </FormItem>
+                                )}
+                            />
+                            <FormField
+                                control={form.control}
+                                name="opportunityType"
+                                render={({ field }: any) => (
+                                    <FormItem>
+                                        <FormLabel>商機類型</FormLabel>
+                                        <Select value={field.value} onValueChange={field.onChange}>
+                                            <FormControl>
+                                                <SelectTrigger>
+                                                    <SelectValue placeholder="選擇商機類型" />
+                                                </SelectTrigger>
+                                            </FormControl>
+                                            <SelectContent>
+                                                <SelectItem value="revenue">營收型商機</SelectItem>
+                                                <SelectItem value="presales">協銷</SelectItem>
+                                            </SelectContent>
+                                        </Select>
+                                        <p className="text-xs text-muted-foreground">營收型商機進 Pipeline；協銷以工時 × 單價計入個人 Summary。</p>
                                         <FormMessage />
                                     </FormItem>
                                 )}

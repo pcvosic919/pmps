@@ -1,5 +1,5 @@
 import mongoose, { Schema, Document } from "mongoose";
-import { memberRoles, opportunityStatuses, type CustomFieldValue, type OpportunityStatus, type OpportunityMember, type PresalesAssignment } from "../../shared/types";
+import { memberRoles, opportunityStatuses, opportunityTypes, type CustomFieldValue, type OpportunityStatus, type OpportunityType, type OpportunityMember, type PresalesAssignment } from "../../shared/types";
 
 export interface IOpportunityMember extends Omit<OpportunityMember, "userId"> {
     userId: mongoose.Types.ObjectId;
@@ -17,6 +17,7 @@ export interface IOpportunity extends Document {
     title: string;
     customerName: string;
     estimatedValue: number;
+    opportunityType: OpportunityType;
     status: OpportunityStatus;
     expectedCloseDate?: Date;
     productNames?: string[];
@@ -38,6 +39,7 @@ const OpportunitySchema = new Schema<IOpportunity>({
     title: { type: String, required: true },
     customerName: { type: String, required: true },
     estimatedValue: { type: Number, required: true, default: 0 },
+    opportunityType: { type: String, enum: opportunityTypes, default: "revenue", required: true },
     status: { type: String, enum: opportunityStatuses, default: "new", required: true },
     expectedCloseDate: { type: Date },
     productNames: [{ type: String }],

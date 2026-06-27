@@ -8,7 +8,7 @@ import { ServiceRequestModel } from "../models/ServiceRequest";
 import { UserModel } from "../models/User";
 import { SystemSettingModel } from "../models/Settings";
 import { TRPCError } from "@trpc/server";
-import { memberRoles, opportunityStatuses } from "../../shared/types";
+import { memberRoles, opportunityStatuses, opportunityTypes } from "../../shared/types";
 import {
     assertAuthorized,
     assertFound,
@@ -45,6 +45,9 @@ const assertOpportunityAssignable = (opportunity: { status?: string }) => {
         throw new TRPCError({ code: "BAD_REQUEST", message: "此商機目前狀態不可再指派協銷" });
     }
 };
+
+const getEffectiveOpportunityType = (opportunity: { opportunityType?: string; estimatedValue?: number }) =>
+    opportunity.opportunityType || (Number(opportunity.estimatedValue || 0) > 0 ? "revenue" : "presales");
 
 const getMonthKey = (value: Date) => value.toISOString().slice(0, 7);
 
@@ -103,7 +106,7 @@ export const opportunitiesRouter = router({
             });
 
             const items = await OpportunityModel.find(query)
-                .select("title customerName estimatedValue status expectedCloseDate ownerId createdAt members presalesAssignments productNames description")
+                .select("title customerName estimatedValue opportunityType status expectedCloseDate ownerId createdAt members presalesAssignments productNames description")
                 .populate("ownerId", "name")
                 .sort({ [sortBy]: direction })
                 .limit(limit + 1)
@@ -119,6 +122,7 @@ export const opportunitiesRouter = router({
                     title: opp.title,
                     customerName: opp.customerName,
                     estimatedValue: opp.estimatedValue,
+                    opportunityType: getEffectiveOpportunityType(opp),
                     status: opp.status,
                     expectedCloseDate: opp.expectedCloseDate,
                     ownerId: (opp.ownerId as any)?._id?.toString() || opp.ownerId?.toString(),
@@ -155,6 +159,7 @@ export const opportunitiesRouter = router({
             title: z.string(),
             customerName: z.string(),
             estimatedValue: z.number().default(0),
+            opportunityType: z.enum(opportunityTypes).default("revenue"),
             status: z.enum(opportunityStatuses).default("new"),
             expectedCloseDate: z.date().optional(),
             customFields: z.array(z.object({
@@ -208,7 +213,8 @@ export const opportunitiesRouter = router({
             return {
                 ...opp,
                 id: opp._id.toString(),
-                ownerId: opp.ownerId.toString()
+                ownerId: opp.ownerId.toString(),
+                opportunityType: getEffectiveOpportunityType(opp)
             };
         }),
 
@@ -617,6 +623,32 @@ export const opportunitiesRouter = router({
             await OpportunityModel.updateOne(
                 { _id: input.id },
                 { $set: { estimatedValue: input.estimatedValue } }
+            );
+
+            return { success: true };
+        }),
+
+    updateOpportunityType: protectedProcedure
+        .input(z.object({
+            id: z.string(),
+            opportunityType: z.enum(opportunityTypes)
+        }))
+        .mutation(async ({ input, ctx }) => {
+            const opportunity = assertFound(
+                await OpportunityModel.findById(input.id)
+                    .select("ownerId members status")
+                    .lean(),
+                "找不到該商機"
+            );
+
+            const isBusinessOwner = isOpportunityBusinessOwner(ctx.user, opportunity);
+            const canUpdate = hasAnyRole(ctx.user, ["admin", "manager", "presales"]) || isBusinessOwner;
+            assertAuthorized(canUpdate, "您沒有權限更新商機類型");
+            assertOpportunityNotConverted(opportunity);
+
+            await OpportunityModel.updateOne(
+                { _id: input.id },
+                { $set: { opportunityType: input.opportunityType } }
             );
 
             return { success: true };

@@ -18,6 +18,11 @@ const OPP_STATUSES = [
     { value: "lost", label: "已失敗", color: "bg-red-100 text-red-800 border-red-200" },
 ] as const;
 
+const OPP_TYPES = [
+    { value: "revenue", label: "營收型商機" },
+    { value: "presales", label: "協銷" },
+] as const;
+
 
 export function OpportunityDetailPage() {
     const [match, params] = useRoute("/opportunities/:id");
@@ -133,6 +138,10 @@ export function OpportunityDetailPage() {
             setEstimatedValueError("");
         },
         onError: (err) => setEstimatedValueError(err.message || "更新預估金額失敗")
+    });
+
+    const updateOpportunityTypeMutation = trpc.opportunities.updateOpportunityType.useMutation({
+        onSuccess: () => refetchOpp()
     });
 
     const createSRMutation = trpc.opportunities.createSR.useMutation({
@@ -347,10 +356,27 @@ export function OpportunityDetailPage() {
                         )}
                     </div>
                 </div>
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-6 pt-6 border-t border-border/50">
+                <div className="grid grid-cols-1 md:grid-cols-4 gap-6 pt-6 border-t border-border/50">
                     <div className="space-y-1">
                         <span className="text-sm text-muted-foreground">商機 ID</span>
                         <p className="font-semibold">#{opp.id}</p>
+                    </div>
+                    <div className="space-y-1">
+                        <span className="text-sm text-muted-foreground">商機類型</span>
+                        {(isBusinessOwner || hasRole("admin") || hasRole("manager") || hasRole("presales")) && !isConverted ? (
+                            <select
+                                value={(opp as any).opportunityType || (Number(opp.estimatedValue || 0) > 0 ? "revenue" : "presales")}
+                                onChange={(event) => updateOpportunityTypeMutation.mutate({ id, opportunityType: event.target.value as "revenue" | "presales" })}
+                                disabled={updateOpportunityTypeMutation.isPending}
+                                className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm font-semibold"
+                            >
+                                {OPP_TYPES.map((item) => (
+                                    <option key={item.value} value={item.value}>{item.label}</option>
+                                ))}
+                            </select>
+                        ) : (
+                            <p className="font-semibold">{OPP_TYPES.find((item) => item.value === ((opp as any).opportunityType || "revenue"))?.label || "營收型商機"}</p>
+                        )}
                     </div>
                     <div className="space-y-1">
                         <div className="flex items-center justify-between gap-3">

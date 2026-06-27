@@ -1,5 +1,5 @@
-import { useEffect, useState } from "react";
-import { TrendingUp, Save, Plus, Trash2 } from "lucide-react";
+import { useEffect, useMemo, useState } from "react";
+import { AlertTriangle, TrendingUp, Save, Plus, Trash2 } from "lucide-react";
 import { toast } from "react-hot-toast";
 import { trpc } from "../lib/trpc";
 
@@ -9,7 +9,7 @@ const defaultSettings = {
     pcSlaTarget: 95,
     pcRenewalTarget: 85,
     pcUtilizationTarget: 80,
-    pcPresalesHourlyRate: 2000,
+    pcPresalesHourlyRate: 1000,
     pcMaintenancePointValue: 500,
     pcKpiTarget: 5000000,
     pcDeptKpiTargets: {} as Record<string, number>,
@@ -17,20 +17,39 @@ const defaultSettings = {
 
 export default function ProfitCenterFormulaPage() {
     const [settings, setSettings] = useState(defaultSettings);
+    const [targetYear, setTargetYear] = useState(new Date().getFullYear());
     const [selectedDept, setSelectedDept] = useState("");
     const [customTarget, setCustomTarget] = useState("");
+    const [selectedPersonId, setSelectedPersonId] = useState("");
+    const [personTarget, setPersonTarget] = useState("");
+    const [personNote, setPersonNote] = useState("");
     
     const utils = trpc.useUtils();
     const { data: departments } = trpc.users.getDepartments.useQuery();
+    const { data: usersData } = trpc.users.list.useQuery({ limit: 500 });
+    const allUsers = usersData?.items || [];
+    const { data: governance, refetch: refetchGovernance } = trpc.analytics.getKpiGovernance.useQuery({ year: targetYear });
 
     const { data, isLoading } = trpc.system.getSettings.useQuery();
     const updateSettings = trpc.system.updateSettings.useMutation({
         onSuccess: async () => {
             toast.success("利潤中心公式設定已儲存");
             await utils.system.getSettings.invalidate();
+            await utils.analytics.getKpiGovernance.invalidate();
+            await utils.analytics.getDeptKpi.invalidate();
         },
         onError: (error) => {
             toast.error(error.message || "儲存失敗，請稍後再試");
+        }
+    });
+    const upsertKpiTarget = trpc.analytics.upsertKpiTarget.useMutation({
+        onSuccess: async () => {
+            await refetchGovernance();
+            await utils.analytics.getDeptKpi.invalidate();
+            await utils.analytics.generateReport.invalidate();
+        },
+        onError: (error) => {
+            toast.error(error.message || "年度目標儲存失敗");
         }
     });
 
@@ -42,7 +61,7 @@ export default function ProfitCenterFormulaPage() {
                 pcSlaTarget: data.pcSlaTarget,
                 pcRenewalTarget: data.pcRenewalTarget,
                 pcUtilizationTarget: data.pcUtilizationTarget,
-                pcPresalesHourlyRate: data.pcPresalesHourlyRate ?? 2000,
+                pcPresalesHourlyRate: data.pcPresalesHourlyRate ?? 1000,
                 pcMaintenancePointValue: data.pcMaintenancePointValue ?? 500,
                 pcKpiTarget: (data as any).pcKpiTarget ?? 5000000,
                 pcDeptKpiTargets: (data as any).pcDeptKpiTargets ?? {},
@@ -50,16 +69,58 @@ export default function ProfitCenterFormulaPage() {
         }
     }, [data]);
 
-    const handleSave = () => {
+    const deptTargetTotal = useMemo(
+        () => Object.values(settings.pcDeptKpiTargets || {}).reduce((sum, value) => sum + Number(value || 0), 0),
+        [settings.pcDeptKpiTargets]
+    );
+    const divisionTarget = Number((settings as any).pcKpiTarget || 0);
+    const targetGap = deptTargetTotal - divisionTarget;
+    const deptTargetsMatchDivision = targetGap === 0;
+    const personTargets = (governance?.targets || []).filter((target: any) => target.scope === "person");
+
+    const handleSave = async () => {
         // We only update the formula-related settings, so we merge with existing data to satisfy the mutation schema
         if (!data) return;
+        if (!deptTargetsMatchDivision) {
+            toast.error(`各部門 KPI 目標加總需等於處級目標，目前差額 NT$ ${Math.abs(targetGap).toLocaleString()}`);
+            return;
+        }
         
         const updatedPayload = {
             ...data,
             ...settings
         };
         
-        updateSettings.mutate(updatedPayload);
+        await updateSettings.mutateAsync(updatedPayload);
+        await Promise.all(Object.entries(settings.pcDeptKpiTargets || {}).map(([department, targetAmount]) =>
+            upsertKpiTarget.mutateAsync({
+                year: targetYear,
+                scope: "department",
+                department,
+                targetAmount: Number(targetAmount || 0),
+                note: "利潤中心公式頁同步"
+            })
+        ));
+    };
+
+    const handleSavePersonTarget = async () => {
+        const selectedUser = allUsers.find((user: any) => user.id === selectedPersonId);
+        if (!selectedUser) {
+            toast.error("請先選擇人員");
+            return;
+        }
+        await upsertKpiTarget.mutateAsync({
+            year: targetYear,
+            scope: "person",
+            department: selectedUser.department || "未指定",
+            userId: selectedUser.id,
+            targetAmount: Number(personTarget || 0),
+            note: personNote || undefined
+        });
+        setSelectedPersonId("");
+        setPersonTarget("");
+        setPersonNote("");
+        toast.success("個人年度目標已儲存");
     };
 
     if (isLoading) {
@@ -82,7 +143,7 @@ export default function ProfitCenterFormulaPage() {
                     className="bg-primary text-primary-foreground hover:bg-primary/90 px-5 py-2.5 rounded-lg flex items-center text-sm font-medium transition-all shadow-md active:scale-95 disabled:opacity-50"
                 >
                     <Save className="w-4 h-4 mr-2" />
-                    {updateSettings.isPending ? "儲存中..." : "儲存設定"}
+                    {updateSettings.isPending || upsertKpiTarget.isPending ? "儲存中..." : "儲存設定"}
                 </button>
             </div>
 
@@ -181,7 +242,19 @@ export default function ProfitCenterFormulaPage() {
 
                     <div className="grid md:grid-cols-2 gap-8 border-t border-border/50 pt-8">
                         <div>
-                            <label className="block text-sm font-bold mb-2">年度部門 KPI 目標金額 (NT$)</label>
+                            <label className="block text-sm font-bold mb-2">目標年度</label>
+                            <input
+                                type="number"
+                                min={2020}
+                                max={2100}
+                                value={targetYear}
+                                onChange={e => setTargetYear(Number(e.target.value))}
+                                className="w-full p-2.5 rounded-lg border border-input bg-background/50 focus:bg-background transition-colors"
+                            />
+                            <p className="text-xs text-muted-foreground mt-1.5">部門與個人年度目標會同步到此年度的 KPI 目標設定。</p>
+                        </div>
+                        <div>
+                            <label className="block text-sm font-bold mb-2">處級 KPI 目標金額 (NT$)</label>
                             <input
                                 type="number"
                                 min={0}
@@ -189,14 +262,25 @@ export default function ProfitCenterFormulaPage() {
                                 onChange={e => setSettings(s => ({ ...s, pcKpiTarget: Number(e.target.value) } as any))}
                                 className="w-full p-2.5 rounded-lg border border-input bg-background/50 focus:bg-background transition-colors"
                             />
-                            <p className="text-xs text-muted-foreground mt-1.5">各部門年度業績目標基準，用於 KPI 儀表板的達成率與 Gap 計算。</p>
+                            <p className="text-xs text-muted-foreground mt-1.5">處級年度目標總額；各部門 KPI 目標加總必須等於此金額。</p>
                         </div>
                     </div>
 
                     <div className="grid md:grid-cols-1 gap-8 border-t border-border/50 pt-8">
                         <div>
-                            <label className="block text-sm font-bold mb-2">各部門個別 KPI 目標 (Department Override)</label>
-                            <p className="text-xs text-muted-foreground mb-4">若有特別設定，KPI 儀表板會優先使用這裡的金額；若無設定，則自動套用上方的全域預設目標。</p>
+                            <label className="block text-sm font-bold mb-2">各部門 KPI 目標</label>
+                            <p className="text-xs text-muted-foreground mb-4">各部門 KPI 目標加總需等於處級 KPI 目標，儲存時會同步到年度部門 KpiTarget。</p>
+                            <div className={`mb-4 rounded-lg border p-3 text-sm ${deptTargetsMatchDivision ? "border-emerald-200 bg-emerald-50 text-emerald-800" : "border-amber-200 bg-amber-50 text-amber-800"}`}>
+                                <div className="flex items-center gap-2 font-semibold">
+                                    {!deptTargetsMatchDivision && <AlertTriangle className="h-4 w-4" />}
+                                    部門合計 NT$ {deptTargetTotal.toLocaleString()} / 處級目標 NT$ {divisionTarget.toLocaleString()}
+                                </div>
+                                {!deptTargetsMatchDivision && (
+                                    <div className="mt-1 text-xs">
+                                        目前{targetGap > 0 ? "超出" : "不足"} NT$ {Math.abs(targetGap).toLocaleString()}，請調整部門目標後再儲存。
+                                    </div>
+                                )}
+                            </div>
                             
                             <div className="flex gap-3 mb-4">
                                 <select 
@@ -272,6 +356,75 @@ export default function ProfitCenterFormulaPage() {
                                                             <Trash2 className="w-4 h-4" />
                                                         </button>
                                                     </td>
+                                                </tr>
+                                            ))
+                                        )}
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div className="grid md:grid-cols-1 gap-8 border-t border-border/50 pt-8">
+                        <div>
+                            <label className="block text-sm font-bold mb-2">個人年度目標</label>
+                            <p className="text-xs text-muted-foreground mb-4">設定每位人員在目標年度的 KPI 目標，年度認列報表的 Summary_個人會直接引用。</p>
+                            <div className="grid gap-3 md:grid-cols-[1.4fr_1fr_1.2fr_auto] mb-4">
+                                <select
+                                    value={selectedPersonId}
+                                    onChange={e => setSelectedPersonId(e.target.value)}
+                                    className="p-2.5 rounded-lg border border-input bg-background/50 focus:bg-background"
+                                >
+                                    <option value="">選擇人員...</option>
+                                    {allUsers.map((user: any) => (
+                                        <option key={user.id} value={user.id}>{user.name} - {user.department || "未指定"}</option>
+                                    ))}
+                                </select>
+                                <input
+                                    type="number"
+                                    min={0}
+                                    placeholder="年度目標"
+                                    value={personTarget}
+                                    onChange={e => setPersonTarget(e.target.value)}
+                                    className="p-2.5 rounded-lg border border-input bg-background/50 focus:bg-background"
+                                />
+                                <input
+                                    placeholder="備註"
+                                    value={personNote}
+                                    onChange={e => setPersonNote(e.target.value)}
+                                    className="p-2.5 rounded-lg border border-input bg-background/50 focus:bg-background"
+                                />
+                                <button
+                                    type="button"
+                                    onClick={handleSavePersonTarget}
+                                    disabled={upsertKpiTarget.isPending}
+                                    className="bg-secondary text-secondary-foreground px-4 py-2 rounded-lg hover:bg-secondary/80 flex items-center justify-center disabled:opacity-50"
+                                >
+                                    <Plus className="w-4 h-4 mr-1" /> 新增 / 更新
+                                </button>
+                            </div>
+                            <div className="bg-muted/20 border border-border/50 rounded-lg overflow-hidden">
+                                <table className="w-full text-sm text-left">
+                                    <thead className="bg-muted/50">
+                                        <tr>
+                                            <th className="px-4 py-2 font-medium">人員</th>
+                                            <th className="px-4 py-2 font-medium">部門</th>
+                                            <th className="px-4 py-2 font-medium">年度目標 (NT$)</th>
+                                            <th className="px-4 py-2 font-medium">備註</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody className="divide-y divide-border/50">
+                                        {personTargets.length === 0 ? (
+                                            <tr>
+                                                <td colSpan={4} className="px-4 py-6 text-center text-muted-foreground">尚未設定個人年度目標</td>
+                                            </tr>
+                                        ) : (
+                                            personTargets.map((target: any) => (
+                                                <tr key={target.id} className="hover:bg-muted/10">
+                                                    <td className="px-4 py-2.5 font-medium">{target.userName || target.userId}</td>
+                                                    <td className="px-4 py-2.5">{target.department || "未指定"}</td>
+                                                    <td className="px-4 py-2.5">{Number(target.targetAmount || 0).toLocaleString()}</td>
+                                                    <td className="px-4 py-2.5 text-muted-foreground">{target.note || ""}</td>
                                                 </tr>
                                             ))
                                         )}

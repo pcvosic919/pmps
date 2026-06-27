@@ -413,16 +413,19 @@ export function exportKpiRevenueWorkbook(rows: Row[], fileName: string) {
     const workbook = XLSX.utils.book_new();
     const deptRows = rows.filter((row) => row["層級"] === "部門");
     const personRows = rows.filter((row) => row["層級"] === "個人");
+    const reportYear = Number(rows.find((row) => row["年度"])?.["年度"] || new Date().getFullYear());
+    const previousYearColumn = `${reportYear - 1}年度數字`;
 
     appendJsonSheet(workbook, "部級目標設定", deptRows.map((row) => ({
         "部級": row["部門"],
         "目標設定": row["年度目標"],
         "調整後": row["年度目標"],
-        "2025年度數字": "",
-        "YoY": "",
-    })), ["部級", "目標設定", "調整後", "2025年度數字", "YoY"]);
+        [previousYearColumn]: row["前一年年度數字"],
+        "YoY": row["YoY"],
+    })), ["部級", "目標設定", "調整後", previousYearColumn, "YoY"]);
 
     appendJsonSheet(workbook, "Summary_部級(實際+未認列)", deptRows.map((row) => ({
+        "年度": row["年度"],
         "部門": row["部門"],
         "目標金額": row["年度目標"],
         "Q1目標": row["Q1目標"],
@@ -434,12 +437,22 @@ export function exportKpiRevenueWorkbook(rows: Row[], fileName: string) {
         "Q3認列": row["Q3認列"],
         "Q4認列": row["Q4認列"],
         "年度合計": row["實際認列收入"],
+        [previousYearColumn]: row["前一年年度數字"],
+        "YoY": row["YoY"],
+        "已建案未認列": row["已建案未認列"],
+        "商機Pipeline": row["商機Pipeline"],
+        "Pipeline原始金額": row["Pipeline原始金額"],
+        "Pipeline加權金額": row["Pipeline加權金額"],
+        "預估年度合計": row["含Pipeline預估"],
         "年度達成率%": row["達成率%"],
-        "派工系統(已建案未認列)": row["Pipeline預估"],
+        "預估達成率%": row["預估達成率%"],
+        "Gap": row["Gap"],
         "含Pipeline達成率%": row["含Pipeline達成率%"],
-    })), ["部門", "目標金額", "Q1目標", "Q2目標", "Q3目標", "Q4目標", "Q1認列", "Q2認列", "Q3認列", "Q4認列", "年度合計", "年度達成率%", "派工系統(已建案未認列)", "含Pipeline達成率%"]);
+        "資料異常備註": row["資料異常備註"],
+    })), ["年度", "部門", "目標金額", "Q1目標", "Q2目標", "Q3目標", "Q4目標", "Q1認列", "Q2認列", "Q3認列", "Q4認列", "年度合計", previousYearColumn, "YoY", "已建案未認列", "商機Pipeline", "Pipeline原始金額", "Pipeline加權金額", "預估年度合計", "年度達成率%", "預估達成率%", "Gap", "含Pipeline達成率%", "資料異常備註"]);
 
     appendJsonSheet(workbook, "Summary_個人(實際+未認列)", personRows.map((row) => ({
+        "年度": row["年度"],
         "Employee ID": row["員工編號"],
         "Employee Name": row["員工姓名"],
         "類型": row["制度"],
@@ -455,9 +468,17 @@ export function exportKpiRevenueWorkbook(rows: Row[], fileName: string) {
         "Q3小計": row["Q3認列"],
         "Q4小計": row["Q4認列"],
         "年度合計": row["實際認列收入"],
+        [previousYearColumn]: row["前一年年度數字"],
+        "YoY": row["YoY"],
+        "已建案未認列": row["已建案未認列"],
+        "商機Pipeline": row["商機Pipeline"],
         "Pipeline預估": row["Pipeline預估"],
+        "Pipeline原始金額": row["Pipeline原始金額"],
+        "Pipeline加權金額": row["Pipeline加權金額"],
         "含Pipeline達成率%": row["含Pipeline達成率%"],
-    })), ["Employee ID", "Employee Name", "類型", "Department Code", "Description", "金額/數量", "Q1目標", "Q2目標", "Q3目標", "Q4目標", "Q1小計", "Q2小計", "Q3小計", "Q4小計", "年度合計", "Pipeline預估", "含Pipeline達成率%"]);
+        "Gap": row["Gap"],
+        "備註": row["資料異常備註"],
+    })), ["年度", "Employee ID", "Employee Name", "類型", "Department Code", "Description", "金額/數量", "Q1目標", "Q2目標", "Q3目標", "Q4目標", "Q1小計", "Q2小計", "Q3小計", "Q4小計", "年度合計", previousYearColumn, "YoY", "已建案未認列", "商機Pipeline", "Pipeline預估", "Pipeline原始金額", "Pipeline加權金額", "含Pipeline達成率%", "Gap", "備註"]);
 
     appendJsonSheet(workbook, "Summary", rows, Object.keys(rows[0] || {}));
     writeWorkbook(workbook, fileName);

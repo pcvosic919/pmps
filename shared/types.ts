@@ -72,6 +72,13 @@ export const opportunityStatuses = [
 
 export type OpportunityStatus = typeof opportunityStatuses[number];
 
+export const opportunityTypes = [
+    "revenue",
+    "presales"
+] as const;
+
+export type OpportunityType = typeof opportunityTypes[number];
+
 export const srStatuses = [
     "new",
     "in_progress",
@@ -135,6 +142,7 @@ export interface OpportunityInput {
     title: string;
     customerName: string;
     estimatedValue: number;
+    opportunityType: OpportunityType;
     status: OpportunityStatus;
     expectedCloseDate?: Date;
     productNames?: string[];
