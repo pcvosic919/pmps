@@ -91,6 +91,16 @@ export function WbsManagementPage() {
         }
     });
 
+    const parseExcelDate = (value: any) => {
+        if (!value) return undefined;
+        if (value instanceof Date) return value;
+        if (typeof value === "number") {
+            return new Date(Math.round((value - 25569) * 86400 * 1000));
+        }
+        const date = new Date(value);
+        return Number.isNaN(date.getTime()) ? undefined : date;
+    };
+
     const handleExcelImport = (e: React.ChangeEvent<HTMLInputElement>) => {
         const file = e.target.files?.[0];
         if (!file) return;
@@ -106,7 +116,7 @@ export function WbsManagementPage() {
 
                 const importedItems = json.map((row: any) => {
                     // Extract assignee from columns like "[John]天數" or fallback to "負責人"
-                    let assigneeName = row['負責人'] || row['Assignee'];
+                    let assigneeName = row['負責人'] || row['指派人員帳號'] || row['Assignee'];
                     if (!assigneeName) {
                         for (const key of Object.keys(row)) {
                             if (key.startsWith('[') && key.endsWith(']天數') && row[key]) {
@@ -115,7 +125,12 @@ export function WbsManagementPage() {
                             }
                         }
                     }
-                    const assignee = techs?.find(t => t.name === assigneeName);
+                    const assigneeText = String(assigneeName || "").trim().toLowerCase();
+                    const assignee = techs?.find(t =>
+                        [t.id, t.name, t.email].some(value => String(value || "").trim().toLowerCase() === assigneeText)
+                    ) || allUsers?.items?.find((item: any) =>
+                        [item.id, item.name, item.email].some(value => String(value || "").trim().toLowerCase() === assigneeText)
+                    );
 
                     // Determine level based on "工作項次" (e.g. "1" -> 0, "1.1" -> 1)
                     let level = Number(row['階層'] || row['Level'] || 0);
@@ -126,11 +141,13 @@ export function WbsManagementPage() {
 
                     return {
                         title: row['工作項目'] || row['項目名稱'] || row['Title'] || row['項目'] || row['專案階段'] || '未命名項目',
-                        estimatedHours: Number(row['工作天數(小計)'] || row['工作天數'] || row['預估工時'] || row['Hours'] || row['工時'] || 0),
+                        estimatedHours: Number(row['工作天數(小計)'] || row['工作天數'] || row['工時(天)'] || row['預估工時'] || row['Hours'] || row['工時'] || 0),
                         actualHours: 0,
                         assigneeId: assignee?.id,
                         level: level,
-                        completionPercentage: 0,
+                        startDate: parseExcelDate(row['起始時間'] || row['預計執行日']),
+                        endDate: parseExcelDate(row['起訖時間'] || row['預計完成日']),
+                        completionPercentage: Number(row['完成百分比'] || row['總完成百分比'] || 0),
                         code: row['工作編號'] || row['編號'] || '',
                         description: row['工作說明'] || row['說明'] || '',
                         remarks: row['備註'] || '',
@@ -284,7 +301,7 @@ export function WbsManagementPage() {
             items: latestVersion.items,
             people,
         });
-        toast.success("WBS 已依專案成本表範本匯出");
+        toast.success("WBS 已匯出 Action Item 與 AEB 報價單");
     };
 
     // File upload (Mock implementation)
@@ -317,14 +334,15 @@ export function WbsManagementPage() {
         const result = await refetchWbsQuote();
         const quote = result.data || wbsQuote;
         if (!quote) return;
-        const rows = quote.items.map((item: any) => ({
-            "項目": item.title,
+        const rows: any[] = quote.items.map((item: any, index: number) => ({
+            "項次": index + 1,
+            "工作說明": item.title,
             "指派人員": item.assigneeName,
             "天數": item.days,
             "日費率": item.dailyRate,
-            "小計": item.amount
+            "總價(NT$)": item.amount
         }));
-        rows.push({ "項目": "總計", "指派人員": "", "天數": "", "日費率": "", "小計": quote.totalAmount });
+        rows.push({ "項次": "合計", "工作說明": "", "指派人員": "", "天數": "", "日費率": "", "總價(NT$)": quote.totalAmount });
         exportRowsToXlsx(rows, `WBS_Quote_SR${srId}.xlsx`, "Quote");
         toast.success("已依人員日費率產生報價單");
     };

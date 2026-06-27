@@ -106,6 +106,72 @@ const setFormula = (sheet: XLSX.WorkSheet, row: number, col: number, formula: st
     sheet[encodeCell(row, col)] = { t: "n", f: formula };
 };
 
+const excelTheme = {
+    fontName: "Microsoft JhengHei",
+    primary: "1B5E20",
+    accent: "78BE20",
+    light: "EAF4E3",
+    border: "B7D7A8",
+    text: "1F2937",
+    muted: "F6FAF2",
+};
+
+const getOrCreateCell = (sheet: XLSX.WorkSheet, row: number, col: number) => {
+    const address = encodeCell(row, col);
+    if (!sheet[address]) sheet[address] = { t: "s", v: "" };
+    return sheet[address] as XLSX.CellObject & { s?: Record<string, unknown> };
+};
+
+const mergeStyle = (...styles: Array<Record<string, unknown> | undefined>) =>
+    Object.assign({}, ...styles.filter(Boolean));
+
+const baseCellStyle = {
+    font: { name: excelTheme.fontName, color: { rgb: excelTheme.text } },
+    alignment: { vertical: "center" },
+    border: {
+        top: { style: "thin", color: { rgb: excelTheme.border } },
+        bottom: { style: "thin", color: { rgb: excelTheme.border } },
+        left: { style: "thin", color: { rgb: excelTheme.border } },
+        right: { style: "thin", color: { rgb: excelTheme.border } },
+    },
+};
+
+const headerCellStyle = mergeStyle(baseCellStyle, {
+    font: { name: excelTheme.fontName, bold: true, color: { rgb: "FFFFFF" } },
+    fill: { patternType: "solid", fgColor: { rgb: excelTheme.primary } },
+    alignment: { horizontal: "center", vertical: "center", wrapText: true },
+});
+
+const titleCellStyle = mergeStyle(baseCellStyle, {
+    font: { name: excelTheme.fontName, bold: true, sz: 16, color: { rgb: "FFFFFF" } },
+    fill: { patternType: "solid", fgColor: { rgb: excelTheme.accent } },
+    alignment: { horizontal: "center", vertical: "center" },
+});
+
+const applyTableTheme = (sheet: XLSX.WorkSheet, headerRow: number, lastRow: number, lastCol: number, titleRow?: number) => {
+    for (let row = 1; row <= lastRow; row++) {
+        for (let col = 1; col <= lastCol; col++) {
+            const cell = getOrCreateCell(sheet, row, col);
+            const isHeader = row === headerRow;
+            const isTitle = titleRow === row;
+            const zebra = row > headerRow && (row - headerRow) % 2 === 0;
+            cell.s = isTitle
+                ? titleCellStyle
+                : isHeader
+                    ? headerCellStyle
+                    : mergeStyle(baseCellStyle, zebra ? { fill: { patternType: "solid", fgColor: { rgb: excelTheme.muted } } } : undefined);
+        }
+    }
+};
+
+const writeWorkbook = (workbook: XLSX.WorkBook, fileName: string) => {
+    XLSX.writeFile(
+        workbook,
+        fileName.endsWith(".xlsx") ? fileName : `${fileName}.xlsx`,
+        { compression: true, cellStyles: true } as XLSX.WritingOptions
+    );
+};
+
 const normalizeDateText = (value?: string | Date) => {
     if (!value) return "";
     const date = value instanceof Date ? value : new Date(value);
@@ -122,15 +188,9 @@ const makeItemNumbers = (items: WbsWorkbookItem[]) => {
     });
 };
 
-const buildWbsRows = (
-    items: WbsWorkbookItem[],
-    allPeople: WbsWorkbookPerson[],
-    sheetPeople: WbsWorkbookPerson[],
-    overflowToLastSlot: boolean
-) => {
+const buildWbsRows = (items: WbsWorkbookItem[], allPeople: WbsWorkbookPerson[]) => {
     const itemNumbers = makeItemNumbers(items);
     const peopleById = new Map(allPeople.map((person) => [person.id, person]));
-    const sheetPersonIds = new Set(sheetPeople.map((person) => person.id));
     let currentStage = "未分類階段";
 
     return items.map((item, index) => {
@@ -139,52 +199,34 @@ const buildWbsRows = (
         }
 
         const assignee = item.assigneeId ? peopleById.get(item.assigneeId) : undefined;
-        const personSlots: Array<number | string> = sheetPeople.flatMap((person, personIndex) => {
-            const isOverflowSlot = overflowToLastSlot && personIndex === 2 && !!item.assigneeId && !sheetPersonIds.has(item.assigneeId);
-            const assigned = item.assigneeId === person.id || isOverflowSlot;
-            const dailyRate = isOverflowSlot ? assignee?.dailyRate || 0 : person.dailyRate || 0;
-            return [assigned ? item.estimatedHours || 0 : 0, dailyRate];
-        });
-
-        while (personSlots.length < 6) personSlots.push("");
+        const completionPercentage = item.completionPercentage || 0;
 
         return {
             phase: currentStage,
+            level: item.level || 0,
             itemNumber: itemNumbers[index],
             title: item.title,
             code: item.code || itemNumbers[index],
             description: item.description || "",
             days: item.estimatedHours || 0,
-            personSlots,
+            dailyRate: assignee?.dailyRate || 0,
+            amount: (item.estimatedHours || 0) * (assignee?.dailyRate || 0),
             assigneeName: assignee?.name || "",
             department: assignee?.department || "",
             startDate: normalizeDateText(item.startDate),
             endDate: normalizeDateText(item.endDate),
-            status: (item.completionPercentage || 0) >= 100 ? "已完成" : (item.completionPercentage || 0) > 0 ? "進行中" : "未開始",
+            completionPercentage,
+            status: completionPercentage >= 100 ? "已完成" : completionPercentage > 0 ? "進行中" : "未開始",
             remarks: item.remarks || "",
         };
     });
 };
 
-const buildStageRanges = (rows: ReturnType<typeof buildWbsRows>, startRow: number) => {
-    const ranges: { phase: string; start: number; end: number }[] = [];
-    rows.forEach((row, index) => {
-        const sheetRow = startRow + index;
-        const last = ranges[ranges.length - 1];
-        if (!last || last.phase !== row.phase) {
-            ranges.push({ phase: row.phase, start: sheetRow, end: sheetRow });
-        } else {
-            last.end = sheetRow;
-        }
-    });
-    return ranges;
-};
-
 const setWorkbookProps = (workbook: XLSX.WorkBook) => {
     workbook.Props = {
         ...(workbook.Props || {}),
-        Title: "WBS 專案成本表",
-        Subject: "WBS 專案成本與 Action Item 匯出",
+        Title: "WBS Action Item 與 AEB 報價單",
+        Subject: "WBS Action Item 與 AEB 報價單匯出",
         Author: "PMP System",
         CreatedDate: new Date(),
     };
@@ -195,9 +237,13 @@ const appendJsonSheet = (workbook: XLSX.WorkBook, name: string, rows: Row[], col
         ? rows.map((row) => Object.fromEntries(columns.map((column) => [column, row[column] ?? ""])))
         : rows;
     const worksheet = XLSX.utils.json_to_sheet(orderedRows, columns ? { header: columns } : undefined);
-    setUsefulWidths(worksheet, columns || Object.keys(rows[0] || {}));
+    const sheetColumns = columns || Object.keys(rows[0] || {});
+    setUsefulWidths(worksheet, sheetColumns);
+    if (sheetColumns.length > 0) {
+        applyTableTheme(worksheet, 1, Math.max(rows.length + 1, 1), sheetColumns.length);
+    }
     if (rows.length > 0) {
-        const lastCol = XLSX.utils.encode_col((columns || Object.keys(rows[0] || {})).length - 1);
+        const lastCol = XLSX.utils.encode_col(sheetColumns.length - 1);
         worksheet["!autofilter"] = { ref: `A1:${lastCol}${rows.length + 1}` };
     }
     XLSX.utils.book_append_sheet(workbook, worksheet, normalizeSheetName(name));
@@ -206,14 +252,16 @@ const appendJsonSheet = (workbook: XLSX.WorkBook, name: string, rows: Row[], col
 export function exportRowsToXlsx(rows: Row[], fileName: string, sheetName = "Report") {
     const workbook = XLSX.utils.book_new();
     appendJsonSheet(workbook, sheetName, rows);
-    XLSX.writeFile(workbook, fileName.endsWith(".xlsx") ? fileName : `${fileName}.xlsx`, { compression: true });
+    writeWorkbook(workbook, fileName);
 }
 
 export function exportArraysToXlsx(rows: unknown[][], fileName: string, sheetName = "Report") {
     const workbook = XLSX.utils.book_new();
     const worksheet = XLSX.utils.aoa_to_sheet(rows);
+    const lastCol = Math.max(...rows.map((row) => row.length), 1);
+    applyTableTheme(worksheet, 1, Math.max(rows.length, 1), lastCol);
     XLSX.utils.book_append_sheet(workbook, worksheet, normalizeSheetName(sheetName));
-    XLSX.writeFile(workbook, fileName.endsWith(".xlsx") ? fileName : `${fileName}.xlsx`, { compression: true });
+    writeWorkbook(workbook, fileName);
 }
 
 export function exportOpenCasesWorkbook(rows: Row[], fileName: string) {
@@ -229,9 +277,11 @@ export function exportOpenCasesWorkbook(rows: Row[], fileName: string) {
     appendJsonSheet(workbook, "維護及託管服務", rows.filter((row) => includesAny(row, ["維護", "託管"])), openCaseSummaryColumns);
     appendJsonSheet(workbook, "活動支援及教育訓練", rows.filter((row) => includesAny(row, ["教育", "活動", "訓練"])), openCaseSummaryColumns);
     appendJsonSheet(workbook, "其他", rows.filter((row) => !includesAny(row, ["協銷", "專案", "POC", "維護", "託管", "教育", "活動", "訓練"])), openCaseSummaryColumns);
-    XLSX.utils.book_append_sheet(workbook, XLSX.utils.aoa_to_sheet([[`報表匯出時間:${new Date().toLocaleString()}`]]), "報表匯出");
+    const exportSheet = XLSX.utils.aoa_to_sheet([[`報表匯出時間:${new Date().toLocaleString()}`]]);
+    applyTableTheme(exportSheet, 1, 1, 1);
+    XLSX.utils.book_append_sheet(workbook, exportSheet, "報表匯出");
 
-    XLSX.writeFile(workbook, fileName.endsWith(".xlsx") ? fileName : `${fileName}.xlsx`, { compression: true });
+    writeWorkbook(workbook, fileName);
 }
 
 export function exportKpiRevenueWorkbook(rows: Row[], fileName: string) {
@@ -281,7 +331,7 @@ export function exportKpiRevenueWorkbook(rows: Row[], fileName: string) {
     })), ["Employee ID", "Employee Name", "類型", "Department Code", "Description", "金額/數量", "Q1目標", "Q2目標", "Q3目標", "Q4目標", "Q1小計", "Q2小計", "年度合計", "Pipeline預估", "含Pipeline達成率%"]);
 
     appendJsonSheet(workbook, "Summary", rows, Object.keys(rows[0] || {}));
-    XLSX.writeFile(workbook, fileName.endsWith(".xlsx") ? fileName : `${fileName}.xlsx`, { compression: true });
+    writeWorkbook(workbook, fileName);
 }
 
 export function exportWbsCostWorkbook(input: WbsWorkbookInput) {
@@ -289,216 +339,88 @@ export function exportWbsCostWorkbook(input: WbsWorkbookInput) {
     setWorkbookProps(workbook);
 
     const allPeople = input.people;
-    const people = allPeople.slice(0, 3);
-    const hasOverflowPeople = allPeople.length > 3;
-    const rows = buildWbsRows(input.items, allPeople, people, hasOverflowPeople);
+    const rows = buildWbsRows(input.items, allPeople);
     const projectTitle = input.projectTitle || "專案";
     const customerName = input.customerName || "[待填客戶名稱]";
     const salesInfo = `${input.salesDepartment || "[待填業務部門]"} / ${input.salesRep || "[待填業務代表]"}`;
-    const technicalDepartment = input.technicalDepartment || people[0]?.department || "[待填技術部門]";
-    const techLead = people[0]?.name || "[待填技術負責人]";
-    const defaultRate = people.find((person) => person.dailyRate)?.dailyRate || 0;
+    const technicalDepartment = input.technicalDepartment || allPeople[0]?.department || "[待填技術部門]";
+    const techLead = allPeople[0]?.name || "[待填技術負責人]";
 
-    const costHeaders = [
-        "專案階段",
-        "工作項次",
-        "工作項目",
-        "工作編號",
-        "工作說明",
-        "起始時間",
-        "起訖時間",
-        "工作天數\n(小計)",
-        `${people[0]?.name || "人員1"}\n人天`,
-        `${people[0]?.name || "人員1"}\n單價`,
-        `${people[1]?.name || "人員2"}\n人天`,
-        `${people[1]?.name || "人員2"}\n單價`,
-        `${hasOverflowPeople ? "其他人員" : people[2]?.name || "人員3"}\n人天`,
-        `${hasOverflowPeople ? "其他人員" : people[2]?.name || "人員3"}\n單價`,
-        "內部成本\n小計(NT$)",
-        "備註",
-    ];
-    const costDataStartRow = 4;
-    const totalRow = costDataStartRow + rows.length;
-    const costAoa: unknown[][] = [
-        [`${projectTitle}　專案成本表${input.version ? ` v${input.version}` : ""}`],
-        [`客戶：${customerName}　　業務：${salesInfo}`, "", "", "", "", "", "", "", `技術：${technicalDepartment} / ${techLead}　　費率：NT$${defaultRate.toLocaleString()}/人天`],
-        costHeaders,
-        ...rows.map((row, index) => [
-            index === 0 || rows[index - 1].phase !== row.phase ? row.phase : "",
-            row.itemNumber,
-            row.title,
-            row.code,
-            row.description,
-            row.startDate,
-            row.endDate,
-            null,
-            ...row.personSlots,
-            null,
-            row.remarks,
-        ]),
-        ["總計", "", "", "", "", "", "", null, null, "", null, "", null, "", null, ""],
-    ];
-    const costSheet = XLSX.utils.aoa_to_sheet(costAoa);
-    costSheet["!merges"] = [
-        { s: { r: 0, c: 0 }, e: { r: 0, c: 15 } },
-        { s: { r: 1, c: 0 }, e: { r: 1, c: 7 } },
-        { s: { r: 1, c: 8 }, e: { r: 1, c: 15 } },
-        { s: { r: totalRow - 1, c: 0 }, e: { r: totalRow - 1, c: 6 } },
-    ];
-    const stageRanges = buildStageRanges(rows, costDataStartRow);
-    stageRanges.forEach((range) => {
-        if (range.end > range.start) {
-            costSheet["!merges"]!.push({ s: { r: range.start - 1, c: 0 }, e: { r: range.end - 1, c: 0 } });
-        }
-    });
-    costSheet["!cols"] = [
-        { wch: 18 },
-        { wch: 8 },
-        { wch: 28 },
-        { wch: 10 },
-        { wch: 72 },
-        { wch: 12 },
-        { wch: 12 },
-        { wch: 10 },
-        { wch: 10 },
-        { wch: 10 },
-        { wch: 10 },
-        { wch: 10 },
-        { wch: 10 },
-        { wch: 10 },
-        { wch: 16 },
-        { wch: 18 },
-    ];
-    costSheet["!rows"] = [
-        { hpt: 28 },
-        { hpt: 20 },
-        { hpt: 34 },
-        ...rows.map((row) => ({ hpt: row.description.length > 36 ? 30 : 22 })),
-        { hpt: 24 },
-    ];
-    rows.forEach((_, index) => {
-        const row = costDataStartRow + index;
-        setFormula(costSheet, row, 8, `I${row}+K${row}+M${row}`);
-        setFormula(costSheet, row, 15, `I${row}*J${row}+K${row}*L${row}+M${row}*N${row}`);
-        [10, 12, 14, 15].forEach((col) => {
-            const cell = costSheet[encodeCell(row, col)];
-            if (cell) cell.z = "#,##0";
-        });
-    });
-    setFormula(costSheet, totalRow, 8, `SUM(H${costDataStartRow}:H${totalRow - 1})`);
-    setFormula(costSheet, totalRow, 9, `SUM(I${costDataStartRow}:I${totalRow - 1})`);
-    setFormula(costSheet, totalRow, 11, `SUM(K${costDataStartRow}:K${totalRow - 1})`);
-    setFormula(costSheet, totalRow, 13, `SUM(M${costDataStartRow}:M${totalRow - 1})`);
-    setFormula(costSheet, totalRow, 15, `SUM(O${costDataStartRow}:O${totalRow - 1})`);
-    costSheet["!autofilter"] = { ref: `A3:P${Math.max(totalRow - 1, 3)}` };
-    XLSX.utils.book_append_sheet(workbook, costSheet, "專案成本表");
-
-    const quoteStartRow = 8;
-    const quoteTotalRow = quoteStartRow + stageRanges.length;
-    const quoteAoa: unknown[][] = [
-        ["AEB 報價單（內部用）"],
-        ["客戶名稱", customerName],
-        ["專案名稱", projectTitle],
-        ["業務部門 / 業務代表", salesInfo],
-        ["技術部門 / 技術負責人", `${technicalDepartment} / ${techLead}`],
-        ["費率", defaultRate ? `NT$${defaultRate.toLocaleString()} / 人天` : "[待填費率]"],
-        ["項次", "工作說明（階段）", "天數", "總價(NT$)", "備註"],
-        ...stageRanges.map((range, index) => [index + 1, range.phase, null, null, ""]),
-        ["合計", "", null, null, ""],
-    ];
-    const quoteSheet = XLSX.utils.aoa_to_sheet(quoteAoa);
-    quoteSheet["!merges"] = [
-        { s: { r: 0, c: 0 }, e: { r: 0, c: 4 } },
-        { s: { r: 1, c: 1 }, e: { r: 1, c: 4 } },
-        { s: { r: 2, c: 1 }, e: { r: 2, c: 4 } },
-        { s: { r: 3, c: 1 }, e: { r: 3, c: 4 } },
-        { s: { r: 4, c: 1 }, e: { r: 4, c: 4 } },
-        { s: { r: 5, c: 1 }, e: { r: 5, c: 4 } },
-        { s: { r: quoteTotalRow - 1, c: 0 }, e: { r: quoteTotalRow - 1, c: 1 } },
-    ];
-    quoteSheet["!cols"] = [{ wch: 8 }, { wch: 44 }, { wch: 10 }, { wch: 16 }, { wch: 20 }];
-    stageRanges.forEach((range, index) => {
-        const row = quoteStartRow + index;
-        setFormula(quoteSheet, row, 3, `SUM('專案成本表'!H${range.start}:H${range.end})`);
-        setFormula(quoteSheet, row, 4, `SUM('專案成本表'!O${range.start}:O${range.end})`);
-        const amountCell = quoteSheet[encodeCell(row, 4)];
-        if (amountCell) amountCell.z = "#,##0";
-    });
-    setFormula(quoteSheet, quoteTotalRow, 3, `SUM(C${quoteStartRow}:C${quoteTotalRow - 1})`);
-    setFormula(quoteSheet, quoteTotalRow, 4, `SUM(D${quoteStartRow}:D${quoteTotalRow - 1})`);
-    const quoteTotalAmountCell = quoteSheet[encodeCell(quoteTotalRow, 4)];
-    if (quoteTotalAmountCell) quoteTotalAmountCell.z = "#,##0";
-    XLSX.utils.book_append_sheet(workbook, quoteSheet, "AEB報價單");
-
-    const actionHeaders = ["專案階段", "工作項次", "工作項目", "工作編號", "工作說明", "工時(天)", "負責單位", "負責人", "預計執行日", "預計完成日", "實際執行日", "實際完成日", "狀況", "交付文件", "備註"];
+    const actionHeaders = ["階層", "工作項次", "工作項目", "工作編號", "工作說明", "工作天數(小計)", "負責單位", "負責人", "起始時間", "起訖時間", "完成百分比", "備註"];
     const actionSheet = XLSX.utils.aoa_to_sheet([
-        [`${projectTitle}　Action Item 追蹤表`],
         actionHeaders,
         ...rows.map((row) => [
-            row.phase,
+            row.level,
             row.itemNumber,
             row.title,
             row.code,
             row.description,
             row.days,
             row.department || technicalDepartment,
-            row.assigneeName || "[待填]",
-            row.startDate || "[待填]",
-            row.endDate || "[待填]",
-            "",
-            "",
-            row.status,
-            "",
+            row.assigneeName || "",
+            row.startDate,
+            row.endDate,
+            row.completionPercentage,
             row.remarks,
         ]),
     ]);
-    actionSheet["!merges"] = [{ s: { r: 0, c: 0 }, e: { r: 0, c: 14 } }];
     actionSheet["!cols"] = [
-        { wch: 18 },
         { wch: 8 },
-        { wch: 28 },
         { wch: 10 },
-        { wch: 44 },
-        { wch: 9 },
+        { wch: 30 },
+        { wch: 12 },
+        { wch: 52 },
+        { wch: 14 },
         { wch: 20 },
-        { wch: 16 },
+        { wch: 28 },
         { wch: 13 },
         { wch: 13 },
-        { wch: 13 },
-        { wch: 13 },
-        { wch: 10 },
-        { wch: 18 },
-        { wch: 18 },
+        { wch: 12 },
+        { wch: 24 },
     ];
+    actionSheet["!autofilter"] = { ref: `A1:L${Math.max(rows.length + 1, 1)}` };
+    applyTableTheme(actionSheet, 1, Math.max(rows.length + 1, 1), actionHeaders.length);
     XLSX.utils.book_append_sheet(workbook, actionSheet, "Action Item");
 
-    const docsRows = stageRanges.map((range, index) => [
-        index + 1,
-        `${range.phase}交付文件`,
-        range.phase,
-        techLead,
-        "未開始",
-    ]);
-    const docsSheet = XLSX.utils.aoa_to_sheet([
-        ["專案文件交付清單"],
-        ["項次", "交付文件名稱", "對應階段", "負責人", "狀況"],
-        ...docsRows,
-    ]);
-    docsSheet["!merges"] = [{ s: { r: 0, c: 0 }, e: { r: 0, c: 4 } }];
-    docsSheet["!cols"] = [{ wch: 8 }, { wch: 42 }, { wch: 24 }, { wch: 18 }, { wch: 10 }];
-    XLSX.utils.book_append_sheet(workbook, docsSheet, "專案文件交付清單");
+    const quoteStartRow = 7;
+    const quoteTotalRow = quoteStartRow + rows.length;
+    const quoteAoa: unknown[][] = [
+        ["AEB 報價單（內部用）"],
+        ["客戶名稱", customerName],
+        ["專案名稱", projectTitle],
+        ["業務部門 / 業務代表", salesInfo],
+        ["技術部門 / 技術負責人", `${technicalDepartment} / ${techLead}`],
+        ["項次", "工作說明", "指派人員", "天數", "日費率", "總價(NT$)", "備註"],
+        ...rows.map((row, index) => [index + 1, row.title, row.assigneeName || "", row.days, row.dailyRate, null, row.remarks]),
+        ["合計", "", "", null, "", null, ""],
+    ];
+    const quoteSheet = XLSX.utils.aoa_to_sheet(quoteAoa);
+    quoteSheet["!merges"] = [
+        { s: { r: 0, c: 0 }, e: { r: 0, c: 6 } },
+        { s: { r: 1, c: 1 }, e: { r: 1, c: 6 } },
+        { s: { r: 2, c: 1 }, e: { r: 2, c: 6 } },
+        { s: { r: 3, c: 1 }, e: { r: 3, c: 6 } },
+        { s: { r: 4, c: 1 }, e: { r: 4, c: 6 } },
+        { s: { r: quoteTotalRow - 1, c: 0 }, e: { r: quoteTotalRow - 1, c: 2 } },
+    ];
+    quoteSheet["!cols"] = [{ wch: 8 }, { wch: 40 }, { wch: 28 }, { wch: 10 }, { wch: 12 }, { wch: 16 }, { wch: 24 }];
+    rows.forEach((_, index) => {
+        const row = quoteStartRow + index;
+        setFormula(quoteSheet, row, 6, `D${row}*E${row}`);
+        [5, 6].forEach((col) => {
+            const cell = quoteSheet[encodeCell(row, col)];
+            if (cell) cell.z = "#,##0";
+        });
+        const amountCell = quoteSheet[encodeCell(row, 6)];
+        if (amountCell) amountCell.z = "#,##0";
+    });
+    setFormula(quoteSheet, quoteTotalRow, 4, `SUM(D${quoteStartRow}:D${quoteTotalRow - 1})`);
+    setFormula(quoteSheet, quoteTotalRow, 6, `SUM(F${quoteStartRow}:F${quoteTotalRow - 1})`);
+    const quoteTotalAmountCell = quoteSheet[encodeCell(quoteTotalRow, 6)];
+    if (quoteTotalAmountCell) quoteTotalAmountCell.z = "#,##0";
+    applyTableTheme(quoteSheet, 6, Math.max(quoteTotalRow, 6), 7, 1);
+    XLSX.utils.book_append_sheet(workbook, quoteSheet, "AEB報價單");
 
-    const listSheet = XLSX.utils.aoa_to_sheet([
-        ["狀況", "專案階段", "負責單位", "角色"],
-        ["未開始", stageRanges[0]?.phase || "", technicalDepartment, people[0]?.name || "人員1"],
-        ["進行中", stageRanges[1]?.phase || "", "客戶 IT", people[1]?.name || "人員2"],
-        ["已完成", stageRanges[2]?.phase || "", "原廠 / 供應商", hasOverflowPeople ? "其他人員" : people[2]?.name || "人員3"],
-        ["暫停", stageRanges[3]?.phase || "", "", ""],
-        ["取消", stageRanges[4]?.phase || "", "", ""],
-    ]);
-    listSheet["!cols"] = [{ wch: 14 }, { wch: 28 }, { wch: 22 }, { wch: 16 }];
-    XLSX.utils.book_append_sheet(workbook, listSheet, "List");
-
-    workbook.SheetNames = ["AEB報價單", "專案成本表", "Action Item", "專案文件交付清單", "List"];
-    XLSX.writeFile(workbook, input.fileName.endsWith(".xlsx") ? input.fileName : `${input.fileName}.xlsx`, { compression: true });
+    workbook.SheetNames = ["Action Item", "AEB報價單"];
+    writeWorkbook(workbook, input.fileName);
 }

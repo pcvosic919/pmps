@@ -1614,7 +1614,7 @@ export const analyticsRouter = router({
                     : null;
                 const srMatch: any = { externalProjectCode: { $exists: true, $ne: "" } };
                 if (input.department) {
-                    const allowedDepartments = await buildDepartmentAccessFilter(ctx.user, input.department);
+                    const allowedDepartments = (await buildDepartmentAccessFilter(ctx.user, input.department)) || [];
                     if (allowedDepartments.length === 0) {
                         srMatch._id = null;
                     } else {
@@ -1688,7 +1688,7 @@ export const analyticsRouter = router({
                 if (!latestBatchId) return [];
                 const match: any = { importBatchId: latestBatchId, year };
                 if (input.department) {
-                    const allowedDepartments = await buildDepartmentAccessFilter(ctx.user, input.department);
+                    const allowedDepartments = (await buildDepartmentAccessFilter(ctx.user, input.department)) || [];
                     match.department = allowedDepartments.length > 0 ? { $in: allowedDepartments } : "__NO_ACCESS__";
                 }
 

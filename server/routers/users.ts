@@ -67,7 +67,7 @@ export const usersRouter = router({
             }
 
             const items = await UserModel.find(query)
-                .select("name email department managedDepartments title role roles isActive provider createdAt")
+                .select("name email department managedDepartments title role roles isActive provider costRate createdAt")
                 .sort({ [sortBy]: direction })
                 .limit(limit + 1)
                 .lean();
@@ -87,7 +87,8 @@ export const usersRouter = router({
                     role: u.role,
                     roles: u.roles,
                     isActive: u.isActive,
-                    provider: u.provider
+                    provider: u.provider,
+                    costRate: (u as any).costRate
                 })),
                 nextCursor: hasMore && lastItem
                     ? encodeCursor(lastItem._id, ((lastItem as Record<string, string | number | Date | null>)[sortBy] ?? null) instanceof Date
