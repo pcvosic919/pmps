@@ -1740,25 +1740,41 @@ export const analyticsRouter = router({
                     .populate("wbsVersions.items.assigneeId", "name email department")
                     .sort({ plannedEndDate: 1, createdAt: 1 })
                     .lean();
-                return srs.flatMap((sr: any) => {
+                const projectRows = srs.map((sr: any) => {
                     const latestVersion = getLatestWbsVersion(sr);
-                    const wbsItems = latestVersion?.items?.length ? latestVersion.items : [null];
+                    const wbsItems = latestVersion?.items || [];
                     const completedWorkItems = latestVersion?.items?.filter((item: any) => Number(item.completionPercentage || 0) >= 100).length || 0;
                     const totalWorkItems = latestVersion?.items?.length || 0;
-                    return wbsItems.map((item: any) => {
-                        const assignee = item?.assigneeId;
-                        const itemHours = Number(item?.estimatedHours || 0);
-                        const actualHours = Number(item?.actualHours || 0);
-                        const completionPercentage = Number(item?.completionPercentage || sr.completionPercentage || 0);
-                        return ({
+                    const joinUnique = (values: unknown[]) =>
+                        Array.from(new Set(values.map((value) => String(value || "").trim()).filter(Boolean))).join("、");
+                    const dates = (items: any[], key: "startDate" | "endDate") =>
+                        items
+                            .map((item) => item?.[key] ? new Date(item[key]) : null)
+                            .filter((date): date is Date => !!date && !Number.isNaN(date.getTime()));
+                    const startDates = dates(wbsItems, "startDate");
+                    const endDates = dates(wbsItems, "endDate");
+                    const firstStartDate = startDates.length > 0
+                        ? new Date(Math.min(...startDates.map((date) => date.getTime())))
+                        : sr.plannedStartDate;
+                    const lastEndDate = endDates.length > 0
+                        ? new Date(Math.max(...endDates.map((date) => date.getTime())))
+                        : sr.plannedEndDate;
+                    const estimatedHours = wbsItems.reduce((sum: number, item: any) => sum + Number(item?.estimatedHours || 0), 0);
+                    const actualHours = wbsItems.reduce((sum: number, item: any) => sum + Number(item?.actualHours || 0), 0);
+                    const completionPercentage = Number(
+                        sr.completionPercentage
+                        || (totalWorkItems > 0 ? Math.round(wbsItems.reduce((sum: number, item: any) => sum + Number(item?.completionPercentage || 0), 0) / totalWorkItems) : 0)
+                    );
+                    const assignees = wbsItems.map((item: any) => item?.assigneeId).filter(Boolean);
+                    return {
                         "公司名稱": sr.customerName || "",
                         "案件名稱": sr.title || "",
                         "專案編號": sr.externalProjectCode || sr._id.toString(),
                         "服務類型": sr.externalServiceType || sr.srType || "",
                         "建案日期": toDateText(sr.createdAt),
                         "審核日期": toDateText(sr.reviewDate),
-                        "預計開始時間": toDateText(item?.startDate || sr.plannedStartDate),
-                        "預計結束時間": toDateText(item?.endDate || sr.plannedEndDate),
+                        "預計開始時間": toDateText(firstStartDate),
+                        "預計結束時間": toDateText(lastEndDate),
                         "預計結束時間-歷程": "",
                         "全案開始時間": toDateText(sr.actualStartDate),
                         "全案結束時間": toDateText(sr.actualEndDate),
@@ -1766,16 +1782,16 @@ export const analyticsRouter = router({
                         "業務代表": sr.salesRep || "",
                         "全案狀態": srStatusText[sr.status] || sr.status || "",
                         "個人案件狀態": completionPercentage >= 100 ? "已完成" : completionPercentage > 0 ? "進行中" : "未開始",
-                        "技術部門_部級": assignee?.department || sr.pmId?.department || "",
-                        "技術部門": assignee?.department || "",
-                        "處理人員": assignee?.name || sr.pmId?.name || "",
-                        "角色": item ? "WBS 指派人員" : "PM",
+                        "技術部門_部級": joinUnique(assignees.map((assignee: any) => assignee?.department)) || sr.pmId?.department || "",
+                        "技術部門": joinUnique(assignees.map((assignee: any) => assignee?.department)),
+                        "處理人員": joinUnique(assignees.map((assignee: any) => assignee?.name)) || sr.pmId?.name || "",
+                        "角色": assignees.length > 0 ? "WBS 指派人員" : "PM",
                         "工時類別": sr.srType || "",
-                        "建案工時": itemHours,
-                        "分配工時": itemHours,
+                        "建案工時": estimatedHours,
+                        "分配工時": estimatedHours,
                         "已累計工時": actualHours,
                         "執行工時    2023/11/17 ~ 2026/05/26": actualHours,
-                        "剩餘工時": Math.max(0, itemHours - actualHours),
+                        "剩餘工時": Math.max(0, estimatedHours - actualHours),
                         "建案人員部門": sr.pmId?.department || "",
                         "建案人員": sr.pmId?.name || "",
                         "問題代號(客服)": sr.externalIssueCode || "",
@@ -1786,13 +1802,14 @@ export const analyticsRouter = router({
                         "保固到期日期": toDateText(sr.warrantyExpiresAt),
                         "計費分攤": sr.billingAllocation || "",
                         "認列月份": sr.recognitionMonth || "",
-                        "工作項目": item?.title || "",
+                        "工作項目": joinUnique(wbsItems.map((item: any) => item?.title)),
                         "總工作項目": sr.totalWorkItems || totalWorkItems,
                         "總完成工作項目": sr.completedWorkItems || completedWorkItems,
                         "總完成百分比": sr.completionPercentage || completionPercentage
-                    });
-                    });
+                    };
                 });
+
+                return Array.from(new Map(projectRows.map((row) => [row["專案編號"], row])).values());
             } else if (input.reportType === "kpi_revenue") {
                 const year = start.getFullYear();
                 const policy = await getOrCreateKpiPolicy(year);
