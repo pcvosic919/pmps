@@ -1050,7 +1050,7 @@ export const projectsRouter = router({
     generateWbsQuote: protectedProcedure
         .input(z.object({ srId: z.string() }))
         .query(async ({ input }) => {
-            const sr = await ServiceRequestModel.findById(input.srId).populate("wbsVersions.items.assigneeId", "name email costRate").lean();
+            const sr = await ServiceRequestModel.findById(input.srId).populate("wbsVersions.items.assigneeId", "name email department costRate").lean();
             if (!sr) throw new TRPCError({ code: "NOT_FOUND", message: "找不到專案" });
             const version = getEffectiveWbsVersion(sr) || [...(sr.wbsVersions || [])].sort((a: any, b: any) => b.versionNumber - a.versionNumber)[0];
             if (!version) throw new TRPCError({ code: "BAD_REQUEST", message: "沒有可轉報價的 WBS" });
@@ -1060,7 +1060,19 @@ export const projectsRouter = router({
                 const dailyRate = Number(user?.costRate?.dailyRate || 0);
                 return { title: item.title, assigneeName: user?.name || "未指派", days, dailyRate, amount: days * dailyRate };
             });
-            return { srId: sr._id.toString(), title: sr.title, versionNumber: version.versionNumber, items, totalAmount: items.reduce((sum: number, item: any) => sum + item.amount, 0) };
+            const firstAssignee = (version.items || []).map((item: any) => item.assigneeId).find(Boolean);
+            return {
+                srId: sr._id.toString(),
+                title: sr.title,
+                customerName: sr.customerName || "",
+                salesDepartment: sr.salesDepartment || "",
+                salesRep: sr.salesRep || "",
+                technicalDepartment: firstAssignee?.department || "",
+                technicalLead: firstAssignee?.name || "",
+                versionNumber: version.versionNumber,
+                items,
+                totalAmount: items.reduce((sum: number, item: any) => sum + item.amount, 0)
+            };
         }),
 
     getMyProjectTimesheets: protectedProcedure

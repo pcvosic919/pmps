@@ -7,7 +7,7 @@ import toast from "react-hot-toast";
 import { useCurrentUser } from "../lib/useCurrentUser";
 import * as XLSX from "xlsx";
 import { SharePointFilesSection } from "../components/SharePointFilesSection";
-import { exportRowsToXlsx, exportWbsCostWorkbook } from "../lib/exportXlsx";
+import { exportWbsCostWorkbook, exportWbsQuoteWorkbook, formatExportDate, makeXlsxFileName } from "../lib/exportXlsx";
 
 type WbsDraftItem = {
     title: string;
@@ -369,6 +369,7 @@ export function WbsManagementPage() {
             return {
                 id,
                 name: user?.email || tech?.email || user?.name || tech?.name || id,
+                displayName: user?.name || tech?.name || user?.email || tech?.email || id,
                 department: user?.department || tech?.department,
                 dailyRate: tech?.costRate?.dailyRate || user?.costRate?.dailyRate || 0,
             };
@@ -376,7 +377,7 @@ export function WbsManagementPage() {
 
         const exportResult = exportWbsCostWorkbook({
             srId: sr.id,
-            fileName: `WBS_Export_SR${sr.id}_v${latestVersion.version}.xlsx`,
+            fileName: makeXlsxFileName("WBS管理", formatExportDate()),
             projectTitle: sr.title,
             customerName: sr.customerName,
             salesDepartment: sr.salesDepartment,
@@ -422,17 +423,18 @@ export function WbsManagementPage() {
         const result = await refetchWbsQuote();
         const quote = result.data || wbsQuote;
         if (!quote) return;
-        const rows: any[] = quote.items.map((item: any, index: number) => ({
-            "項次": index + 1,
-            "工作說明": item.title,
-            "指派人員": item.assigneeName,
-            "天數": item.days,
-            "日費率": item.dailyRate,
-            "總價(NT$)": item.amount
-        }));
-        rows.push({ "項次": "合計", "工作說明": "", "指派人員": "", "天數": "", "日費率": "", "總價(NT$)": quote.totalAmount });
-        exportRowsToXlsx(rows, `WBS_Quote_SR${srId}.xlsx`, "Quote");
-        const missingRatePeople = Array.from(new Set(quote.items.filter((item: any) => item.assigneeName && Number(item.dailyRate || 0) <= 0).map((item: any) => item.assigneeName)));
+        const exportResult = exportWbsQuoteWorkbook({
+            fileName: makeXlsxFileName(quote.title || sr.title || "專案", formatExportDate(), "報價單"),
+            projectTitle: quote.title || sr.title,
+            customerName: quote.customerName || sr.customerName,
+            salesDepartment: quote.salesDepartment || sr.salesDepartment,
+            salesRep: quote.salesRep || sr.salesRep,
+            technicalDepartment: quote.technicalDepartment,
+            technicalLead: quote.technicalLead,
+            versionNumber: quote.versionNumber,
+            items: quote.items,
+        });
+        const missingRatePeople = exportResult.missingRatePeople;
         if (missingRatePeople.length > 0) {
             toast.error(`以下人員尚未設定日費率：${missingRatePeople.join(", ")}`);
         }

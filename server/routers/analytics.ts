@@ -20,9 +20,9 @@ import { toObjectId } from "../_core/cursor";
 const reportTypes = ["utilization", "settlement", "timesheets", "project_profitability", "pm_ranking", "budget_variance", "sla_compliance", "renewal_rate", "open_cases", "kpi_revenue"] as const;
 
 const defaultKpiSourceDefinitions = [
-    { key: "target", label: "年度目標", source: "KPI 目標設定或長官 Excel 匯入", rule: "部門/個人目標以 KPI 目標設定為優先，未設定時使用匯入檔或系統預設值。", isActive: true },
-    { key: "recognizedRevenue", label: "實際認列收入", source: "結案/認列金額與年度目標匯入檔", rule: "以認列月份落在年度內的實際認列收入為 KPI 達成主數字，不以月結成本倒推營收。", isActive: true },
-    { key: "pipeline", label: "Pipeline 預估", source: "商機 estimatedValue 與匯入檔 Pipeline 欄位", rule: "商機金額依狀態加權；匯入檔 Pipeline 依匯入 Pipeline 權重納入預估達成。", isActive: true },
+    { key: "target", label: "年度目標", source: "系統 KPI 目標設定", rule: "部門/個人目標以系統內 KPI 目標設定為準。", isActive: true },
+    { key: "recognizedRevenue", label: "實際認列收入", source: "系統專案認列金額與結案資料", rule: "以 ServiceRequest 的認列月份與認列金額為主；未填認列金額時，已結案專案以合約金額估算。", isActive: true },
+    { key: "pipeline", label: "Pipeline 預估", source: "系統商機與未結案專案", rule: "商機金額依狀態加權；未結案專案以尚未認列合約金額納入 Pipeline。", isActive: true },
     { key: "settlement", label: "月度結算", source: "月結快照與工時成本", rule: "月結提供成本、毛利與鎖帳快照；可對照 KPI，但不直接覆蓋認列收入。", isActive: true }
 ] as const;
 
@@ -37,8 +37,8 @@ const defaultPipelineWeights: Record<string, number> = {
 };
 
 const defaultReportTemplates = [
-    { reportType: "open_cases", label: "未結案清單匯出", category: "executive", description: "長官檢視格式，依上傳 Excel 欄位順序輸出。", outputFormat: "xlsx", isExecutiveFormat: true, sortOrder: 10 },
-    { reportType: "kpi_revenue", label: "年度目標/認列/Pipeline 報表", category: "executive", description: "長官檢視格式，保留年度目標、實際認列收入與 Pipeline 欄位。", outputFormat: "xlsx", isExecutiveFormat: true, sortOrder: 20 },
+    { reportType: "open_cases", label: "未結案清單匯出", category: "executive", description: "長官檢視格式，從系統專案、WBS 與排程資料產出。", outputFormat: "xlsx", isExecutiveFormat: true, sortOrder: 10 },
+    { reportType: "kpi_revenue", label: "年度目標/認列/Pipeline 報表", category: "executive", description: "長官檢視格式，從系統 KPI 目標、專案認列與商機 Pipeline 彙整。", outputFormat: "xlsx", isExecutiveFormat: true, sortOrder: 20 },
     { reportType: "settlement", label: "部門利潤結算報表", category: "finance", description: "月結與利潤中心結算用。", outputFormat: "xlsx", isExecutiveFormat: false, sortOrder: 30 },
     { reportType: "timesheets", label: "工時清單報表", category: "people", description: "技術/協銷/專案工時明細。", outputFormat: "xlsx", isExecutiveFormat: false, sortOrder: 40 },
     { reportType: "utilization", label: "人力稼動率報表", category: "people", description: "人力稼動率與工時負載。", outputFormat: "xlsx", isExecutiveFormat: false, sortOrder: 50 },
@@ -117,6 +117,55 @@ const getWeightedPipelineAmount = (amount: number, status: string | undefined, w
     const weight = weights[status || ""] ?? 0;
     return Math.round((amount || 0) * weight);
 };
+
+const srStatusText: Record<string, string> = {
+    new: "新建",
+    in_progress: "執行中",
+    completed: "已結案",
+    cancelled: "已取消"
+};
+
+const getLatestWbsVersion = (sr: any) => {
+    const versions = [...(sr.wbsVersions || [])];
+    if (versions.length === 0) return null;
+    const approved = versions.filter((version: any) => version.status === "approved");
+    return (approved.length > 0 ? approved : versions)
+        .sort((left: any, right: any) => (right.versionNumber || 0) - (left.versionNumber || 0))[0];
+};
+
+const toDateText = (value?: Date | string | null) => {
+    if (!value) return "";
+    const date = new Date(value);
+    return Number.isNaN(date.getTime()) ? "" : date.toISOString().slice(0, 10);
+};
+
+const getRecognitionDate = (sr: any) => {
+    if (sr.recognitionMonth && /^\d{4}-\d{2}/.test(sr.recognitionMonth)) {
+        return new Date(`${sr.recognitionMonth}-01T00:00:00.000Z`);
+    }
+    return sr.actualEndDate || sr.updatedAt || sr.createdAt;
+};
+
+const getQuarterKey = (value?: Date | string | null) => {
+    const date = value ? new Date(value) : null;
+    if (!date || Number.isNaN(date.getTime())) return null;
+    return `q${Math.floor(date.getUTCMonth() / 3) + 1}` as "q1" | "q2" | "q3" | "q4";
+};
+
+const addRevenueBucket = (
+    buckets: Map<string, { total: number; q1: number; q2: number; q3: number; q4: number }>,
+    key: string,
+    amount: number,
+    date?: Date | string | null
+) => {
+    const bucket = buckets.get(key) || { total: 0, q1: 0, q2: 0, q3: 0, q4: 0 };
+    bucket.total += amount;
+    const quarter = getQuarterKey(date);
+    if (quarter) bucket[quarter] += amount;
+    buckets.set(key, bucket);
+};
+
+const getKpiDepartment = (item: any) => item.salesDepartment || item.pmId?.department || item.ownerId?.department || "未指定";
 
 const buildSettlementSnapshotPayload = async (month: string, type: "project" | "presales") => {
     const startDate = new Date(`${month}-01T00:00:00.000Z`);
@@ -1096,34 +1145,42 @@ export const analyticsRouter = router({
 
     getReportDataSourceStatus: roleProcedure(["admin", "manager"])
         .query(async () => {
-            const [openCasesBatch, kpiRevenueBatch] = await Promise.all([
-                ImportBatchModel.findOne({ type: "open_cases" }).sort({ createdAt: -1 }).lean(),
-                ImportBatchModel.findOne({ type: "kpi_revenue" }).sort({ createdAt: -1 }).lean()
+            const year = new Date().getFullYear();
+            const [openCasesRows, totalProjects, targetRows, recognizedRows, pipelineRows] = await Promise.all([
+                ServiceRequestModel.countDocuments({ status: { $nin: ["completed", "cancelled"] } }),
+                ServiceRequestModel.countDocuments(),
+                KpiTargetModel.countDocuments({ year }),
+                ServiceRequestModel.countDocuments({
+                    $or: [
+                        { recognitionMonth: { $regex: `^${year}-` } },
+                        { actualEndDate: { $gte: new Date(year, 0, 1), $lt: new Date(year + 1, 0, 1) } },
+                        { recognizedRevenueAmount: { $gt: 0 } }
+                    ]
+                }),
+                OpportunityModel.countDocuments({ status: { $nin: ["lost", "won", "converted"] } })
             ]);
-
-            const [openCasesRows, kpiRevenueRows] = await Promise.all([
-                ServiceRequestModel.countDocuments({ externalProjectCode: { $exists: true, $ne: "" } }),
-                kpiRevenueBatch
-                    ? RevenueSnapshotModel.countDocuments({ importBatchId: kpiRevenueBatch._id })
-                    : Promise.resolve(0)
-            ]);
-
-            const toStatus = (batch: any, dataRows: number) => ({
-                hasImport: !!batch,
-                sourceFileName: batch?.sourceFileName || "",
-                status: batch?.status || "not_imported",
-                importedAt: batch?.createdAt || null,
-                totalRows: batch?.totalRows || 0,
-                successRows: batch?.successRows || 0,
-                failedRows: batch?.failedRows || 0,
-                warningCount: batch?.warnings?.length || 0,
-                errorCount: batch?.errorMessages?.length || 0,
-                dataRows,
-            });
 
             return {
-                open_cases: toStatus(openCasesBatch, openCasesRows),
-                kpi_revenue: toStatus(kpiRevenueBatch, kpiRevenueRows)
+                open_cases: {
+                    sourceType: "system",
+                    sourceName: "系統專案 / WBS / 排程",
+                    status: "ready",
+                    checkedAt: new Date(),
+                    description: "排除已結案與已取消的 ServiceRequest，並展開最新 WBS 工作項目。",
+                    totalRows: totalProjects,
+                    dataRows: openCasesRows,
+                    detail: `系統專案總數 ${totalProjects}，未結案 ${openCasesRows}。`,
+                },
+                kpi_revenue: {
+                    sourceType: "system",
+                    sourceName: "系統 KPI 目標 / 專案認列 / 商機 Pipeline",
+                    status: "ready",
+                    checkedAt: new Date(),
+                    description: `${year} 年度 KPI 目標、ServiceRequest 認列金額與 Opportunity Pipeline 彙整。`,
+                    totalRows: targetRows + recognizedRows + pipelineRows,
+                    dataRows: targetRows + recognizedRows + pipelineRows,
+                    detail: `目標 ${targetRows} 筆，認列專案 ${recognizedRows} 筆，Pipeline 商機 ${pipelineRows} 筆。`,
+                }
             };
         }),
 
@@ -1645,21 +1702,29 @@ export const analyticsRouter = router({
                 const scopedUser = input.userId
                     ? (await getScopedReportUsers(ctx.user, input.department, input.userId))[0]
                     : null;
-                const srMatch: any = { externalProjectCode: { $exists: true, $ne: "" } };
-                if (input.department) {
-                    const allowedDepartments = (await buildDepartmentAccessFilter(ctx.user, input.department)) || [];
+                const srMatch: any = { status: { $nin: ["completed", "cancelled"] } };
+                const allowedDepartments = await buildDepartmentAccessFilter(ctx.user, input.department);
+                if (allowedDepartments !== null) {
                     if (allowedDepartments.length === 0) {
                         srMatch._id = null;
                     } else {
+                        const deptUsers = await UserModel.find({ department: { $in: allowedDepartments } }, { _id: 1 }).lean();
+                        const deptUserIds = deptUsers.map((user: any) => user._id);
                         srMatch.$or = [
-                            { "externalAssignments.department": { $in: allowedDepartments } },
-                            { salesDepartment: { $in: allowedDepartments } }
+                            { salesDepartment: { $in: allowedDepartments } },
+                            { pmId: { $in: deptUserIds } },
+                            { "members.userId": { $in: deptUserIds } },
+                            { "wbsVersions.items.assigneeId": { $in: deptUserIds } },
+                            { "externalAssignments.department": { $in: allowedDepartments } }
                         ];
                     }
                 }
                 if (scopedUser) {
                     srMatch.$and = [{
                         $or: [
+                            { pmId: scopedUser._id },
+                            { "members.userId": scopedUser._id },
+                            { "wbsVersions.items.assigneeId": scopedUser._id },
                             { "externalAssignments.userId": scopedUser._id },
                             { "externalAssignments.handlerName": scopedUser.name },
                             { "externalAssignments.handlerDisplayName": scopedUser.name },
@@ -1670,94 +1735,215 @@ export const analyticsRouter = router({
                     srMatch._id = null;
                 }
 
-                const srs = await ServiceRequestModel.find(srMatch).sort({ plannedEndDate: 1, externalProjectCode: 1 }).lean();
+                const srs = await ServiceRequestModel.find(srMatch)
+                    .populate("pmId", "name department email")
+                    .populate("wbsVersions.items.assigneeId", "name email department")
+                    .sort({ plannedEndDate: 1, createdAt: 1 })
+                    .lean();
                 return srs.flatMap((sr: any) => {
-                    const assignments = sr.externalAssignments?.length ? sr.externalAssignments : [null];
-                    return assignments.map((assignment: any) => ({
+                    const latestVersion = getLatestWbsVersion(sr);
+                    const wbsItems = latestVersion?.items?.length ? latestVersion.items : [null];
+                    const completedWorkItems = latestVersion?.items?.filter((item: any) => Number(item.completionPercentage || 0) >= 100).length || 0;
+                    const totalWorkItems = latestVersion?.items?.length || 0;
+                    return wbsItems.map((item: any) => {
+                        const assignee = item?.assigneeId;
+                        const itemHours = Number(item?.estimatedHours || 0);
+                        const actualHours = Number(item?.actualHours || 0);
+                        const completionPercentage = Number(item?.completionPercentage || sr.completionPercentage || 0);
+                        return ({
                         "公司名稱": sr.customerName || "",
                         "案件名稱": sr.title || "",
-                        "專案編號": sr.externalProjectCode || "",
+                        "專案編號": sr.externalProjectCode || sr._id.toString(),
                         "服務類型": sr.externalServiceType || sr.srType || "",
-                        "建案日期": sr.createdAt ? new Date(sr.createdAt).toISOString().slice(0, 10) : "",
-                        "審核日期": sr.reviewDate ? new Date(sr.reviewDate).toISOString().slice(0, 10) : "",
-                        "預計開始時間": sr.plannedStartDate ? new Date(sr.plannedStartDate).toISOString().slice(0, 10) : "",
-                        "預計結束時間": sr.plannedEndDate ? new Date(sr.plannedEndDate).toISOString().slice(0, 10) : "",
+                        "建案日期": toDateText(sr.createdAt),
+                        "審核日期": toDateText(sr.reviewDate),
+                        "預計開始時間": toDateText(item?.startDate || sr.plannedStartDate),
+                        "預計結束時間": toDateText(item?.endDate || sr.plannedEndDate),
                         "預計結束時間-歷程": "",
-                        "全案開始時間": sr.actualStartDate ? new Date(sr.actualStartDate).toISOString().slice(0, 10) : "",
-                        "全案結束時間": sr.actualEndDate ? new Date(sr.actualEndDate).toISOString().slice(0, 10) : "",
+                        "全案開始時間": toDateText(sr.actualStartDate),
+                        "全案結束時間": toDateText(sr.actualEndDate),
                         "業務部門": sr.salesDepartment || "",
                         "業務代表": sr.salesRep || "",
-                        "全案狀態": sr.externalStatus || "",
-                        "個人案件狀態": assignment?.personalStatus || "",
-                        "技術部門_部級": assignment?.department || "",
-                        "技術部門": assignment?.teamDepartment || "",
-                        "處理人員": assignment?.handlerDisplayName || assignment?.handlerName || "",
-                        "角色": assignment?.roleName || "",
-                        "工時類別": assignment?.workType || "",
-                        "建案工時": assignment?.plannedHours || 0,
-                        "分配工時": assignment?.assignedHours || 0,
-                        "已累計工時": assignment?.actualHours || 0,
-                        "執行工時    2023/11/17 ~ 2026/05/26": assignment?.actualHours || 0,
-                        "剩餘工時": assignment?.remainingHours || 0,
-                        "建案人員部門": "",
-                        "建案人員": "",
+                        "全案狀態": srStatusText[sr.status] || sr.status || "",
+                        "個人案件狀態": completionPercentage >= 100 ? "已完成" : completionPercentage > 0 ? "進行中" : "未開始",
+                        "技術部門_部級": assignee?.department || sr.pmId?.department || "",
+                        "技術部門": assignee?.department || "",
+                        "處理人員": assignee?.name || sr.pmId?.name || "",
+                        "角色": item ? "WBS 指派人員" : "PM",
+                        "工時類別": sr.srType || "",
+                        "建案工時": itemHours,
+                        "分配工時": itemHours,
+                        "已累計工時": actualHours,
+                        "執行工時    2023/11/17 ~ 2026/05/26": actualHours,
+                        "剩餘工時": Math.max(0, itemHours - actualHours),
+                        "建案人員部門": sr.pmId?.department || "",
+                        "建案人員": sr.pmId?.name || "",
                         "問題代號(客服)": sr.externalIssueCode || "",
                         "案件編號(保固 / 維護專案)": sr.externalWarrantyProjectCode || "",
                         "起訖時間(保固 / 維護專案)": "",
                         "案件編號(協銷)": sr.externalPresalesCaseCode || "",
-                        "更新日期": sr.updatedAt ? new Date(sr.updatedAt).toISOString().slice(0, 10) : "",
-                        "保固到期日期": sr.warrantyExpiresAt ? new Date(sr.warrantyExpiresAt).toISOString().slice(0, 10) : "",
+                        "更新日期": toDateText(sr.updatedAt),
+                        "保固到期日期": toDateText(sr.warrantyExpiresAt),
                         "計費分攤": sr.billingAllocation || "",
                         "認列月份": sr.recognitionMonth || "",
-                        "工作項目": "",
-                        "總工作項目": sr.totalWorkItems || 0,
-                        "總完成工作項目": sr.completedWorkItems || 0,
-                        "總完成百分比": sr.completionPercentage || 0
-                    }));
+                        "工作項目": item?.title || "",
+                        "總工作項目": sr.totalWorkItems || totalWorkItems,
+                        "總完成工作項目": sr.completedWorkItems || completedWorkItems,
+                        "總完成百分比": sr.completionPercentage || completionPercentage
+                    });
+                    });
                 });
             } else if (input.reportType === "kpi_revenue") {
                 const year = start.getFullYear();
-                const latestBatchId = await getLatestImportBatchId("kpi_revenue");
-                if (!latestBatchId) return [];
-                const match: any = { importBatchId: latestBatchId, year };
-                if (input.department) {
-                    const allowedDepartments = (await buildDepartmentAccessFilter(ctx.user, input.department)) || [];
-                    match.department = allowedDepartments.length > 0 ? { $in: allowedDepartments } : "__NO_ACCESS__";
-                }
-
+                const policy = await getOrCreateKpiPolicy(year);
+                const allowedDepartments = await buildDepartmentAccessFilter(ctx.user, input.department);
                 const scopedUser = input.userId
                     ? (await getScopedReportUsers(ctx.user, input.department, input.userId))[0]
                     : null;
-                let snapshots = await RevenueSnapshotModel.find(match).sort({ scope: 1, department: 1, employeeName: 1 }).lean();
-                if (snapshots.length === 0 && !input.department && !input.userId) {
-                    const latestSnapshot = await RevenueSnapshotModel.findOne({ importBatchId: latestBatchId }, { year: 1 }).sort({ year: -1 }).lean();
-                    if (latestSnapshot?.year && latestSnapshot.year !== year) {
-                        snapshots = await RevenueSnapshotModel.find({ importBatchId: latestBatchId, year: latestSnapshot.year }).sort({ scope: 1, department: 1, employeeName: 1 }).lean();
+                const departmentFilter = allowedDepartments && allowedDepartments.length > 0 ? allowedDepartments : null;
+                if (allowedDepartments !== null && allowedDepartments.length === 0) return [];
+
+                const targetMatch: any = { year };
+                if (departmentFilter) targetMatch.department = { $in: departmentFilter };
+                if (scopedUser) {
+                    targetMatch.$or = [
+                        { scope: "person", userId: scopedUser._id },
+                        { scope: "person", userName: scopedUser.name }
+                    ];
+                }
+
+                const srMatch: any = {};
+                if (departmentFilter) {
+                    const deptUsers = await UserModel.find({ department: { $in: departmentFilter } }, { _id: 1 }).lean();
+                    srMatch.$or = [
+                        { salesDepartment: { $in: departmentFilter } },
+                        { pmId: { $in: deptUsers.map((user: any) => user._id) } }
+                    ];
+                }
+                if (scopedUser) srMatch.pmId = scopedUser._id;
+
+                const oppMatch: any = { status: { $nin: ["lost", "won", "converted"] } };
+                if (departmentFilter) {
+                    const deptUsers = await UserModel.find({ department: { $in: departmentFilter } }, { _id: 1 }).lean();
+                    oppMatch.ownerId = { $in: deptUsers.map((user: any) => user._id) };
+                }
+                if (scopedUser) oppMatch.ownerId = scopedUser._id;
+
+                const [targets, serviceRequests, opportunities] = await Promise.all([
+                    KpiTargetModel.find(targetMatch).sort({ scope: 1, department: 1, userName: 1 }).lean(),
+                    ServiceRequestModel.find(srMatch)
+                        .populate("pmId", "name department")
+                        .select("title salesDepartment pmId status contractAmount recognizedRevenueAmount recognitionMonth actualEndDate createdAt updatedAt")
+                        .lean(),
+                    OpportunityModel.find(oppMatch)
+                        .populate("ownerId", "name department")
+                        .select("title customerName estimatedValue status ownerId")
+                        .lean()
+                ]);
+
+                const recognizedByDept = new Map<string, { total: number; q1: number; q2: number; q3: number; q4: number }>();
+                const recognizedByPerson = new Map<string, { total: number; q1: number; q2: number; q3: number; q4: number }>();
+                const pipelineByDept = new Map<string, number>();
+                const pipelineByPerson = new Map<string, number>();
+
+                for (const sr of serviceRequests as any[]) {
+                    const recognitionDate = getRecognitionDate(sr);
+                    const recognitionYear = recognitionDate ? new Date(recognitionDate).getUTCFullYear() : year;
+                    const recognizedAmount = Number(sr.recognizedRevenueAmount || 0) > 0
+                        ? Number(sr.recognizedRevenueAmount || 0)
+                        : sr.status === "completed" && recognitionYear === year
+                            ? Number(sr.contractAmount || 0)
+                            : 0;
+                    const department = getKpiDepartment(sr);
+                    const personKey = sr.pmId?._id?.toString();
+                    if (recognizedAmount > 0 && recognitionYear === year) {
+                        addRevenueBucket(recognizedByDept, department, recognizedAmount, recognitionDate);
+                        if (personKey) addRevenueBucket(recognizedByPerson, personKey, recognizedAmount, recognitionDate);
+                    }
+                    if (sr.status !== "completed" && sr.status !== "cancelled") {
+                        const openAmount = Math.max(0, Number(sr.contractAmount || 0) - Number(sr.recognizedRevenueAmount || 0));
+                        pipelineByDept.set(department, (pipelineByDept.get(department) || 0) + openAmount);
+                        if (personKey) pipelineByPerson.set(personKey, (pipelineByPerson.get(personKey) || 0) + openAmount);
                     }
                 }
-                return snapshots
-                .filter((snapshot: any) => !scopedUser || (snapshot.scope === "person" && snapshot.employeeName === (scopedUser as any).name))
-                .map((snapshot: any) => ({
-                    "層級": snapshot.scope === "department" ? "部門" : "個人",
-                    "年度": snapshot.year,
-                    "部門": snapshot.department,
-                    "員工編號": snapshot.employeeCode || "",
-                    "員工姓名": snapshot.employeeName || "",
-                    "制度": snapshot.schemeType || "",
-                    "指標": snapshot.description || "",
-                    "年度目標": snapshot.targetAmount || 0,
-                    "Q1目標": snapshot.q1TargetAmount || 0,
-                    "Q2目標": snapshot.q2TargetAmount || 0,
-                    "Q3目標": snapshot.q3TargetAmount || 0,
-                    "Q4目標": snapshot.q4TargetAmount || 0,
-                    "Q1認列": snapshot.q1RecognizedAmount || 0,
-                    "Q2認列": snapshot.q2RecognizedAmount || 0,
-                    "實際認列收入": snapshot.recognizedRevenueAmount || 0,
-                    "Pipeline預估": snapshot.pipelineAmount || 0,
-                    "含Pipeline預估": (snapshot.recognizedRevenueAmount || 0) + (snapshot.pipelineAmount || 0),
-                    "達成率%": snapshot.targetAmount > 0 ? Math.round(((snapshot.recognizedRevenueAmount || 0) / snapshot.targetAmount) * 100) : 0,
-                    "含Pipeline達成率%": snapshot.targetAmount > 0 ? Math.round((((snapshot.recognizedRevenueAmount || 0) + (snapshot.pipelineAmount || 0)) / snapshot.targetAmount) * 100) : 0
-                }));
+
+                for (const opportunity of opportunities as any[]) {
+                    const department = getKpiDepartment(opportunity);
+                    const amount = getWeightedPipelineAmount(Number(opportunity.estimatedValue || 0), opportunity.status, policy.pipelineWeights || defaultPipelineWeights);
+                    pipelineByDept.set(department, (pipelineByDept.get(department) || 0) + amount);
+                    const ownerKey = opportunity.ownerId?._id?.toString();
+                    if (ownerKey) pipelineByPerson.set(ownerKey, (pipelineByPerson.get(ownerKey) || 0) + amount);
+                }
+
+                const departmentTargets = new Map(targets.filter((target: any) => target.scope === "department").map((target: any) => [target.department, target]));
+                const personTargets = targets.filter((target: any) => target.scope === "person");
+                const departmentKeys = new Set([
+                    ...departmentTargets.keys(),
+                    ...recognizedByDept.keys(),
+                    ...pipelineByDept.keys()
+                ]);
+
+                const deptRows = Array.from(departmentKeys).sort().map((department) => {
+                    const target = departmentTargets.get(department) as any;
+                    const recognized = recognizedByDept.get(department) || { total: 0, q1: 0, q2: 0, q3: 0, q4: 0 };
+                    const pipeline = pipelineByDept.get(department) || 0;
+                    const targetAmount = Number(target?.targetAmount || 0);
+                    return {
+                        "層級": "部門",
+                        "年度": year,
+                        "部門": department,
+                        "員工編號": "",
+                        "員工姓名": "",
+                        "制度": "系統設定",
+                        "指標": target?.note || "年度目標",
+                        "年度目標": targetAmount,
+                        "Q1目標": target?.q1TargetAmount || 0,
+                        "Q2目標": target?.q2TargetAmount || 0,
+                        "Q3目標": target?.q3TargetAmount || 0,
+                        "Q4目標": target?.q4TargetAmount || 0,
+                        "Q1認列": recognized.q1,
+                        "Q2認列": recognized.q2,
+                        "Q3認列": recognized.q3,
+                        "Q4認列": recognized.q4,
+                        "實際認列收入": recognized.total,
+                        "Pipeline預估": pipeline,
+                        "含Pipeline預估": recognized.total + pipeline,
+                        "達成率%": targetAmount > 0 ? Math.round((recognized.total / targetAmount) * 100) : 0,
+                        "含Pipeline達成率%": targetAmount > 0 ? Math.round(((recognized.total + pipeline) / targetAmount) * 100) : 0
+                    };
+                });
+
+                const personRows = personTargets.map((target: any) => {
+                    const personKey = target.userId?.toString() || "";
+                    const recognized = recognizedByPerson.get(personKey) || { total: 0, q1: 0, q2: 0, q3: 0, q4: 0 };
+                    const pipeline = pipelineByPerson.get(personKey) || 0;
+                    const targetAmount = Number(target.targetAmount || 0);
+                    return {
+                        "層級": "個人",
+                        "年度": year,
+                        "部門": target.department,
+                        "員工編號": personKey,
+                        "員工姓名": target.userName || "",
+                        "制度": "系統設定",
+                        "指標": target.note || "年度目標",
+                        "年度目標": targetAmount,
+                        "Q1目標": target.q1TargetAmount || 0,
+                        "Q2目標": target.q2TargetAmount || 0,
+                        "Q3目標": target.q3TargetAmount || 0,
+                        "Q4目標": target.q4TargetAmount || 0,
+                        "Q1認列": recognized.q1,
+                        "Q2認列": recognized.q2,
+                        "Q3認列": recognized.q3,
+                        "Q4認列": recognized.q4,
+                        "實際認列收入": recognized.total,
+                        "Pipeline預估": pipeline,
+                        "含Pipeline預估": recognized.total + pipeline,
+                        "達成率%": targetAmount > 0 ? Math.round((recognized.total / targetAmount) * 100) : 0,
+                        "含Pipeline達成率%": targetAmount > 0 ? Math.round(((recognized.total + pipeline) / targetAmount) * 100) : 0
+                    };
+                });
+
+                return [...deptRows, ...personRows];
             }
             
             return [];

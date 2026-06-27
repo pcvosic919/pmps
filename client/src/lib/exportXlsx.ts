@@ -5,6 +5,7 @@ type Row = Record<string, unknown>;
 type WbsWorkbookPerson = {
     id: string;
     name: string;
+    displayName?: string;
     department?: string;
     dailyRate?: number;
 };
@@ -37,6 +38,27 @@ type WbsWorkbookInput = {
 
 type WbsWorkbookExportResult = {
     missingRatePeople: string[];
+};
+
+type WbsQuoteWorkbookItem = {
+    title: string;
+    description?: string;
+    assigneeName?: string;
+    days: number;
+    dailyRate: number;
+    amount?: number;
+};
+
+type WbsQuoteWorkbookInput = {
+    fileName: string;
+    projectTitle: string;
+    customerName?: string;
+    salesDepartment?: string;
+    salesRep?: string;
+    technicalDepartment?: string;
+    technicalLead?: string;
+    versionNumber?: number | string;
+    items: WbsQuoteWorkbookItem[];
 };
 
 const normalizeSheetName = (name: string) =>
@@ -177,6 +199,23 @@ const writeWorkbook = (workbook: XLSX.WorkBook, fileName: string) => {
     );
 };
 
+export const formatExportDate = (date = new Date()) => {
+    const year = date.getFullYear();
+    const month = String(date.getMonth() + 1).padStart(2, "0");
+    const day = String(date.getDate()).padStart(2, "0");
+    return `${year}-${month}-${day}`;
+};
+
+export const sanitizeXlsxFileName = (value: string) =>
+    value
+        .replace(/[\\/:*?"<>|]/g, "-")
+        .replace(/\s+/g, " ")
+        .trim()
+        .slice(0, 120) || "匯出檔案";
+
+export const makeXlsxFileName = (...parts: Array<string | number | undefined | null>) =>
+    `${sanitizeXlsxFileName(parts.filter((part) => part !== undefined && part !== null && String(part).trim()).join("-"))}.xlsx`;
+
 const normalizeDateText = (value?: string | Date) => {
     if (!value) return "";
     const date = value instanceof Date ? value : new Date(value);
@@ -217,6 +256,7 @@ const buildWbsRows = (items: WbsWorkbookItem[], allPeople: WbsWorkbookPerson[]) 
             dailyRate: assignee?.dailyRate || 0,
             amount: (item.estimatedHours || 0) * (assignee?.dailyRate || 0),
             assigneeName: assignee?.name || "",
+            assigneeDisplayName: assignee?.displayName || assignee?.name || "",
             department: assignee?.department || "",
             startDate: normalizeDateText(item.startDate),
             endDate: normalizeDateText(item.endDate),
@@ -225,6 +265,70 @@ const buildWbsRows = (items: WbsWorkbookItem[], allPeople: WbsWorkbookPerson[]) 
             remarks: item.remarks || "",
         };
     });
+};
+
+const buildQuoteSheet = (input: Omit<WbsQuoteWorkbookInput, "fileName">) => {
+    const rows = input.items || [];
+    const customerName = input.customerName || "[待填客戶名稱]";
+    const projectTitle = input.projectTitle || "[待填專案名稱]";
+    const salesInfo = `${input.salesDepartment || "[待填業務部門]"} / ${input.salesRep || "[待填業務代表]"}`;
+    const technicalInfo = `${input.technicalDepartment || "[待填技術部門]"} / ${input.technicalLead || "[待填技術負責人]"}`;
+    const quoteStartRow = 7;
+    const quoteTotalRow = quoteStartRow + rows.length;
+    const quoteAoa: unknown[][] = [
+        ["AEB 報價單（內部用）", "", "", "", "", ""],
+        ["客戶名稱", customerName, "", "", "", ""],
+        ["專案名稱", projectTitle, "", "", "", ""],
+        ["業務部門 / 業務代表", salesInfo, "", "", "", ""],
+        ["技術部門 / 技術負責人", technicalInfo, "", "", "", ""],
+        ["項次", "工作項目", "指派人員", "天數", "日費率", "總價(NT$)"],
+        ...rows.map((row, index) => [
+            index + 1,
+            row.title || row.description || "",
+            row.assigneeName || "",
+            row.days || 0,
+            row.dailyRate || 0,
+            row.amount ?? null,
+        ]),
+        ["合計", "", "", null, "", null],
+    ];
+    const quoteSheet = XLSX.utils.aoa_to_sheet(quoteAoa);
+    quoteSheet["!merges"] = [
+        { s: { r: 0, c: 0 }, e: { r: 0, c: 4 } },
+        { s: { r: 1, c: 1 }, e: { r: 1, c: 4 } },
+        { s: { r: 2, c: 1 }, e: { r: 2, c: 4 } },
+        { s: { r: 3, c: 1 }, e: { r: 3, c: 4 } },
+        { s: { r: 4, c: 1 }, e: { r: 4, c: 4 } },
+        { s: { r: quoteTotalRow - 1, c: 0 }, e: { r: quoteTotalRow - 1, c: 2 } },
+    ];
+    quoteSheet["!cols"] = [{ wch: 18.5 }, { wch: 28 }, { wch: 18 }, { wch: 10 }, { wch: 12 }, { wch: 14 }];
+    quoteSheet["!rows"] = [
+        { hpt: 28 },
+        { hpt: 22 },
+        { hpt: 22 },
+        { hpt: 22 },
+        { hpt: 22 },
+        { hpt: 24 },
+    ];
+    rows.forEach((rowData, index) => {
+        const row = quoteStartRow + index;
+        if (rowData.amount === undefined) setFormula(quoteSheet, row, 6, `D${row}*E${row}`);
+        [4, 5, 6].forEach((col) => {
+            const cell = quoteSheet[encodeCell(row, col)];
+            if (cell) cell.z = col === 4 ? "0.##" : "#,##0";
+        });
+    });
+    if (rows.length > 0) {
+        setFormula(quoteSheet, quoteTotalRow, 4, `SUM(D${quoteStartRow}:D${quoteTotalRow - 1})`);
+        setFormula(quoteSheet, quoteTotalRow, 6, `SUM(F${quoteStartRow}:F${quoteTotalRow - 1})`);
+    } else {
+        quoteSheet[encodeCell(quoteTotalRow, 4)] = { t: "n", v: 0 };
+        quoteSheet[encodeCell(quoteTotalRow, 6)] = { t: "n", v: 0 };
+    }
+    const totalAmountCell = quoteSheet[encodeCell(quoteTotalRow, 6)];
+    if (totalAmountCell) totalAmountCell.z = "#,##0";
+    applyTableTheme(quoteSheet, 6, Math.max(quoteTotalRow, 6), 6, 1);
+    return quoteSheet;
 };
 
 const setWorkbookProps = (workbook: XLSX.WorkBook) => {
@@ -258,6 +362,22 @@ export function exportRowsToXlsx(rows: Row[], fileName: string, sheetName = "Rep
     const workbook = XLSX.utils.book_new();
     appendJsonSheet(workbook, sheetName, rows);
     writeWorkbook(workbook, fileName);
+}
+
+export function exportWbsQuoteWorkbook(input: WbsQuoteWorkbookInput): WbsWorkbookExportResult {
+    const workbook = XLSX.utils.book_new();
+    workbook.Props = {
+        Title: "AEB 報價單",
+        Subject: "WBS 轉報價單",
+        Author: "PMP System",
+        CreatedDate: new Date(),
+    };
+    const quoteSheet = buildQuoteSheet(input);
+    XLSX.utils.book_append_sheet(workbook, quoteSheet, "Quote");
+    writeWorkbook(workbook, input.fileName);
+    return {
+        missingRatePeople: Array.from(new Set(input.items.filter((item) => item.assigneeName && Number(item.dailyRate || 0) <= 0).map((item) => item.assigneeName || ""))).filter(Boolean),
+    };
 }
 
 export function exportArraysToXlsx(rows: unknown[][], fileName: string, sheetName = "Report") {
@@ -311,11 +431,13 @@ export function exportKpiRevenueWorkbook(rows: Row[], fileName: string) {
         "Q4目標": row["Q4目標"],
         "Q1認列": row["Q1認列"],
         "Q2認列": row["Q2認列"],
+        "Q3認列": row["Q3認列"],
+        "Q4認列": row["Q4認列"],
         "年度合計": row["實際認列收入"],
         "年度達成率%": row["達成率%"],
         "派工系統(已建案未認列)": row["Pipeline預估"],
         "含Pipeline達成率%": row["含Pipeline達成率%"],
-    })), ["部門", "目標金額", "Q1目標", "Q2目標", "Q3目標", "Q4目標", "Q1認列", "Q2認列", "年度合計", "年度達成率%", "派工系統(已建案未認列)", "含Pipeline達成率%"]);
+    })), ["部門", "目標金額", "Q1目標", "Q2目標", "Q3目標", "Q4目標", "Q1認列", "Q2認列", "Q3認列", "Q4認列", "年度合計", "年度達成率%", "派工系統(已建案未認列)", "含Pipeline達成率%"]);
 
     appendJsonSheet(workbook, "Summary_個人(實際+未認列)", personRows.map((row) => ({
         "Employee ID": row["員工編號"],
@@ -330,10 +452,12 @@ export function exportKpiRevenueWorkbook(rows: Row[], fileName: string) {
         "Q4目標": row["Q4目標"],
         "Q1小計": row["Q1認列"],
         "Q2小計": row["Q2認列"],
+        "Q3小計": row["Q3認列"],
+        "Q4小計": row["Q4認列"],
         "年度合計": row["實際認列收入"],
         "Pipeline預估": row["Pipeline預估"],
         "含Pipeline達成率%": row["含Pipeline達成率%"],
-    })), ["Employee ID", "Employee Name", "類型", "Department Code", "Description", "金額/數量", "Q1目標", "Q2目標", "Q3目標", "Q4目標", "Q1小計", "Q2小計", "年度合計", "Pipeline預估", "含Pipeline達成率%"]);
+    })), ["Employee ID", "Employee Name", "類型", "Department Code", "Description", "金額/數量", "Q1目標", "Q2目標", "Q3目標", "Q4目標", "Q1小計", "Q2小計", "Q3小計", "Q4小計", "年度合計", "Pipeline預估", "含Pipeline達成率%"]);
 
     appendJsonSheet(workbook, "Summary", rows, Object.keys(rows[0] || {}));
     writeWorkbook(workbook, fileName);
@@ -349,7 +473,7 @@ export function exportWbsCostWorkbook(input: WbsWorkbookInput): WbsWorkbookExpor
     const customerName = input.customerName || "[待填客戶名稱]";
     const salesInfo = `${input.salesDepartment || "[待填業務部門]"} / ${input.salesRep || "[待填業務代表]"}`;
     const technicalDepartment = input.technicalDepartment || allPeople[0]?.department || "[待填技術部門]";
-    const techLead = allPeople[0]?.name || "[待填技術負責人]";
+    const techLead = allPeople[0]?.displayName || allPeople[0]?.name || "[待填技術負責人]";
     const exportedAt = new Date().toISOString();
     const versionText = input.version ? String(input.version) : "";
     const missingRatePeople = Array.from(new Set(rows.filter((row) => row.assigneeName && row.dailyRate <= 0).map((row) => row.assigneeName)));
@@ -396,43 +520,22 @@ export function exportWbsCostWorkbook(input: WbsWorkbookInput): WbsWorkbookExpor
     applyTableTheme(actionSheet, 1, Math.max(rows.length + 1, 1), actionHeaders.length);
     XLSX.utils.book_append_sheet(workbook, actionSheet, "Action Item");
 
-    const quoteStartRow = 7;
-    const quoteTotalRow = quoteStartRow + rows.length;
-    const quoteAoa: unknown[][] = [
-        ["AEB 報價單（內部用）"],
-        ["客戶名稱", customerName],
-        ["專案名稱", projectTitle],
-        ["業務部門 / 業務代表", salesInfo],
-        ["技術部門 / 技術負責人", `${technicalDepartment} / ${techLead}`],
-        ["項次", "工作說明", "指派人員", "天數", "日費率", "總價(NT$)", "備註"],
-        ...rows.map((row, index) => [index + 1, row.title, row.assigneeName || "", row.days, row.dailyRate, null, row.dailyRate <= 0 && row.assigneeName ? "未設定費率" : row.remarks]),
-        ["合計", "", "", null, "", null, ""],
-    ];
-    const quoteSheet = XLSX.utils.aoa_to_sheet(quoteAoa);
-    quoteSheet["!merges"] = [
-        { s: { r: 0, c: 0 }, e: { r: 0, c: 6 } },
-        { s: { r: 1, c: 1 }, e: { r: 1, c: 6 } },
-        { s: { r: 2, c: 1 }, e: { r: 2, c: 6 } },
-        { s: { r: 3, c: 1 }, e: { r: 3, c: 6 } },
-        { s: { r: 4, c: 1 }, e: { r: 4, c: 6 } },
-        { s: { r: quoteTotalRow - 1, c: 0 }, e: { r: quoteTotalRow - 1, c: 2 } },
-    ];
-    quoteSheet["!cols"] = [{ wch: 8 }, { wch: 40 }, { wch: 28 }, { wch: 10 }, { wch: 12 }, { wch: 16 }, { wch: 24 }];
-    rows.forEach((_, index) => {
-        const row = quoteStartRow + index;
-        setFormula(quoteSheet, row, 6, `D${row}*E${row}`);
-        [5, 6].forEach((col) => {
-            const cell = quoteSheet[encodeCell(row, col)];
-            if (cell) cell.z = "#,##0";
-        });
-        const amountCell = quoteSheet[encodeCell(row, 6)];
-        if (amountCell) amountCell.z = "#,##0";
+    const quoteSheet = buildQuoteSheet({
+        projectTitle,
+        customerName,
+        salesDepartment: input.salesDepartment,
+        salesRep: input.salesRep,
+        technicalDepartment,
+        technicalLead: techLead,
+        versionNumber: versionText,
+        items: rows.map((row) => ({
+            title: row.title,
+            assigneeName: row.assigneeDisplayName || row.assigneeName || "",
+            days: row.days,
+            dailyRate: row.dailyRate,
+            amount: row.amount,
+        })),
     });
-    setFormula(quoteSheet, quoteTotalRow, 4, `SUM(D${quoteStartRow}:D${quoteTotalRow - 1})`);
-    setFormula(quoteSheet, quoteTotalRow, 6, `SUM(F${quoteStartRow}:F${quoteTotalRow - 1})`);
-    const quoteTotalAmountCell = quoteSheet[encodeCell(quoteTotalRow, 6)];
-    if (quoteTotalAmountCell) quoteTotalAmountCell.z = "#,##0";
-    applyTableTheme(quoteSheet, 6, Math.max(quoteTotalRow, 6), 7, 1);
     XLSX.utils.book_append_sheet(workbook, quoteSheet, "AEB報價單");
 
     const infoSheet = XLSX.utils.aoa_to_sheet([

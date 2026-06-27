@@ -3,7 +3,7 @@ import { trpc } from "../lib/trpc";
 import { Database, Download, FileText, Printer, Calendar, BarChart2 } from "lucide-react";
 import toast from "react-hot-toast";
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from "recharts";
-import { exportKpiRevenueWorkbook, exportOpenCasesWorkbook, exportRowsToXlsx } from "../lib/exportXlsx";
+import { exportKpiRevenueWorkbook, exportOpenCasesWorkbook, exportRowsToXlsx, formatExportDate, makeXlsxFileName } from "../lib/exportXlsx";
 
 type ReportType =
     | "timesheets"
@@ -79,12 +79,14 @@ export function ReportBuilderPage() {
             return;
         }
 
+        const exportDate = formatExportDate();
+        const reportLabel = selectedTemplate?.label || reportType;
         if (reportType === "open_cases") {
-            exportOpenCasesWorkbook(reportData as any[], `處理人員管理_未結案清單_${startDate}.xlsx`);
+            exportOpenCasesWorkbook(reportData as any[], makeXlsxFileName("未結案清單匯出", exportDate));
         } else if (reportType === "kpi_revenue") {
-            exportKpiRevenueWorkbook(reportData as any[], `2026年度目標達成狀況_Summary.xlsx`);
+            exportKpiRevenueWorkbook(reportData as any[], makeXlsxFileName("年度目標認列報表", exportDate));
         } else {
-            exportRowsToXlsx(reportData as any[], `report_${reportType}_${startDate}.xlsx`, reportType);
+            exportRowsToXlsx(reportData as any[], makeXlsxFileName(reportLabel, exportDate), reportType);
         }
         toast.success("Excel 匯出成功");
     };
@@ -95,9 +97,8 @@ export function ReportBuilderPage() {
 
     const getEmptyMessage = () => {
         if (!selectedTemplate?.isExecutiveFormat || !selectedSourceStatus) return "符合條件的資料為空。";
-        if (!selectedSourceStatus.hasImport) return "尚未匯入此主管報表的資料來源。";
-        if (selectedSourceStatus.dataRows === 0) return "已有匯入批次，但目前系統內沒有可用資料列，請檢查匯入結果。";
-        return "資料來源已有資料，但目前篩選條件下沒有資料。";
+        if (selectedSourceStatus.dataRows === 0) return "系統內目前沒有符合此主管報表口徑的資料，請確認專案、WBS、金額或年度目標設定。";
+        return "系統資料已有內容，但目前篩選條件下沒有資料。";
     };
 
     return (
@@ -145,14 +146,14 @@ export function ReportBuilderPage() {
                             <div className="mt-2 rounded-lg border border-emerald-200 bg-emerald-50 p-3 text-xs text-emerald-900">
                                 <div className="font-semibold flex items-center gap-1.5">
                                     <Database className="w-3.5 h-3.5" />
-                                    資料來源狀態
+                                    系統資料狀態
                                 </div>
                                 <div className="mt-2 space-y-1 text-emerald-800">
-                                    <div>最近匯入：{selectedSourceStatus.hasImport ? new Date(selectedSourceStatus.importedAt).toLocaleString() : "尚未匯入"}</div>
-                                    <div>來源檔案：{selectedSourceStatus.sourceFileName || "-"}</div>
-                                    <div>匯入狀態：{selectedSourceStatus.status}</div>
-                                    <div>成功 / 失敗：{selectedSourceStatus.successRows} / {selectedSourceStatus.failedRows}</div>
+                                    <div>來源：{selectedSourceStatus.sourceName || "系統資料庫"}</div>
+                                    <div>統計時間：{selectedSourceStatus.checkedAt ? new Date(selectedSourceStatus.checkedAt).toLocaleString() : "-"}</div>
+                                    <div>資料口徑：{selectedSourceStatus.description || "-"}</div>
                                     <div>目前資料列：{selectedSourceStatus.dataRows}</div>
+                                    {selectedSourceStatus.detail && <div>{selectedSourceStatus.detail}</div>}
                                 </div>
                             </div>
                         )}
