@@ -23,6 +23,7 @@ type WbsWorkbookItem = {
 };
 
 type WbsWorkbookInput = {
+    srId?: string;
     fileName: string;
     projectTitle: string;
     customerName?: string;
@@ -32,6 +33,10 @@ type WbsWorkbookInput = {
     version?: number | string;
     items: WbsWorkbookItem[];
     people: WbsWorkbookPerson[];
+};
+
+type WbsWorkbookExportResult = {
+    missingRatePeople: string[];
 };
 
 const normalizeSheetName = (name: string) =>
@@ -168,7 +173,7 @@ const writeWorkbook = (workbook: XLSX.WorkBook, fileName: string) => {
     XLSX.writeFile(
         workbook,
         fileName.endsWith(".xlsx") ? fileName : `${fileName}.xlsx`,
-        { compression: true, cellStyles: true } as XLSX.WritingOptions
+        { compression: true, cellStyles: true } as any
     );
 };
 
@@ -334,7 +339,7 @@ export function exportKpiRevenueWorkbook(rows: Row[], fileName: string) {
     writeWorkbook(workbook, fileName);
 }
 
-export function exportWbsCostWorkbook(input: WbsWorkbookInput) {
+export function exportWbsCostWorkbook(input: WbsWorkbookInput): WbsWorkbookExportResult {
     const workbook = XLSX.utils.book_new();
     setWorkbookProps(workbook);
 
@@ -345,8 +350,11 @@ export function exportWbsCostWorkbook(input: WbsWorkbookInput) {
     const salesInfo = `${input.salesDepartment || "[待填業務部門]"} / ${input.salesRep || "[待填業務代表]"}`;
     const technicalDepartment = input.technicalDepartment || allPeople[0]?.department || "[待填技術部門]";
     const techLead = allPeople[0]?.name || "[待填技術負責人]";
+    const exportedAt = new Date().toISOString();
+    const versionText = input.version ? String(input.version) : "";
+    const missingRatePeople = Array.from(new Set(rows.filter((row) => row.assigneeName && row.dailyRate <= 0).map((row) => row.assigneeName)));
 
-    const actionHeaders = ["階層", "工作項次", "工作項目", "工作編號", "工作說明", "工作天數(小計)", "負責單位", "負責人", "起始時間", "起訖時間", "完成百分比", "備註"];
+    const actionHeaders = ["階層", "工作項次", "工作項目", "工作編號", "工作說明", "工作天數(小計)", "負責單位", "負責人", "起始時間", "起訖時間", "完成百分比", "備註", "SR ID", "WBS 版本", "匯出時間"];
     const actionSheet = XLSX.utils.aoa_to_sheet([
         actionHeaders,
         ...rows.map((row) => [
@@ -362,6 +370,9 @@ export function exportWbsCostWorkbook(input: WbsWorkbookInput) {
             row.endDate,
             row.completionPercentage,
             row.remarks,
+            input.srId || "",
+            versionText,
+            exportedAt,
         ]),
     ]);
     actionSheet["!cols"] = [
@@ -377,8 +388,11 @@ export function exportWbsCostWorkbook(input: WbsWorkbookInput) {
         { wch: 13 },
         { wch: 12 },
         { wch: 24 },
+        { wch: 14 },
+        { wch: 10 },
+        { wch: 20 },
     ];
-    actionSheet["!autofilter"] = { ref: `A1:L${Math.max(rows.length + 1, 1)}` };
+    actionSheet["!autofilter"] = { ref: `A1:O${Math.max(rows.length + 1, 1)}` };
     applyTableTheme(actionSheet, 1, Math.max(rows.length + 1, 1), actionHeaders.length);
     XLSX.utils.book_append_sheet(workbook, actionSheet, "Action Item");
 
@@ -391,7 +405,7 @@ export function exportWbsCostWorkbook(input: WbsWorkbookInput) {
         ["業務部門 / 業務代表", salesInfo],
         ["技術部門 / 技術負責人", `${technicalDepartment} / ${techLead}`],
         ["項次", "工作說明", "指派人員", "天數", "日費率", "總價(NT$)", "備註"],
-        ...rows.map((row, index) => [index + 1, row.title, row.assigneeName || "", row.days, row.dailyRate, null, row.remarks]),
+        ...rows.map((row, index) => [index + 1, row.title, row.assigneeName || "", row.days, row.dailyRate, null, row.dailyRate <= 0 && row.assigneeName ? "未設定費率" : row.remarks]),
         ["合計", "", "", null, "", null, ""],
     ];
     const quoteSheet = XLSX.utils.aoa_to_sheet(quoteAoa);
@@ -421,6 +435,23 @@ export function exportWbsCostWorkbook(input: WbsWorkbookInput) {
     applyTableTheme(quoteSheet, 6, Math.max(quoteTotalRow, 6), 7, 1);
     XLSX.utils.book_append_sheet(workbook, quoteSheet, "AEB報價單");
 
-    workbook.SheetNames = ["Action Item", "AEB報價單"];
+    const infoSheet = XLSX.utils.aoa_to_sheet([
+        ["WBS 匯出資訊"],
+        ["SR ID", input.srId || ""],
+        ["WBS 版本", versionText],
+        ["專案名稱", projectTitle],
+        ["客戶名稱", customerName],
+        ["業務部門 / 業務代表", salesInfo],
+        ["技術部門 / 技術負責人", `${technicalDepartment} / ${techLead}`],
+        ["匯出時間", exportedAt],
+        ["未設定費率人員", missingRatePeople.join(", ") || "無"],
+    ]);
+    infoSheet["!merges"] = [{ s: { r: 0, c: 0 }, e: { r: 0, c: 1 } }];
+    infoSheet["!cols"] = [{ wch: 22 }, { wch: 56 }];
+    applyTableTheme(infoSheet, 2, 9, 2, 1);
+    XLSX.utils.book_append_sheet(workbook, infoSheet, "匯出資訊");
+
+    workbook.SheetNames = ["Action Item", "AEB報價單", "匯出資訊"];
     writeWorkbook(workbook, input.fileName);
+    return { missingRatePeople };
 }

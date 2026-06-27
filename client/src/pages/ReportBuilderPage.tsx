@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { trpc } from "../lib/trpc";
-import { Download, FileText, Printer, Calendar, BarChart2 } from "lucide-react";
+import { Database, Download, FileText, Printer, Calendar, BarChart2 } from "lucide-react";
 import toast from "react-hot-toast";
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from "recharts";
 import { exportKpiRevenueWorkbook, exportOpenCasesWorkbook, exportRowsToXlsx } from "../lib/exportXlsx";
@@ -31,6 +31,7 @@ export function ReportBuilderPage() {
     const [userId, setUserId] = useState("");
     const { data: usersData } = trpc.users.list.useQuery({ limit: 500 });
     const { data: reportCatalog } = trpc.analytics.getReportCatalog.useQuery();
+    const { data: dataSourceStatus } = trpc.analytics.getReportDataSourceStatus.useQuery();
     const allUsers = usersData?.items || [];
     const filteredUsers = allUsers.filter((user: any) => !department || user.department === department);
     const fallbackCatalog = [
@@ -47,6 +48,8 @@ export function ReportBuilderPage() {
     ];
     const catalog = reportCatalog?.length ? reportCatalog : fallbackCatalog;
     const selectedTemplate = catalog.find((template: any) => template.reportType === reportType);
+    const executiveSourceKey = reportType === "open_cases" || reportType === "kpi_revenue" ? reportType : null;
+    const selectedSourceStatus = executiveSourceKey ? (dataSourceStatus as any)?.[executiveSourceKey] : null;
     const categoryLabels: Record<string, string> = {
         executive: "主管檢視報表",
         finance: "財務結算報表",
@@ -90,6 +93,13 @@ export function ReportBuilderPage() {
         window.print();
     };
 
+    const getEmptyMessage = () => {
+        if (!selectedTemplate?.isExecutiveFormat || !selectedSourceStatus) return "符合條件的資料為空。";
+        if (!selectedSourceStatus.hasImport) return "尚未匯入此主管報表的資料來源。";
+        if (selectedSourceStatus.dataRows === 0) return "已有匯入批次，但目前系統內沒有可用資料列，請檢查匯入結果。";
+        return "資料來源已有資料，但目前篩選條件下沒有資料。";
+    };
+
     return (
         <div className="space-y-6">
             <div className="flex justify-between items-center bg-card p-6 rounded-xl shadow-sm border border-border/50 print:hidden">
@@ -131,6 +141,21 @@ export function ReportBuilderPage() {
                                 {selectedTemplate.isExecutiveFormat && <div className="mt-1 text-primary font-medium">長官格式：會維持指定 Excel 欄位與工作表。</div>}
                             </div>
                         )}
+                        {selectedSourceStatus && (
+                            <div className="mt-2 rounded-lg border border-emerald-200 bg-emerald-50 p-3 text-xs text-emerald-900">
+                                <div className="font-semibold flex items-center gap-1.5">
+                                    <Database className="w-3.5 h-3.5" />
+                                    資料來源狀態
+                                </div>
+                                <div className="mt-2 space-y-1 text-emerald-800">
+                                    <div>最近匯入：{selectedSourceStatus.hasImport ? new Date(selectedSourceStatus.importedAt).toLocaleString() : "尚未匯入"}</div>
+                                    <div>來源檔案：{selectedSourceStatus.sourceFileName || "-"}</div>
+                                    <div>匯入狀態：{selectedSourceStatus.status}</div>
+                                    <div>成功 / 失敗：{selectedSourceStatus.successRows} / {selectedSourceStatus.failedRows}</div>
+                                    <div>目前資料列：{selectedSourceStatus.dataRows}</div>
+                                </div>
+                            </div>
+                        )}
                     </div>
 
                     <div>
@@ -168,7 +193,7 @@ export function ReportBuilderPage() {
                             產生中...
                         </div>
                     ) : (!reportData || reportData.length === 0) ? (
-                        <div className="p-12 text-center text-muted-foreground">符合條件的資料為空。</div>
+                        <div className="p-12 text-center text-muted-foreground">{getEmptyMessage()}</div>
                     ) : (
                         <div className="space-y-6">
                             {reportType === "utilization" && (

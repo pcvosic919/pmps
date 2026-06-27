@@ -1094,6 +1094,39 @@ export const analyticsRouter = router({
         return { success: true };
     }),
 
+    getReportDataSourceStatus: roleProcedure(["admin", "manager"])
+        .query(async () => {
+            const [openCasesBatch, kpiRevenueBatch] = await Promise.all([
+                ImportBatchModel.findOne({ type: "open_cases" }).sort({ createdAt: -1 }).lean(),
+                ImportBatchModel.findOne({ type: "kpi_revenue" }).sort({ createdAt: -1 }).lean()
+            ]);
+
+            const [openCasesRows, kpiRevenueRows] = await Promise.all([
+                ServiceRequestModel.countDocuments({ externalProjectCode: { $exists: true, $ne: "" } }),
+                kpiRevenueBatch
+                    ? RevenueSnapshotModel.countDocuments({ importBatchId: kpiRevenueBatch._id })
+                    : Promise.resolve(0)
+            ]);
+
+            const toStatus = (batch: any, dataRows: number) => ({
+                hasImport: !!batch,
+                sourceFileName: batch?.sourceFileName || "",
+                status: batch?.status || "not_imported",
+                importedAt: batch?.createdAt || null,
+                totalRows: batch?.totalRows || 0,
+                successRows: batch?.successRows || 0,
+                failedRows: batch?.failedRows || 0,
+                warningCount: batch?.warnings?.length || 0,
+                errorCount: batch?.errorMessages?.length || 0,
+                dataRows,
+            });
+
+            return {
+                open_cases: toStatus(openCasesBatch, openCasesRows),
+                kpi_revenue: toStatus(kpiRevenueBatch, kpiRevenueRows)
+            };
+        }),
+
     getOpenCasesDashboard: roleProcedure(["admin", "manager", "pm"])
         .input(z.object({
             department: z.string().optional()

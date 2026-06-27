@@ -9,6 +9,31 @@ import * as XLSX from "xlsx";
 import { SharePointFilesSection } from "../components/SharePointFilesSection";
 import { exportRowsToXlsx, exportWbsCostWorkbook } from "../lib/exportXlsx";
 
+type WbsDraftItem = {
+    title: string;
+    estimatedHours: number;
+    assigneeId: string | undefined;
+    startDate?: Date;
+    endDate?: Date;
+    completionPercentage?: number;
+    colorCode?: string;
+    level?: number;
+    code?: string;
+    remarks?: string;
+    description?: string;
+};
+
+type WbsImportPreview = {
+    items: WbsDraftItem[];
+    summary: {
+        added: number;
+        changed: number;
+        removed: number;
+        unchanged: number;
+    };
+    warnings: string[];
+};
+
 export function WbsManagementPage() {
     const [, params] = useRoute("/service-requests/:id");
     const srId = params?.id || "";
@@ -16,7 +41,8 @@ export function WbsManagementPage() {
     const { hasRole, user } = useCurrentUser();
 
     const [isBuildingVersion, setIsBuildingVersion] = useState(false);
-    const [draftItems, setDraftItems] = useState<{ title: string, estimatedHours: number, assigneeId: string | undefined, startDate?: Date, endDate?: Date, completionPercentage?: number, colorCode?: string, level?: number, code?: string, remarks?: string, description?: string }[]>([]);
+    const [draftItems, setDraftItems] = useState<WbsDraftItem[]>([]);
+    const [pendingImport, setPendingImport] = useState<WbsImportPreview | null>(null);
 
     // View settings
     const displayHours = (h: number) => h.toFixed(1) + ' 天';
@@ -101,6 +127,10 @@ export function WbsManagementPage() {
         return Number.isNaN(date.getTime()) ? undefined : date;
     };
 
+    const itemImportKey = (item: WbsDraftItem) => String(item.code || item.title || "").trim().toLowerCase();
+
+    const normalizeImportDate = (value?: Date) => value ? value.toISOString().slice(0, 10) : "";
+
     const handleExcelImport = (e: React.ChangeEvent<HTMLInputElement>) => {
         const file = e.target.files?.[0];
         if (!file) return;
@@ -113,8 +143,15 @@ export function WbsManagementPage() {
                 const sheetName = workbook.SheetNames[0];
                 const worksheet = workbook.Sheets[sheetName];
                 const json = XLSX.utils.sheet_to_json(worksheet);
+                const importedSrIds = Array.from(new Set(json.map((row: any) => String(row['SR ID'] || "").trim()).filter(Boolean)));
+                const mismatchedSrIds = importedSrIds.filter(id => id !== String(sr?.id || ""));
+                if (mismatchedSrIds.length > 0) {
+                    toast.error(`匯入檔 SR ID (${mismatchedSrIds.join(", ")}) 與目前專案不一致`);
+                    e.target.value = '';
+                    return;
+                }
 
-                const importedItems = json.map((row: any) => {
+                const importedItems: WbsDraftItem[] = json.map((row: any) => {
                     // Extract assignee from columns like "[John]天數" or fallback to "負責人"
                     let assigneeName = row['負責人'] || row['指派人員帳號'] || row['Assignee'];
                     if (!assigneeName) {
@@ -155,8 +192,48 @@ export function WbsManagementPage() {
                     };
                 });
 
-                setDraftItems(prev => [...prev, ...importedItems]);
-                toast.success(`已匯入 ${importedItems.length} 項任務`);
+                const currentByKey = new Map(draftItems.map(item => [itemImportKey(item), item]));
+                const importedKeys = new Set(importedItems.map(itemImportKey).filter(Boolean));
+                let added = 0;
+                let changed = 0;
+                let unchanged = 0;
+
+                importedItems.forEach((item) => {
+                    const key = itemImportKey(item);
+                    const current = key ? currentByKey.get(key) : undefined;
+                    if (!current) {
+                        added++;
+                        return;
+                    }
+                    const hasChanged =
+                        current.title !== item.title ||
+                        Number(current.estimatedHours || 0) !== Number(item.estimatedHours || 0) ||
+                        (current.assigneeId || "") !== (item.assigneeId || "") ||
+                        normalizeImportDate(current.startDate) !== normalizeImportDate(item.startDate) ||
+                        normalizeImportDate(current.endDate) !== normalizeImportDate(item.endDate) ||
+                        (current.code || "") !== (item.code || "") ||
+                        (current.description || "") !== (item.description || "") ||
+                        (current.remarks || "") !== (item.remarks || "") ||
+                        Number(current.completionPercentage || 0) !== Number(item.completionPercentage || 0);
+                    if (hasChanged) changed++;
+                    else unchanged++;
+                });
+
+                const removed = draftItems.filter(item => {
+                    const key = itemImportKey(item);
+                    return key && !importedKeys.has(key);
+                }).length;
+                const importedVersions = Array.from(new Set(json.map((row: any) => String(row['WBS 版本'] || "").trim()).filter(Boolean)));
+                const warnings = importedVersions.length > 0 && latestVersion?.version && !importedVersions.includes(String(latestVersion.version))
+                    ? [`匯入檔版本 ${importedVersions.join(", ")} 與目前最新版 v${latestVersion.version} 不一致，請確認後再套用。`]
+                    : [];
+
+                setPendingImport({
+                    items: importedItems,
+                    summary: { added, changed, removed, unchanged },
+                    warnings,
+                });
+                toast.success(`已解析 ${importedItems.length} 項任務，請先確認匯入預覽`);
             } catch (err) {
                 console.error(err);
                 toast.error("解析 Excel 失敗，請檢查格式");
@@ -164,6 +241,13 @@ export function WbsManagementPage() {
             e.target.value = ''; // Reset input
         };
         reader.readAsArrayBuffer(file);
+    };
+
+    const applyPendingImport = (mode: "append" | "replace") => {
+        if (!pendingImport) return;
+        setDraftItems(prev => mode === "append" ? [...prev, ...pendingImport.items] : pendingImport.items);
+        setPendingImport(null);
+        toast.success(mode === "append" ? "已追加匯入項目到草稿" : "已用匯入項目取代草稿");
     };
 
     if (isLoading) return <div className="p-8 text-center text-muted-foreground">載入中...</div>;
@@ -290,7 +374,8 @@ export function WbsManagementPage() {
             };
         });
 
-        exportWbsCostWorkbook({
+        const exportResult = exportWbsCostWorkbook({
+            srId: sr.id,
             fileName: `WBS_Export_SR${sr.id}_v${latestVersion.version}.xlsx`,
             projectTitle: sr.title,
             customerName: sr.customerName,
@@ -301,6 +386,9 @@ export function WbsManagementPage() {
             items: latestVersion.items,
             people,
         });
+        if (exportResult.missingRatePeople.length > 0) {
+            toast.error(`以下人員尚未設定日費率：${exportResult.missingRatePeople.join(", ")}`);
+        }
         toast.success("WBS 已匯出 Action Item 與 AEB 報價單");
     };
 
@@ -344,6 +432,10 @@ export function WbsManagementPage() {
         }));
         rows.push({ "項次": "合計", "工作說明": "", "指派人員": "", "天數": "", "日費率": "", "總價(NT$)": quote.totalAmount });
         exportRowsToXlsx(rows, `WBS_Quote_SR${srId}.xlsx`, "Quote");
+        const missingRatePeople = Array.from(new Set(quote.items.filter((item: any) => item.assigneeName && Number(item.dailyRate || 0) <= 0).map((item: any) => item.assigneeName)));
+        if (missingRatePeople.length > 0) {
+            toast.error(`以下人員尚未設定日費率：${missingRatePeople.join(", ")}`);
+        }
         toast.success("已依人員日費率產生報價單");
     };
 
@@ -726,6 +818,51 @@ export function WbsManagementPage() {
                                     在此規劃專案的工作分解結構 (WBS)，包含各項子任務、預估工時，並指派給對應的技術人員。
                                     {latestVersion?.items?.length ? ` 已自動帶入 v${latestVersion.version} 作為草稿基底，可直接微調後送審。` : ""}
                                 </div>
+                                {pendingImport && (
+                                    <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-4 text-sm shadow-sm">
+                                        <div className="flex items-start justify-between gap-4">
+                                            <div>
+                                                <div className="font-semibold text-emerald-900 flex items-center gap-2">
+                                                    <AlertCircle className="w-4 h-4" />
+                                                    WBS 匯入預覽
+                                                </div>
+                                                <div className="mt-2 grid grid-cols-2 md:grid-cols-4 gap-2 text-xs">
+                                                    <span className="rounded bg-white px-2 py-1 border border-emerald-100">新增 {pendingImport.summary.added}</span>
+                                                    <span className="rounded bg-white px-2 py-1 border border-emerald-100">異動 {pendingImport.summary.changed}</span>
+                                                    <span className="rounded bg-white px-2 py-1 border border-emerald-100">未變更 {pendingImport.summary.unchanged}</span>
+                                                    <span className="rounded bg-white px-2 py-1 border border-emerald-100">草稿未出現在匯入檔 {pendingImport.summary.removed}</span>
+                                                </div>
+                                                {pendingImport.warnings.length > 0 && (
+                                                    <div className="mt-2 space-y-1 text-xs text-amber-700">
+                                                        {pendingImport.warnings.map((warning, index) => (
+                                                            <div key={index}>{warning}</div>
+                                                        ))}
+                                                    </div>
+                                                )}
+                                            </div>
+                                            <div className="flex flex-wrap gap-2 justify-end">
+                                                <button
+                                                    onClick={() => applyPendingImport("append")}
+                                                    className="px-3 py-1.5 rounded-md bg-emerald-600 text-white text-xs font-semibold hover:bg-emerald-700"
+                                                >
+                                                    追加到草稿
+                                                </button>
+                                                <button
+                                                    onClick={() => applyPendingImport("replace")}
+                                                    className="px-3 py-1.5 rounded-md bg-primary text-primary-foreground text-xs font-semibold hover:bg-primary/90"
+                                                >
+                                                    取代草稿
+                                                </button>
+                                                <button
+                                                    onClick={() => setPendingImport(null)}
+                                                    className="px-3 py-1.5 rounded-md border border-border bg-white text-xs font-semibold hover:bg-muted"
+                                                >
+                                                    取消
+                                                </button>
+                                            </div>
+                                        </div>
+                                    </div>
+                                )}
                                 {draftItems.length === 0 ? (
                                     <div className="text-center p-8 border border-dashed rounded-lg bg-background">
                                         <p className="text-muted-foreground mb-4">目前沒有任何任務項目</p>
