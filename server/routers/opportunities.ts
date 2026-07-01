@@ -106,7 +106,7 @@ export const opportunitiesRouter = router({
             });
 
             const items = await OpportunityModel.find(query)
-                .select("title customerName estimatedValue opportunityType status expectedCloseDate ownerId createdAt members presalesAssignments productNames description")
+                .select("title customerName salesDepartment salesRep estimatedValue opportunityType status expectedCloseDate ownerId createdAt members presalesAssignments productNames description")
                 .populate("ownerId", "name")
                 .sort({ [sortBy]: direction })
                 .limit(limit + 1)
@@ -121,6 +121,8 @@ export const opportunitiesRouter = router({
                     id: opp._id.toString(),
                     title: opp.title,
                     customerName: opp.customerName,
+                    salesDepartment: opp.salesDepartment || "",
+                    salesRep: opp.salesRep || "",
                     estimatedValue: opp.estimatedValue,
                     opportunityType: getEffectiveOpportunityType(opp),
                     status: opp.status,
@@ -158,6 +160,8 @@ export const opportunitiesRouter = router({
         .input(z.object({
             title: z.string(),
             customerName: z.string(),
+            salesDepartment: z.string().trim().optional(),
+            salesRep: z.string().trim().optional(),
             estimatedValue: z.number().default(0),
             opportunityType: z.enum(opportunityTypes).default("revenue"),
             status: z.enum(opportunityStatuses).default("new"),
@@ -466,13 +470,15 @@ export const opportunitiesRouter = router({
             title: z.string(),
             contractAmount: z.number(),
             customerName: z.string().optional(),
+            salesDepartment: z.string().trim().optional(),
+            salesRep: z.string().trim().optional(),
             pmId: z.string().optional(),
             techId: z.string().optional()
         }))
         .mutation(async ({ input, ctx }) => {
             const opportunity = assertFound(
                 await OpportunityModel.findById(input.opportunityId)
-                    .select("title customerName ownerId members presalesAssignments status")
+                    .select("title customerName salesDepartment salesRep ownerId members presalesAssignments status")
                     .lean(),
                 "找不到該商機"
             );
@@ -482,6 +488,8 @@ export const opportunitiesRouter = router({
             const result = await ServiceRequestModel.create({
                 title: input.title,
                 customerName: input.customerName || opportunity.customerName,
+                salesDepartment: input.salesDepartment || opportunity.salesDepartment || "",
+                salesRep: input.salesRep || opportunity.salesRep || "",
                 contractAmount: input.contractAmount,
                 opportunityId: input.opportunityId,
                 pmId: input.pmId ? toObjectId(input.pmId) : undefined,

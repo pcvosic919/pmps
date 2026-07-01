@@ -238,7 +238,7 @@ copilotApiRouter.get("/opportunities/active", async (_req, res) => {
             status: { $nin: ["won", "lost", "converted"] }
         })
             .populate("ownerId", "name")
-            .select("title customerName estimatedValue opportunityType status expectedCloseDate ownerId productNames")
+            .select("title customerName salesDepartment salesRep estimatedValue opportunityType status expectedCloseDate ownerId productNames")
             .sort({ expectedCloseDate: 1 })
             .limit(30)
             .lean();
@@ -249,6 +249,8 @@ copilotApiRouter.get("/opportunities/active", async (_req, res) => {
                 id: o._id.toString(),
                 opportunityName: o.title,
                 customerName: o.customerName,
+                salesDepartment: o.salesDepartment || "",
+                salesRep: o.salesRep || "",
                 estimatedValue: o.estimatedValue,
                 opportunityType: o.opportunityType || (Number(o.estimatedValue || 0) > 0 ? "revenue" : "presales"),
                 status: o.status,
@@ -275,7 +277,7 @@ copilotApiRouter.get("/opportunities/won", async (req, res) => {
             status: { $in: ["won", "converted"] }
         })
             .populate("ownerId", "name")
-            .select("title customerName estimatedValue opportunityType expectedCloseDate ownerId")
+            .select("title customerName salesDepartment salesRep estimatedValue opportunityType expectedCloseDate ownerId")
             .sort({ expectedCloseDate: -1, updatedAt: -1 })
             .limit(limit)
             .lean();
@@ -286,6 +288,8 @@ copilotApiRouter.get("/opportunities/won", async (req, res) => {
                 id: o._id.toString(),
                 opportunityName: o.title,
                 customerName: o.customerName,
+                salesDepartment: o.salesDepartment || "",
+                salesRep: o.salesRep || "",
                 dealValue: o.estimatedValue,
                 opportunityType: o.opportunityType || (Number(o.estimatedValue || 0) > 0 ? "revenue" : "presales"),
                 owner: o.ownerId?.name || "未知",
@@ -311,7 +315,7 @@ copilotApiRouter.get("/opportunities/search", async (req, res) => {
             $text: { $search: q }
         })
             .populate("ownerId", "name")
-            .select("title customerName estimatedValue opportunityType status expectedCloseDate ownerId productNames presalesAssignments")
+            .select("title customerName salesDepartment salesRep estimatedValue opportunityType status expectedCloseDate ownerId productNames presalesAssignments")
             .limit(10)
             .lean();
 
@@ -325,6 +329,8 @@ copilotApiRouter.get("/opportunities/search", async (req, res) => {
                 id: o._id.toString(),
                 opportunityName: o.title,
                 customerName: o.customerName,
+                salesDepartment: o.salesDepartment || "",
+                salesRep: o.salesRep || "",
                 estimatedValue: o.estimatedValue,
                 opportunityType: o.opportunityType || (Number(o.estimatedValue || 0) > 0 ? "revenue" : "presales"),
                 status: o.status,

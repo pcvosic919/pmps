@@ -255,19 +255,25 @@ export const projectsRouter = router({
             totalPoints: z.number().optional(),
             pointValue: z.number().optional(),
             pmId: z.string(),
+            salesDepartment: z.string().trim().optional(),
+            salesRep: z.string().trim().optional(),
             joinPmAsMember: z.boolean().default(true),
             opportunityId: z.string().optional()
         }))
         .mutation(async ({ input, ctx }) => {
             let oppCustomerName = "";
+            let oppSalesDepartment = "";
+            let oppSalesRep = "";
             if (input.opportunityId) {
                 const opportunity = assertFound(
                     await OpportunityModel.findById(input.opportunityId)
-                        .select("customerName ownerId members presalesAssignments status")
+                        .select("customerName salesDepartment salesRep ownerId members presalesAssignments status")
                         .lean(),
                     "找不到該商機"
                 );
                 oppCustomerName = opportunity.customerName || "";
+                oppSalesDepartment = opportunity.salesDepartment || "";
+                oppSalesRep = opportunity.salesRep || "";
                 assertAuthorized(canAccessServiceRequest(ctx.user, { members: buildSrMembers(ctx.user.id, input.pmId, input.joinPmAsMember) }, opportunity), "您沒有權限從此商機建立 SR");
                 if (opportunity.status === "converted") {
                     throw new TRPCError({ code: "BAD_REQUEST", message: "此商機已轉案，請勿重複建立 SR" });
@@ -277,6 +283,8 @@ export const projectsRouter = router({
             const sr = await ServiceRequestModel.create({
                 title: input.title,
                 customerName: input.customerName || oppCustomerName,
+                salesDepartment: input.salesDepartment || oppSalesDepartment,
+                salesRep: input.salesRep || oppSalesRep,
                 contractAmount: input.contractAmount,
                 srType: input.srType,
                 totalPoints: input.totalPoints,

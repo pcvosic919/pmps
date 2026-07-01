@@ -16,6 +16,8 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 const oppSchema = z.object({
     title: z.string().min(1, "商機名稱不可為空"),
     customerName: z.string().min(1, "客戶名稱不可為空"),
+    salesDepartment: z.string().optional(),
+    salesRep: z.string().optional(),
     estimatedValue: z.number().min(0, "金額不能為負數"),
     opportunityType: z.enum(["revenue", "presales"]),
     status: z.enum(["new", "qualified", "presales_active", "won", "converted", "lost"]),
@@ -84,6 +86,8 @@ export function OpportunitiesPage() {
         defaultValues: {
             title: "",
             customerName: "",
+            salesDepartment: "",
+            salesRep: "",
             estimatedValue: 0,
             opportunityType: "revenue",
             status: "new",
@@ -118,6 +122,8 @@ export function OpportunitiesPage() {
         createOpp.mutate({
             title: values.title,
             customerName: values.customerName,
+            salesDepartment: values.salesDepartment,
+            salesRep: values.salesRep,
             estimatedValue: values.estimatedValue,
             opportunityType: values.opportunityType,
             status: values.status,
@@ -197,6 +203,7 @@ export function OpportunitiesPage() {
                                 <th className="px-6 py-4">ID / 商機名稱</th>
                                 <th className="px-6 py-4">類型</th>
                                 <th className="px-6 py-4">客戶名稱</th>
+                                <th className="px-6 py-4">業務</th>
                                 <th className="px-6 py-4">預估金額 (NT$)</th>
                                 <th className="px-6 py-4">負責人</th>
                                 <th className="px-6 py-4">建立日期</th>
@@ -226,6 +233,12 @@ export function OpportunitiesPage() {
                                         <div className="flex items-center text-sm text-foreground/80">
                                             <Building2 className="w-3.5 h-3.5 mr-2 opacity-50" />
                                             {opp.customerName}
+                                        </div>
+                                    </td>
+                                    <td className="px-6 py-4">
+                                        <div className="text-sm text-foreground/80">
+                                            <div className="font-medium">{(opp as any).salesRep || "未填寫"}</div>
+                                            <div className="text-xs text-muted-foreground">{(opp as any).salesDepartment || "未填寫部門"}</div>
                                         </div>
                                     </td>
                                     <td className="px-6 py-4">
@@ -267,7 +280,7 @@ export function OpportunitiesPage() {
                             ))}
                             {(!opps || opps.length === 0) && (
                                 <tr>
-                                                <td colSpan={8} className="px-6 py-12 text-center text-muted-foreground italic">
+                                                <td colSpan={9} className="px-6 py-12 text-center text-muted-foreground italic">
                                         <div className="flex flex-col items-center justify-center opacity-50">
                                             <Briefcase className="w-10 h-10 mb-2" />
                                             <p>尚無商機資料</p>
@@ -325,6 +338,34 @@ export function OpportunitiesPage() {
                                     </FormItem>
                                 )}
                             />
+                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                                <FormField
+                                    control={form.control}
+                                    name="salesDepartment"
+                                    render={({ field }: any) => (
+                                        <FormItem>
+                                            <FormLabel>業務部門</FormLabel>
+                                            <FormControl>
+                                                <Input placeholder="例：雲端事業處 / 業務一部" {...field} />
+                                            </FormControl>
+                                            <FormMessage />
+                                        </FormItem>
+                                    )}
+                                />
+                                <FormField
+                                    control={form.control}
+                                    name="salesRep"
+                                    render={({ field }: any) => (
+                                        <FormItem>
+                                            <FormLabel>業務</FormLabel>
+                                            <FormControl>
+                                                <Input placeholder="例：王小明" {...field} />
+                                            </FormControl>
+                                            <FormMessage />
+                                        </FormItem>
+                                    )}
+                                />
+                            </div>
                             <FormField
                                 control={form.control}
                                 name="estimatedValue"

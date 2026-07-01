@@ -16,6 +16,8 @@ export interface IOpportunityCustomField extends Omit<CustomFieldValue, "fieldId
 export interface IOpportunity extends Document {
     title: string;
     customerName: string;
+    salesDepartment?: string;
+    salesRep?: string;
     estimatedValue: number;
     opportunityType: OpportunityType;
     status: OpportunityStatus;
@@ -38,6 +40,8 @@ export interface IOpportunity extends Document {
 const OpportunitySchema = new Schema<IOpportunity>({
     title: { type: String, required: true },
     customerName: { type: String, required: true },
+    salesDepartment: { type: String },
+    salesRep: { type: String },
     estimatedValue: { type: Number, required: true, default: 0 },
     opportunityType: { type: String, enum: opportunityTypes, default: "revenue", required: true },
     status: { type: String, enum: opportunityStatuses, default: "new", required: true },
@@ -75,8 +79,9 @@ const OpportunitySchema = new Schema<IOpportunity>({
 OpportunitySchema.index({ ownerId: 1, status: 1, createdAt: -1 });
 OpportunitySchema.index({ status: 1, createdAt: -1 });
 OpportunitySchema.index({ estimatedValue: -1, _id: -1 });
+OpportunitySchema.index({ salesDepartment: 1, createdAt: -1 });
 OpportunitySchema.index({ "members.userId": 1, createdAt: -1 });
 OpportunitySchema.index({ "presalesAssignments.techId": 1, createdAt: -1 });
-OpportunitySchema.index({ title: "text", customerName: "text" });
+OpportunitySchema.index({ title: "text", customerName: "text", salesRep: "text", salesDepartment: "text" });
 
 export const OpportunityModel = mongoose.models.Opportunity || mongoose.model<IOpportunity>("Opportunity", OpportunitySchema);

@@ -141,6 +141,8 @@ export interface OpportunityMember {
 export interface OpportunityInput {
     title: string;
     customerName: string;
+    salesDepartment?: string;
+    salesRep?: string;
     estimatedValue: number;
     opportunityType: OpportunityType;
     status: OpportunityStatus;

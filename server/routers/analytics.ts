@@ -1874,7 +1874,7 @@ export const analyticsRouter = router({
                         .lean(),
                     OpportunityModel.find(oppMatch)
                         .populate("ownerId", "name department")
-                        .select("title customerName estimatedValue opportunityType status ownerId")
+                        .select("title customerName salesDepartment salesRep estimatedValue opportunityType status ownerId")
                         .lean(),
                     TimesheetModel.find(presalesMatch)
                         .populate("techId", "name department")

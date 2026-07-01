@@ -14,6 +14,8 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 const srSchema = z.object({
     title: z.string().min(1, "專案名稱不可為空"),
     customerName: z.string().min(1, "公司名稱不可為空"),
+    salesDepartment: z.string().optional(),
+    salesRep: z.string().optional(),
     srType: z.enum(["project", "maintenance"]).default("project"),
     contractAmount: z.number().min(0, "合約金額不能為負").optional(),
     totalPoints: z.number().min(0).optional(),
@@ -51,6 +53,7 @@ export function ServiceRequestsPage() {
         resolver: zodResolver(srSchema) as any,
         defaultValues: { 
             title: "", customerName: "", srType: "project", contractAmount: 0, 
+            salesDepartment: "", salesRep: "",
             totalPoints: 0, pointValue: 500, 
             pmId: "", joinPmAsMember: true 
         }
@@ -247,6 +250,35 @@ export function ServiceRequestsPage() {
                                     </FormItem>
                                 )}
                             />
+
+                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                                <FormField
+                                    control={form.control}
+                                    name="salesDepartment"
+                                    render={({ field }: any) => (
+                                        <FormItem>
+                                            <FormLabel>業務部門</FormLabel>
+                                            <FormControl>
+                                                <Input placeholder="例：雲端事業處 / 業務一部" {...field} />
+                                            </FormControl>
+                                            <FormMessage />
+                                        </FormItem>
+                                    )}
+                                />
+                                <FormField
+                                    control={form.control}
+                                    name="salesRep"
+                                    render={({ field }: any) => (
+                                        <FormItem>
+                                            <FormLabel>業務</FormLabel>
+                                            <FormControl>
+                                                <Input placeholder="例：王小明" {...field} />
+                                            </FormControl>
+                                            <FormMessage />
+                                        </FormItem>
+                                    )}
+                                />
+                            </div>
 
                             <FormField
                                 control={form.control}

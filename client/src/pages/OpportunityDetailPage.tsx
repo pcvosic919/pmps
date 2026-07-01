@@ -56,6 +56,8 @@ export function OpportunityDetailPage() {
     const [srTitle, setSrTitle] = useState("");
     const [srCustomerName, setSrCustomerName] = useState("");
     const [srAmount, setSrAmount] = useState("");
+    const [srSalesDepartment, setSrSalesDepartment] = useState("");
+    const [srSalesRep, setSrSalesRep] = useState("");
     const [srPmId, setSrPmId] = useState("");
     const [srTechId, setSrTechId] = useState("");
     const [srError, setSrError] = useState("");
@@ -147,7 +149,7 @@ export function OpportunityDetailPage() {
     const createSRMutation = trpc.opportunities.createSR.useMutation({
         onSuccess: (data) => {
             setShowSRModal(false);
-            setSrTitle(""); setSrCustomerName(""); setSrAmount(""); setSrPmId(""); setSrTechId(""); setSrError("");
+            setSrTitle(""); setSrCustomerName(""); setSrAmount(""); setSrSalesDepartment(""); setSrSalesRep(""); setSrPmId(""); setSrTechId(""); setSrError("");
             // Navigate to the new SR
             window.location.href = `/service-requests/${data.id}`;
         },
@@ -183,6 +185,8 @@ export function OpportunityDetailPage() {
             opportunityId: id, 
             title: srTitle, 
             customerName: srCustomerName,
+            salesDepartment: srSalesDepartment,
+            salesRep: srSalesRep,
             contractAmount: amount, 
             pmId: srPmId || undefined,
             techId: srTechId || undefined
@@ -334,7 +338,16 @@ export function OpportunityDetailPage() {
                     <div className="flex items-center gap-2">
                         {!hasRole("business") && (
                             <button
-                                onClick={() => { if (!isConverted) { setShowSRModal(true); setSrTitle(`${opp.title} ${opp.customerName} - SR`); setSrError(""); } }}
+                                onClick={() => {
+                                    if (!isConverted) {
+                                        setShowSRModal(true);
+                                        setSrTitle(`${opp.title} ${opp.customerName} - SR`);
+                                        setSrCustomerName(opp.customerName || "");
+                                        setSrSalesDepartment((opp as any).salesDepartment || "");
+                                        setSrSalesRep((opp as any).salesRep || "");
+                                        setSrError("");
+                                    }
+                                }}
                                 disabled={isConverted}
                                 className="flex items-center gap-2 px-4 py-2 bg-primary text-primary-foreground rounded-lg hover:bg-primary/90 transition-colors text-sm font-medium shadow-sm disabled:opacity-50"
                             >
@@ -399,6 +412,14 @@ export function OpportunityDetailPage() {
                     <div className="space-y-1">
                         <span className="text-sm text-muted-foreground flex items-center"><Calendar className="w-4 h-4 mr-1" />建立日期</span>
                         <p className="font-semibold">{new Date(opp.createdAt).toLocaleDateString()}</p>
+                    </div>
+                    <div className="space-y-1">
+                        <span className="text-sm text-muted-foreground">業務部門</span>
+                        <p className="font-semibold">{(opp as any).salesDepartment || "未填寫"}</p>
+                    </div>
+                    <div className="space-y-1">
+                        <span className="text-sm text-muted-foreground">業務</span>
+                        <p className="font-semibold">{(opp as any).salesRep || "未填寫"}</p>
                     </div>
                 </div>
 
@@ -889,6 +910,18 @@ export function OpportunityDetailPage() {
                                 <label className="block text-sm font-medium mb-1">合約金額 (NT$)</label>
                                 <input type="number" min="0" step="1000" value={srAmount} onChange={e => setSrAmount(e.target.value)} placeholder="例：1500000"
                                     className="w-full border border-border rounded-lg px-3 py-2 bg-background text-sm focus:outline-none focus:ring-2 focus:ring-primary/50" />
+                            </div>
+                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                                <div>
+                                    <label className="block text-sm font-medium mb-1">業務部門</label>
+                                    <input type="text" value={srSalesDepartment} onChange={e => setSrSalesDepartment(e.target.value)} placeholder="例：雲端事業處 / 業務一部"
+                                        className="w-full border border-border rounded-lg px-3 py-2 bg-background text-sm focus:outline-none focus:ring-2 focus:ring-primary/50" />
+                                </div>
+                                <div>
+                                    <label className="block text-sm font-medium mb-1">業務</label>
+                                    <input type="text" value={srSalesRep} onChange={e => setSrSalesRep(e.target.value)} placeholder="例：王小明"
+                                        className="w-full border border-border rounded-lg px-3 py-2 bg-background text-sm focus:outline-none focus:ring-2 focus:ring-primary/50" />
+                                </div>
                             </div>
                             <div>
                                 <label className="block text-sm font-medium mb-1">指派 PM (選用)</label>
