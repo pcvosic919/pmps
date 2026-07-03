@@ -47,6 +47,19 @@ const buildSrMembers = (creatorId: string, pmId: string, joinPmAsMember: boolean
     return members;
 };
 
+const getSalesUserFields = async (salesUserId?: string) => {
+    if (!salesUserId) return null;
+    const salesUser = assertFound(
+        await UserModel.findById(salesUserId).select("name department").lean(),
+        "找不到指定的業務帳號"
+    );
+    return {
+        salesUserId: salesUser._id,
+        salesRep: salesUser.name || "",
+        salesDepartment: salesUser.department || ""
+    };
+};
+
 const addMonths = (value: Date, months: number) => {
     const next = new Date(value);
     next.setMonth(next.getMonth() + months);
@@ -211,6 +224,7 @@ export const projectsRouter = router({
                 externalProjectCode: 1,
                 externalServiceType: 1,
                 externalStatus: 1,
+                salesUserId: 1,
                 salesDepartment: 1,
                 salesRep: 1,
                 plannedStartDate: 1,
@@ -229,6 +243,7 @@ export const projectsRouter = router({
             ...item,
             id: item._id.toString(),
             opportunityId: item.opportunityId?.toString(),
+            salesUserId: item.salesUserId?.toString() || "",
             pmId: item.pmId?.toString() || ""
         }));
     }),
@@ -255,6 +270,7 @@ export const projectsRouter = router({
             totalPoints: z.number().optional(),
             pointValue: z.number().optional(),
             pmId: z.string(),
+            salesUserId: z.string().optional(),
             salesDepartment: z.string().trim().optional(),
             salesRep: z.string().trim().optional(),
             joinPmAsMember: z.boolean().default(true),
@@ -262,16 +278,18 @@ export const projectsRouter = router({
         }))
         .mutation(async ({ input, ctx }) => {
             let oppCustomerName = "";
+            let oppSalesUserId: any = undefined;
             let oppSalesDepartment = "";
             let oppSalesRep = "";
             if (input.opportunityId) {
                 const opportunity = assertFound(
                     await OpportunityModel.findById(input.opportunityId)
-                        .select("customerName salesDepartment salesRep ownerId members presalesAssignments status")
+                        .select("customerName salesUserId salesDepartment salesRep ownerId members presalesAssignments status")
                         .lean(),
                     "找不到該商機"
                 );
                 oppCustomerName = opportunity.customerName || "";
+                oppSalesUserId = opportunity.salesUserId;
                 oppSalesDepartment = opportunity.salesDepartment || "";
                 oppSalesRep = opportunity.salesRep || "";
                 assertAuthorized(canAccessServiceRequest(ctx.user, { members: buildSrMembers(ctx.user.id, input.pmId, input.joinPmAsMember) }, opportunity), "您沒有權限從此商機建立 SR");
@@ -279,12 +297,14 @@ export const projectsRouter = router({
                     throw new TRPCError({ code: "BAD_REQUEST", message: "此商機已轉案，請勿重複建立 SR" });
                 }
             }
+            const salesUserFields = await getSalesUserFields(input.salesUserId);
 
             const sr = await ServiceRequestModel.create({
                 title: input.title,
                 customerName: input.customerName || oppCustomerName,
-                salesDepartment: input.salesDepartment || oppSalesDepartment,
-                salesRep: input.salesRep || oppSalesRep,
+                salesUserId: salesUserFields?.salesUserId || oppSalesUserId,
+                salesDepartment: salesUserFields?.salesDepartment || input.salesDepartment || oppSalesDepartment,
+                salesRep: salesUserFields?.salesRep || input.salesRep || oppSalesRep,
                 contractAmount: input.contractAmount,
                 srType: input.srType,
                 totalPoints: input.totalPoints,
@@ -564,9 +584,37 @@ export const projectsRouter = router({
                 ...sr,
                 id: sr._id.toString(),
                 opportunityId: sr.opportunityId?.toString(),
+                salesUserId: sr.salesUserId?.toString() || "",
                 pmId: sr.pmId?.toString(),
                 wbsVersions
             };
+        }),
+
+    updateSalesOwner: protectedProcedure
+        .input(z.object({
+            id: z.string(),
+            salesUserId: z.string()
+        }))
+        .mutation(async ({ input, ctx }) => {
+            const sr = assertFound(
+                await ServiceRequestModel.findById(input.id)
+                    .select("pmId members wbsVersions.items.assigneeId changeRequests opportunityId")
+                    .lean(),
+                "找不到該服務請求"
+            );
+            const opportunity = sr.opportunityId
+                ? await OpportunityModel.findById(sr.opportunityId)
+                    .select("ownerId members presalesAssignments")
+                    .lean()
+                : null;
+            assertAuthorized(canManageServiceRequestStatus(ctx.user, sr, opportunity), "您沒有權限更新業務欄位");
+            const salesUserFields = assertFound(await getSalesUserFields(input.salesUserId), "找不到指定的業務帳號");
+
+            await ServiceRequestModel.updateOne(
+                { _id: input.id },
+                { $set: salesUserFields }
+            );
+            return { success: true };
         }),
 
     submitWbsVersion: roleProcedure(["admin", "tech", "presales", "pm"])

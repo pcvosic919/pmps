@@ -10,10 +10,12 @@ import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { BusinessUserPicker } from "../components/BusinessUserPicker";
 
 const srSchema = z.object({
     title: z.string().min(1, "專案名稱不可為空"),
     customerName: z.string().min(1, "公司名稱不可為空"),
+    salesUserId: z.string().optional(),
     salesDepartment: z.string().optional(),
     salesRep: z.string().optional(),
     srType: z.enum(["project", "maintenance"]).default("project"),
@@ -53,7 +55,7 @@ export function ServiceRequestsPage() {
         resolver: zodResolver(srSchema) as any,
         defaultValues: { 
             title: "", customerName: "", srType: "project", contractAmount: 0, 
-            salesDepartment: "", salesRep: "",
+            salesUserId: "", salesDepartment: "", salesRep: "",
             totalPoints: 0, pointValue: 500, 
             pmId: "", joinPmAsMember: true 
         }
@@ -251,33 +253,37 @@ export function ServiceRequestsPage() {
                                 )}
                             />
 
-                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                            <div className="space-y-2">
                                 <FormField
                                     control={form.control}
-                                    name="salesDepartment"
-                                    render={({ field }: any) => (
-                                        <FormItem>
-                                            <FormLabel>業務部門</FormLabel>
-                                            <FormControl>
-                                                <Input placeholder="例：雲端事業處 / 業務一部" {...field} />
-                                            </FormControl>
-                                            <FormMessage />
-                                        </FormItem>
-                                    )}
-                                />
-                                <FormField
-                                    control={form.control}
-                                    name="salesRep"
+                                    name="salesUserId"
                                     render={({ field }: any) => (
                                         <FormItem>
                                             <FormLabel>業務</FormLabel>
                                             <FormControl>
-                                                <Input placeholder="例：王小明" {...field} />
+                                                <BusinessUserPicker
+                                                    users={users?.items || []}
+                                                    selectedUserId={field.value}
+                                                    legacyName={form.watch("salesRep")}
+                                                    onSelect={(selectedUser) => {
+                                                        field.onChange(selectedUser.id);
+                                                        form.setValue("salesRep", selectedUser.name);
+                                                        form.setValue("salesDepartment", selectedUser.department || "");
+                                                    }}
+                                                    onClear={() => {
+                                                        field.onChange("");
+                                                        form.setValue("salesRep", "");
+                                                        form.setValue("salesDepartment", "");
+                                                    }}
+                                                />
                                             </FormControl>
                                             <FormMessage />
                                         </FormItem>
                                     )}
                                 />
+                                <p className="text-xs text-muted-foreground">
+                                    業務部門：{form.watch("salesDepartment") || "選擇業務帳號後自動帶入"}
+                                </p>
                             </div>
 
                             <FormField

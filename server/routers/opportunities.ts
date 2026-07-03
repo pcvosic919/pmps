@@ -49,6 +49,19 @@ const assertOpportunityAssignable = (opportunity: { status?: string }) => {
 const getEffectiveOpportunityType = (opportunity: { opportunityType?: string; estimatedValue?: number }) =>
     opportunity.opportunityType || (Number(opportunity.estimatedValue || 0) > 0 ? "revenue" : "presales");
 
+const getSalesUserFields = async (salesUserId?: string) => {
+    if (!salesUserId) return null;
+    const salesUser = assertFound(
+        await UserModel.findById(salesUserId).select("name department").lean(),
+        "找不到指定的業務帳號"
+    );
+    return {
+        salesUserId: salesUser._id,
+        salesRep: salesUser.name || "",
+        salesDepartment: salesUser.department || ""
+    };
+};
+
 const getMonthKey = (value: Date) => value.toISOString().slice(0, 7);
 
 const assertSettlementUnlocked = async (month: string, type: "presales" | "project") => {
@@ -106,7 +119,7 @@ export const opportunitiesRouter = router({
             });
 
             const items = await OpportunityModel.find(query)
-                .select("title customerName salesDepartment salesRep estimatedValue opportunityType status expectedCloseDate ownerId createdAt members presalesAssignments productNames description")
+                .select("title customerName salesUserId salesDepartment salesRep estimatedValue opportunityType status expectedCloseDate ownerId createdAt members presalesAssignments productNames description")
                 .populate("ownerId", "name")
                 .sort({ [sortBy]: direction })
                 .limit(limit + 1)
@@ -121,6 +134,7 @@ export const opportunitiesRouter = router({
                     id: opp._id.toString(),
                     title: opp.title,
                     customerName: opp.customerName,
+                    salesUserId: opp.salesUserId?.toString() || "",
                     salesDepartment: opp.salesDepartment || "",
                     salesRep: opp.salesRep || "",
                     estimatedValue: opp.estimatedValue,
@@ -160,6 +174,7 @@ export const opportunitiesRouter = router({
         .input(z.object({
             title: z.string(),
             customerName: z.string(),
+            salesUserId: z.string().optional(),
             salesDepartment: z.string().trim().optional(),
             salesRep: z.string().trim().optional(),
             estimatedValue: z.number().default(0),
@@ -178,9 +193,13 @@ export const opportunitiesRouter = router({
         }))
         .mutation(async ({ input, ctx }) => {
             const ownerId = ctx.user.id;
+            const salesUserFields = await getSalesUserFields(input.salesUserId);
 
             const result = await OpportunityModel.create({
                 ...input,
+                salesUserId: salesUserFields?.salesUserId,
+                salesRep: salesUserFields?.salesRep || input.salesRep || "",
+                salesDepartment: salesUserFields?.salesDepartment || input.salesDepartment || "",
                 ownerId: ownerId,
                 members: [{
                     userId: ownerId,
@@ -218,6 +237,7 @@ export const opportunitiesRouter = router({
                 ...opp,
                 id: opp._id.toString(),
                 ownerId: opp.ownerId.toString(),
+                salesUserId: opp.salesUserId?.toString() || "",
                 opportunityType: getEffectiveOpportunityType(opp)
             };
         }),
@@ -470,6 +490,7 @@ export const opportunitiesRouter = router({
             title: z.string(),
             contractAmount: z.number(),
             customerName: z.string().optional(),
+            salesUserId: z.string().optional(),
             salesDepartment: z.string().trim().optional(),
             salesRep: z.string().trim().optional(),
             pmId: z.string().optional(),
@@ -478,18 +499,20 @@ export const opportunitiesRouter = router({
         .mutation(async ({ input, ctx }) => {
             const opportunity = assertFound(
                 await OpportunityModel.findById(input.opportunityId)
-                    .select("title customerName salesDepartment salesRep ownerId members presalesAssignments status")
+                    .select("title customerName salesUserId salesDepartment salesRep ownerId members presalesAssignments status")
                     .lean(),
                 "找不到該商機"
             );
             assertAuthorized(canManageOpportunity(ctx.user, opportunity), "您沒有權限從此商機建立 SR");
             assertOpportunityNotConverted(opportunity);
+            const salesUserFields = await getSalesUserFields(input.salesUserId);
 
             const result = await ServiceRequestModel.create({
                 title: input.title,
                 customerName: input.customerName || opportunity.customerName,
-                salesDepartment: input.salesDepartment || opportunity.salesDepartment || "",
-                salesRep: input.salesRep || opportunity.salesRep || "",
+                salesUserId: salesUserFields?.salesUserId || opportunity.salesUserId,
+                salesDepartment: salesUserFields?.salesDepartment || input.salesDepartment || opportunity.salesDepartment || "",
+                salesRep: salesUserFields?.salesRep || input.salesRep || opportunity.salesRep || "",
                 contractAmount: input.contractAmount,
                 opportunityId: input.opportunityId,
                 pmId: input.pmId ? toObjectId(input.pmId) : undefined,
@@ -657,6 +680,32 @@ export const opportunitiesRouter = router({
             await OpportunityModel.updateOne(
                 { _id: input.id },
                 { $set: { opportunityType: input.opportunityType } }
+            );
+
+            return { success: true };
+        }),
+
+    updateSalesOwner: protectedProcedure
+        .input(z.object({
+            id: z.string(),
+            salesUserId: z.string()
+        }))
+        .mutation(async ({ input, ctx }) => {
+            const opportunity = assertFound(
+                await OpportunityModel.findById(input.id)
+                    .select("ownerId members presalesAssignments")
+                    .lean(),
+                "找不到該商機"
+            );
+
+            const isBusinessOwner = isOpportunityBusinessOwner(ctx.user, opportunity);
+            const canUpdate = hasAnyRole(ctx.user, ["admin", "manager", "presales"]) || isBusinessOwner;
+            assertAuthorized(canUpdate, "您沒有權限更新業務欄位");
+            const salesUserFields = assertFound(await getSalesUserFields(input.salesUserId), "找不到指定的業務帳號");
+
+            await OpportunityModel.updateOne(
+                { _id: input.id },
+                { $set: salesUserFields }
             );
 
             return { success: true };

@@ -8,6 +8,7 @@ import { useCurrentUser } from "../lib/useCurrentUser";
 import * as XLSX from "xlsx";
 import { SharePointFilesSection } from "../components/SharePointFilesSection";
 import { exportWbsCostWorkbook, exportWbsQuoteWorkbook, formatExportDate, makeXlsxFileName } from "../lib/exportXlsx";
+import { BusinessUserPicker } from "../components/BusinessUserPicker";
 
 type WbsDraftItem = {
     title: string;
@@ -64,6 +65,10 @@ export function WbsManagementPage() {
     // Issue Management state
     const [isCreatingIssue, setIsCreatingIssue] = useState(false);
     const [newIssueData, setNewIssueData] = useState({ title: "", description: "", priority: "medium", assigneeId: "" });
+    const [showEditSalesModal, setShowEditSalesModal] = useState(false);
+    const [editedSalesUserId, setEditedSalesUserId] = useState("");
+    const [editedSalesRep, setEditedSalesRep] = useState("");
+    const [editedSalesDepartment, setEditedSalesDepartment] = useState("");
 
     const { data: sr, isLoading, error } = trpc.projects.srById.useQuery({ id: srId }, { enabled: !!srId });
     const { data: techs } = trpc.users.techList.useQuery();
@@ -115,6 +120,15 @@ export function WbsManagementPage() {
             refetchIssues();
             toast.success("專案議題狀態已更新");
         }
+    });
+
+    const updateSalesOwnerMutation = trpc.projects.updateSalesOwner.useMutation({
+        onSuccess: () => {
+            utils.projects.srById.invalidate({ id: srId });
+            setShowEditSalesModal(false);
+            toast.success("業務欄位已更新");
+        },
+        onError: (err) => toast.error(err.message || "更新業務欄位失敗")
     });
 
     const parseExcelDate = (value: any) => {
@@ -260,6 +274,7 @@ export function WbsManagementPage() {
     const latestVersion = sr.wbsVersions?.length
         ? [...sr.wbsVersions].sort((a: any, b: any) => b.version - a.version)[0]
         : null;
+    const canEditSalesOwner = hasRole("admin") || hasRole("manager") || user?.id === sr.pmId;
 
     const getStatusColor = (status: string) => {
         switch (status) {
@@ -353,6 +368,14 @@ export function WbsManagementPage() {
         if (draftItems.length === 0) { toast.error("請至少新增一項任務"); return; }
         if (draftItems.some(i => !i.title || i.estimatedHours <= 0)) { toast.error("請確實填寫項目名稱與工時"); return; }
         submitVersion.mutate({ srId: sr.id, versionNumber: nextVersionNumber, items: draftItems });
+    };
+
+    const handleUpdateSalesOwner = () => {
+        if (!editedSalesUserId) {
+            toast.error("請選擇業務帳號");
+            return;
+        }
+        updateSalesOwnerMutation.mutate({ id: sr.id, salesUserId: editedSalesUserId });
     };
 
     const handleExportXlsx = () => {
@@ -482,6 +505,27 @@ export function WbsManagementPage() {
                                 <span className="text-muted-foreground">建立日期</span>
                                 <span className="font-medium">{new Date(sr.createdAt).toLocaleDateString()}</span>
                             </div>
+                            <div className="flex justify-between gap-3">
+                                <span className="text-muted-foreground">業務</span>
+                                <span className="font-medium text-right">{sr.salesRep || "未填寫"}</span>
+                            </div>
+                            <div className="flex justify-between gap-3">
+                                <span className="text-muted-foreground">業務部門</span>
+                                <span className="font-medium text-right">{sr.salesDepartment || "未填寫"}</span>
+                            </div>
+                            {canEditSalesOwner && (
+                                <button
+                                    onClick={() => {
+                                        setEditedSalesUserId(sr.salesUserId || "");
+                                        setEditedSalesRep(sr.salesRep || "");
+                                        setEditedSalesDepartment(sr.salesDepartment || "");
+                                        setShowEditSalesModal(true);
+                                    }}
+                                    className="w-full mt-2 px-3 py-2 rounded-lg border border-primary/20 bg-primary/5 text-primary text-sm font-semibold hover:bg-primary/10 transition-colors"
+                                >
+                                    編輯業務
+                                </button>
+                            )}
                             {!hasRole("tech") && (
                                 <>
                                     <div className="flex justify-between">
@@ -984,6 +1028,47 @@ export function WbsManagementPage() {
                     )}
                 </div>
             </div>
+
+            {/* Edit Sales Owner Modal */}
+            {showEditSalesModal && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm">
+                    <div className="bg-card border border-border rounded-xl shadow-xl w-full max-w-lg mx-4 p-6 space-y-5">
+                        <div className="flex justify-between items-center">
+                            <h2 className="text-lg font-bold">編輯業務</h2>
+                            <button onClick={() => setShowEditSalesModal(false)} className="p-1 rounded-full hover:bg-muted"><X className="w-5 h-5 text-muted-foreground" /></button>
+                        </div>
+                        <div className="space-y-2">
+                            <label className="block text-sm font-medium mb-1">業務帳號</label>
+                            <BusinessUserPicker
+                                users={allUsers?.items || []}
+                                selectedUserId={editedSalesUserId}
+                                legacyName={editedSalesRep}
+                                onSelect={(selectedUser) => {
+                                    setEditedSalesUserId(selectedUser.id);
+                                    setEditedSalesRep(selectedUser.name);
+                                    setEditedSalesDepartment(selectedUser.department || "");
+                                }}
+                                onClear={() => {
+                                    setEditedSalesUserId("");
+                                    setEditedSalesRep("");
+                                    setEditedSalesDepartment("");
+                                }}
+                            />
+                            <p className="text-xs text-muted-foreground">業務部門：{editedSalesDepartment || "選擇業務帳號後自動帶入"}</p>
+                        </div>
+                        <div className="flex justify-end gap-3">
+                            <button onClick={() => setShowEditSalesModal(false)} className="px-4 py-2 text-sm border border-border rounded-lg hover:bg-muted">取消</button>
+                            <button
+                                onClick={handleUpdateSalesOwner}
+                                disabled={updateSalesOwnerMutation.isPending || !editedSalesUserId}
+                                className="px-4 py-2 text-sm bg-primary text-primary-foreground rounded-lg hover:bg-primary/90 disabled:opacity-50"
+                            >
+                                {updateSalesOwnerMutation.isPending ? "儲存中..." : "儲存業務"}
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
 
             {/* Reject Modal */}
             {showRejectModal && (

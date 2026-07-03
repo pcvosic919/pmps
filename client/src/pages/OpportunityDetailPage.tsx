@@ -7,6 +7,7 @@ import {
 } from "lucide-react";
 import { useCurrentUser } from "../lib/useCurrentUser";
 import { SharePointFilesSection } from "../components/SharePointFilesSection";
+import { BusinessUserPicker } from "../components/BusinessUserPicker";
 
 
 const OPP_STATUSES = [
@@ -56,6 +57,7 @@ export function OpportunityDetailPage() {
     const [srTitle, setSrTitle] = useState("");
     const [srCustomerName, setSrCustomerName] = useState("");
     const [srAmount, setSrAmount] = useState("");
+    const [srSalesUserId, setSrSalesUserId] = useState("");
     const [srSalesDepartment, setSrSalesDepartment] = useState("");
     const [srSalesRep, setSrSalesRep] = useState("");
     const [srPmId, setSrPmId] = useState("");
@@ -72,6 +74,10 @@ export function OpportunityDetailPage() {
     const [showEditEstimatedValueModal, setShowEditEstimatedValueModal] = useState(false);
     const [editedEstimatedValue, setEditedEstimatedValue] = useState("");
     const [estimatedValueError, setEstimatedValueError] = useState("");
+    const [showEditSalesModal, setShowEditSalesModal] = useState(false);
+    const [editedSalesUserId, setEditedSalesUserId] = useState("");
+    const [editedSalesRep, setEditedSalesRep] = useState("");
+    const [editedSalesDepartment, setEditedSalesDepartment] = useState("");
 
     // ------ Queries ------
     const { data: opp, isLoading: isOppLoading, refetch: refetchOpp } = trpc.opportunities.getById.useQuery({ id }, { enabled: !!id });
@@ -146,10 +152,17 @@ export function OpportunityDetailPage() {
         onSuccess: () => refetchOpp()
     });
 
+    const updateSalesOwnerMutation = trpc.opportunities.updateSalesOwner.useMutation({
+        onSuccess: () => {
+            refetchOpp();
+            setShowEditSalesModal(false);
+        }
+    });
+
     const createSRMutation = trpc.opportunities.createSR.useMutation({
         onSuccess: (data) => {
             setShowSRModal(false);
-            setSrTitle(""); setSrCustomerName(""); setSrAmount(""); setSrSalesDepartment(""); setSrSalesRep(""); setSrPmId(""); setSrTechId(""); setSrError("");
+            setSrTitle(""); setSrCustomerName(""); setSrAmount(""); setSrSalesUserId(""); setSrSalesDepartment(""); setSrSalesRep(""); setSrPmId(""); setSrTechId(""); setSrError("");
             // Navigate to the new SR
             window.location.href = `/service-requests/${data.id}`;
         },
@@ -185,6 +198,7 @@ export function OpportunityDetailPage() {
             opportunityId: id, 
             title: srTitle, 
             customerName: srCustomerName,
+            salesUserId: srSalesUserId,
             salesDepartment: srSalesDepartment,
             salesRep: srSalesRep,
             contractAmount: amount, 
@@ -206,6 +220,11 @@ export function OpportunityDetailPage() {
         updateEstimatedValueMutation.mutate({ id, estimatedValue: value });
     };
 
+    const handleUpdateSalesOwner = () => {
+        if (!editedSalesUserId) return;
+        updateSalesOwnerMutation.mutate({ id, salesUserId: editedSalesUserId });
+    };
+
     if (isOppLoading || isMembersLoading || isAssignmentsLoading || isTimesheetsLoading) {
         return <div className="p-8 text-center animate-pulse">載入中...</div>;
     }
@@ -214,6 +233,7 @@ export function OpportunityDetailPage() {
     const currentStatus = OPP_STATUSES.find(s => s.value === opp.status) ?? OPP_STATUSES[0];
     const isConverted = opp.status === "converted";
     const isBusinessOwner = hasRole("business") && opp.ownerId === user?.id;
+    const canEditSalesOwner = hasRole("admin") || hasRole("manager") || hasRole("presales") || isBusinessOwner;
     const canReportTime = hasRole("admin") || hasRole("manager") || hasRole("pm") || hasRole("presales") || hasRole("tech");
 
     const getTechName = (techId: string) => {
@@ -343,6 +363,7 @@ export function OpportunityDetailPage() {
                                         setShowSRModal(true);
                                         setSrTitle(`${opp.title} ${opp.customerName} - SR`);
                                         setSrCustomerName(opp.customerName || "");
+                                        setSrSalesUserId((opp as any).salesUserId || "");
                                         setSrSalesDepartment((opp as any).salesDepartment || "");
                                         setSrSalesRep((opp as any).salesRep || "");
                                         setSrError("");
@@ -418,7 +439,22 @@ export function OpportunityDetailPage() {
                         <p className="font-semibold">{(opp as any).salesDepartment || "未填寫"}</p>
                     </div>
                     <div className="space-y-1">
-                        <span className="text-sm text-muted-foreground">業務</span>
+                        <div className="flex items-center justify-between gap-3">
+                            <span className="text-sm text-muted-foreground">業務</span>
+                            {canEditSalesOwner && (
+                                <button
+                                    onClick={() => {
+                                        setEditedSalesUserId((opp as any).salesUserId || "");
+                                        setEditedSalesRep((opp as any).salesRep || "");
+                                        setEditedSalesDepartment((opp as any).salesDepartment || "");
+                                        setShowEditSalesModal(true);
+                                    }}
+                                    className="text-xs font-medium text-primary hover:text-primary/80 transition-colors"
+                                >
+                                    編輯
+                                </button>
+                            )}
+                        </div>
                         <p className="font-semibold">{(opp as any).salesRep || "未填寫"}</p>
                     </div>
                 </div>
@@ -787,6 +823,47 @@ export function OpportunityDetailPage() {
                 </div>
             )}
 
+            {/* 編輯業務 Modal */}
+            {showEditSalesModal && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm">
+                    <div className="bg-card border border-border rounded-xl shadow-xl w-full max-w-lg mx-4 p-6 space-y-5">
+                        <div className="flex justify-between items-center">
+                            <h2 className="text-lg font-bold">編輯業務</h2>
+                            <button onClick={() => setShowEditSalesModal(false)} className="p-1 rounded-full hover:bg-muted"><X className="w-5 h-5 text-muted-foreground" /></button>
+                        </div>
+                        <div className="space-y-2">
+                            <label className="block text-sm font-medium mb-1">業務帳號</label>
+                            <BusinessUserPicker
+                                users={allUsers?.items || []}
+                                selectedUserId={editedSalesUserId}
+                                legacyName={editedSalesRep}
+                                onSelect={(selectedUser) => {
+                                    setEditedSalesUserId(selectedUser.id);
+                                    setEditedSalesRep(selectedUser.name);
+                                    setEditedSalesDepartment(selectedUser.department || "");
+                                }}
+                                onClear={() => {
+                                    setEditedSalesUserId("");
+                                    setEditedSalesRep("");
+                                    setEditedSalesDepartment("");
+                                }}
+                            />
+                            <p className="text-xs text-muted-foreground">業務部門：{editedSalesDepartment || "選擇業務帳號後自動帶入"}</p>
+                        </div>
+                        <div className="flex justify-end space-x-3">
+                            <button onClick={() => setShowEditSalesModal(false)} className="px-4 py-2 text-sm border border-border rounded-lg hover:bg-muted">取消</button>
+                            <button
+                                onClick={handleUpdateSalesOwner}
+                                disabled={updateSalesOwnerMutation.isPending || !editedSalesUserId}
+                                className="px-4 py-2 text-sm bg-primary text-primary-foreground rounded-lg hover:bg-primary/90 disabled:opacity-50"
+                            >
+                                {updateSalesOwnerMutation.isPending ? "儲存中..." : "儲存業務"}
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
+
             {/* 編輯預估金額 Modal */}
             {showEditEstimatedValueModal && (
                 <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm">
@@ -911,17 +988,24 @@ export function OpportunityDetailPage() {
                                 <input type="number" min="0" step="1000" value={srAmount} onChange={e => setSrAmount(e.target.value)} placeholder="例：1500000"
                                     className="w-full border border-border rounded-lg px-3 py-2 bg-background text-sm focus:outline-none focus:ring-2 focus:ring-primary/50" />
                             </div>
-                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                                <div>
-                                    <label className="block text-sm font-medium mb-1">業務部門</label>
-                                    <input type="text" value={srSalesDepartment} onChange={e => setSrSalesDepartment(e.target.value)} placeholder="例：雲端事業處 / 業務一部"
-                                        className="w-full border border-border rounded-lg px-3 py-2 bg-background text-sm focus:outline-none focus:ring-2 focus:ring-primary/50" />
-                                </div>
-                                <div>
-                                    <label className="block text-sm font-medium mb-1">業務</label>
-                                    <input type="text" value={srSalesRep} onChange={e => setSrSalesRep(e.target.value)} placeholder="例：王小明"
-                                        className="w-full border border-border rounded-lg px-3 py-2 bg-background text-sm focus:outline-none focus:ring-2 focus:ring-primary/50" />
-                                </div>
+                            <div className="space-y-2">
+                                <label className="block text-sm font-medium mb-1">業務</label>
+                                <BusinessUserPicker
+                                    users={allUsers?.items || []}
+                                    selectedUserId={srSalesUserId}
+                                    legacyName={srSalesRep}
+                                    onSelect={(selectedUser) => {
+                                        setSrSalesUserId(selectedUser.id);
+                                        setSrSalesRep(selectedUser.name);
+                                        setSrSalesDepartment(selectedUser.department || "");
+                                    }}
+                                    onClear={() => {
+                                        setSrSalesUserId("");
+                                        setSrSalesRep("");
+                                        setSrSalesDepartment("");
+                                    }}
+                                />
+                                <p className="text-xs text-muted-foreground">業務部門：{srSalesDepartment || "選擇業務帳號後自動帶入"}</p>
                             </div>
                             <div>
                                 <label className="block text-sm font-medium mb-1">指派 PM (選用)</label>

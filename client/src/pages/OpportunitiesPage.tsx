@@ -12,10 +12,12 @@ import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { BusinessUserPicker } from "../components/BusinessUserPicker";
 
 const oppSchema = z.object({
     title: z.string().min(1, "商機名稱不可為空"),
     customerName: z.string().min(1, "客戶名稱不可為空"),
+    salesUserId: z.string().optional(),
     salesDepartment: z.string().optional(),
     salesRep: z.string().optional(),
     estimatedValue: z.number().min(0, "金額不能為負數"),
@@ -62,7 +64,9 @@ export function OpportunitiesPage() {
     const [customFieldsValues, setCustomFieldsValues] = useState<Record<string, string>>({});
     const { data: customFieldDefs } = trpc.system.getCustomFields.useQuery();
     const { data: settings } = trpc.system.getSettings.useQuery();
+    const { data: usersData } = trpc.users.list.useQuery({ limit: 500 });
     const availableProducts = settings?.availableProducts || [];
+    const businessUsers = usersData?.items || [];
     const oppFields = customFieldDefs?.filter((f: any) => f.entityType === "opportunity") || [];
     const { user } = useCurrentUser();
     const isAdmin = !!user && (user.role === "admin" || user.roles.includes("admin"));
@@ -86,6 +90,7 @@ export function OpportunitiesPage() {
         defaultValues: {
             title: "",
             customerName: "",
+            salesUserId: "",
             salesDepartment: "",
             salesRep: "",
             estimatedValue: 0,
@@ -122,6 +127,7 @@ export function OpportunitiesPage() {
         createOpp.mutate({
             title: values.title,
             customerName: values.customerName,
+            salesUserId: values.salesUserId,
             salesDepartment: values.salesDepartment,
             salesRep: values.salesRep,
             estimatedValue: values.estimatedValue,
@@ -338,33 +344,37 @@ export function OpportunitiesPage() {
                                     </FormItem>
                                 )}
                             />
-                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                            <div className="space-y-2">
                                 <FormField
                                     control={form.control}
-                                    name="salesDepartment"
-                                    render={({ field }: any) => (
-                                        <FormItem>
-                                            <FormLabel>業務部門</FormLabel>
-                                            <FormControl>
-                                                <Input placeholder="例：雲端事業處 / 業務一部" {...field} />
-                                            </FormControl>
-                                            <FormMessage />
-                                        </FormItem>
-                                    )}
-                                />
-                                <FormField
-                                    control={form.control}
-                                    name="salesRep"
+                                    name="salesUserId"
                                     render={({ field }: any) => (
                                         <FormItem>
                                             <FormLabel>業務</FormLabel>
                                             <FormControl>
-                                                <Input placeholder="例：王小明" {...field} />
+                                                <BusinessUserPicker
+                                                    users={businessUsers}
+                                                    selectedUserId={field.value}
+                                                    legacyName={form.watch("salesRep")}
+                                                    onSelect={(selectedUser) => {
+                                                        field.onChange(selectedUser.id);
+                                                        form.setValue("salesRep", selectedUser.name);
+                                                        form.setValue("salesDepartment", selectedUser.department || "");
+                                                    }}
+                                                    onClear={() => {
+                                                        field.onChange("");
+                                                        form.setValue("salesRep", "");
+                                                        form.setValue("salesDepartment", "");
+                                                    }}
+                                                />
                                             </FormControl>
                                             <FormMessage />
                                         </FormItem>
                                     )}
                                 />
+                                <p className="text-xs text-muted-foreground">
+                                    業務部門：{form.watch("salesDepartment") || "選擇業務帳號後自動帶入"}
+                                </p>
                             </div>
                             <FormField
                                 control={form.control}

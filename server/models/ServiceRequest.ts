@@ -65,6 +65,7 @@ export interface IServiceRequest extends Document {
     pointValue?: number;
     pmId?: mongoose.Types.ObjectId;
     status: SrStatus;
+    salesUserId?: mongoose.Types.ObjectId;
     salesDepartment?: string;
     salesRep?: string;
     plannedStartDate?: Date;
@@ -168,6 +169,7 @@ const ServiceRequestSchema = new Schema<IServiceRequest>({
     pointValue: { type: Number },
     pmId: { type: Schema.Types.ObjectId, ref: "User" },
     status: { type: String, enum: srStatuses, default: "new", required: true },
+    salesUserId: { type: Schema.Types.ObjectId, ref: "User" },
     salesDepartment: { type: String },
     salesRep: { type: String },
     plannedStartDate: { type: Date },
@@ -213,6 +215,7 @@ ServiceRequestSchema.index({ "members.userId": 1, createdAt: -1 });
 ServiceRequestSchema.index({ externalProjectCode: 1 }, { sparse: true });
 ServiceRequestSchema.index({ externalServiceType: 1, status: 1 });
 ServiceRequestSchema.index({ recognitionMonth: 1 });
+ServiceRequestSchema.index({ salesUserId: 1, createdAt: -1 });
 ServiceRequestSchema.index({ salesDepartment: 1, createdAt: -1 });
 ServiceRequestSchema.index({ "changeRequests.requesterId": 1, createdAt: -1 });
 ServiceRequestSchema.index({ createdAt: -1 });
