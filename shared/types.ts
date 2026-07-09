@@ -100,6 +100,9 @@ export const wbsVersionStatuses = [
 
 export type WbsVersionStatus = typeof wbsVersionStatuses[number];
 
+export const wbsItemStatuses = ["not_started", "in_progress", "completed"] as const;
+export type WbsItemStatus = typeof wbsItemStatuses[number];
+
 export const issueStatuses = ["open", "in_progress", "resolved", "closed"] as const;
 export type IssueStatus = typeof issueStatuses[number];
 
@@ -194,11 +197,20 @@ export interface WbsItemInput {
     endDate?: Date;
     assigneeId?: string;
     completionPercentage?: number;
+    status?: WbsItemStatus;
     colorCode?: string;
     level?: number;
     description?: string;
     code?: string;
     remarks?: string;
+}
+
+export interface DepartmentApproval {
+    department: string;
+    status: "pending" | "approved" | "rejected";
+    reviewedBy?: string;
+    reviewedAt?: Date;
+    rejectionReason?: string;
 }
 
 export interface WbsVersionInput {
@@ -208,6 +220,7 @@ export interface WbsVersionInput {
     submittedBy?: string;
     reviewedBy?: string;
     items: WbsItemInput[];
+    departmentApprovals?: DepartmentApproval[];
     auditLogs?: AuditLog[];
     createdAt: Date;
 }

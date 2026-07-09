@@ -7,8 +7,9 @@ import toast from "react-hot-toast";
 import { useCurrentUser } from "../lib/useCurrentUser";
 import * as XLSX from "xlsx";
 import { SharePointFilesSection } from "../components/SharePointFilesSection";
-import { exportWbsCostWorkbook, exportWbsQuoteWorkbook, formatExportDate, makeXlsxFileName } from "../lib/exportXlsx";
+import { exportRowsToXlsx, exportWbsCostWorkbook, exportWbsQuoteWorkbook, formatExportDate, makeXlsxFileName } from "../lib/exportXlsx";
 import { BusinessUserPicker } from "../components/BusinessUserPicker";
+import { UserSearchPicker } from "../components/UserSearchPicker";
 
 type WbsDraftItem = {
     title: string;
@@ -17,6 +18,7 @@ type WbsDraftItem = {
     startDate?: Date;
     endDate?: Date;
     completionPercentage?: number;
+    status?: "not_started" | "in_progress" | "completed";
     colorCode?: string;
     level?: number;
     code?: string;
@@ -48,6 +50,11 @@ export function WbsManagementPage() {
     // View settings
     const displayHours = (h: number) => h.toFixed(1) + ' 天';
     const displayHoursShort = (h: number) => h.toFixed(1) + 'd';
+    const wbsStatusLabels: Record<string, string> = {
+        not_started: "尚未開始",
+        in_progress: "進行中",
+        completed: "完成"
+    };
 
     // Review state
     const [reviewingId, setReviewingId] = useState<string | null>(null);
@@ -290,6 +297,15 @@ export function WbsManagementPage() {
         const map: Record<string, string> = { draft: '草稿', submitted: '待審核', approved: '已核准', rejected: '已退回' };
         return map[status] || status;
     };
+    const getApprovalStatusText = (status: string) => {
+        const map: Record<string, string> = { pending: "待核准", approved: "已核准", rejected: "已退回" };
+        return map[status] || status;
+    };
+    const getApprovalStatusColor = (status: string) => {
+        if (status === "approved") return "border-emerald-200 bg-emerald-50 text-emerald-700";
+        if (status === "rejected") return "border-rose-200 bg-rose-50 text-rose-700";
+        return "border-amber-200 bg-amber-50 text-amber-700";
+    };
 
     const getActionMeta = (action: string) => {
         switch(action) {
@@ -310,11 +326,11 @@ export function WbsManagementPage() {
         });
     };
 
-    const handleAddDraftItem = () => setDraftItems([...draftItems, { title: "", estimatedHours: 4, assigneeId: undefined, level: 0, code: "", remarks: "" }]);
+    const handleAddDraftItem = () => setDraftItems([...draftItems, { title: "", estimatedHours: 4, assigneeId: undefined, level: 0, code: "", remarks: "", status: "not_started", completionPercentage: 0 }]);
     const handleAddSubTask = (parentIndex: number) => {
         const parentLevel = draftItems[parentIndex].level || 0;
         const newItems = [...draftItems];
-        newItems.splice(parentIndex + 1, 0, { title: "", estimatedHours: 4, assigneeId: undefined, level: parentLevel + 1, code: "", remarks: "" });
+        newItems.splice(parentIndex + 1, 0, { title: "", estimatedHours: 4, assigneeId: undefined, level: parentLevel + 1, code: "", remarks: "", status: "not_started", completionPercentage: 0 });
         setDraftItems(newItems);
     };
     const handleUpdateDraftItem = (index: number, field: string, value: any) => {
@@ -323,6 +339,20 @@ export function WbsManagementPage() {
         setDraftItems(newItems);
     };
     const handleRemoveDraftItem = (index: number) => setDraftItems(draftItems.filter((_, i) => i !== index));
+    const handleMoveDraftItem = (index: number, direction: -1 | 1) => {
+        const nextIndex = index + direction;
+        if (nextIndex < 0 || nextIndex >= draftItems.length) return;
+        const newItems = [...draftItems];
+        const [item] = newItems.splice(index, 1);
+        newItems.splice(nextIndex, 0, item);
+        setDraftItems(newItems);
+    };
+    const handleShiftDraftLevel = (index: number, delta: -1 | 1) => {
+        const currentLevel = draftItems[index].level || 0;
+        const maxLevel = index > 0 ? (draftItems[index - 1].level || 0) + 1 : 0;
+        const nextLevel = Math.max(0, Math.min(maxLevel, currentLevel + delta));
+        handleUpdateDraftItem(index, "level", nextLevel);
+    };
     const handleStartBuild = () => {
         if (latestVersion?.items?.length) {
             setDraftItems(latestVersion.items.map((item: any) => ({
@@ -332,10 +362,12 @@ export function WbsManagementPage() {
                 startDate: item.startDate ? new Date(item.startDate) : undefined,
                 endDate: item.endDate ? new Date(item.endDate) : undefined,
                 completionPercentage: item.completionPercentage || 0,
+                status: item.status || (item.completionPercentage >= 100 ? "completed" : item.completionPercentage > 0 ? "in_progress" : "not_started"),
                 colorCode: item.colorCode || "#E2E8F0",
                 level: item.level || 0,
                 code: item.code || "",
-                remarks: item.remarks || ""
+                remarks: item.remarks || "",
+                description: item.description || ""
             })));
         } else {
             setDraftItems([]);
@@ -376,6 +408,22 @@ export function WbsManagementPage() {
             return;
         }
         updateSalesOwnerMutation.mutate({ id: sr.id, salesUserId: editedSalesUserId });
+    };
+
+    const handleExportIssues = () => {
+        const rows = (issues || []).map((issue: any) => ({
+            "議題標題": issue.title,
+            "狀態": issue.status,
+            "優先等級": issue.priority,
+            "指派對象": issue.assigneeId?.name || "",
+            "指派信箱": issue.assigneeId?.email || "",
+            "回報人": issue.reporterId?.name || "",
+            "說明": issue.description,
+            "建立時間": issue.createdAt ? new Date(issue.createdAt).toLocaleString() : "",
+            "更新時間": issue.updatedAt ? new Date(issue.updatedAt).toLocaleString() : ""
+        }));
+        exportRowsToXlsx(rows, makeXlsxFileName("議題追蹤", sr?.title, formatExportDate()), "Issues");
+        toast.success("議題追蹤已匯出 Excel");
     };
 
     const handleExportXlsx = () => {
@@ -576,11 +624,20 @@ export function WbsManagementPage() {
                     </div>
 
                     {/* Issues Tracking Area */}
-                    <div className="bg-card border border-border rounded-xl p-5 shadow-sm">
-                        <div className="flex justify-between items-center mb-3">
-                            <h3 className="font-semibold text-base flex items-center"><AlertCircle className="w-4 h-4 mr-2 text-primary" />專案議題追蹤</h3>
-                            <button onClick={() => setIsCreatingIssue(true)} className="p-1.5 hover:bg-muted bg-primary/10 rounded-lg text-primary transition-colors"><Plus className="w-4 h-4" /></button>
-                        </div>
+	                    <div className="bg-card border border-border rounded-xl p-5 shadow-sm">
+	                        <div className="flex justify-between items-center mb-3">
+	                            <h3 className="font-semibold text-base flex items-center"><AlertCircle className="w-4 h-4 mr-2 text-primary" />專案議題追蹤</h3>
+	                            <div className="flex items-center gap-2">
+	                                <button
+	                                    onClick={handleExportIssues}
+	                                    disabled={!issues || issues.length === 0}
+	                                    className="px-2 py-1.5 rounded-lg border border-border text-xs font-medium hover:bg-muted disabled:opacity-50"
+	                                >
+	                                    匯出
+	                                </button>
+	                                <button onClick={() => setIsCreatingIssue(true)} className="p-1.5 hover:bg-muted bg-primary/10 rounded-lg text-primary transition-colors"><Plus className="w-4 h-4" /></button>
+	                            </div>
+	                        </div>
                         {issues && issues.length > 0 ? (
                             <div className="space-y-3 max-h-[400px] overflow-y-auto pr-1">
                                 {issues.map((i: any) => (
@@ -675,6 +732,21 @@ export function WbsManagementPage() {
                                                             <span>退回原因：{version.rejectionReason}</span>
                                                         </div>
                                                     )}
+                                                    {version.departmentApprovals?.length > 0 && (
+                                                        <div className="mt-3 flex flex-wrap gap-2">
+                                                            {version.departmentApprovals.map((approval: any) => {
+                                                                const reviewer = allUsers?.items?.find((u: any) => u.id === approval.reviewedBy);
+                                                                return (
+                                                                    <div key={approval.department} className={`text-[11px] border rounded-lg px-2 py-1 ${getApprovalStatusColor(approval.status)}`}>
+                                                                        <span className="font-semibold">{approval.department || "未指定部門"}</span>
+                                                                        <span className="mx-1">/</span>
+                                                                        <span>{getApprovalStatusText(approval.status)}</span>
+                                                                        {reviewer && <span className="ml-1 text-muted-foreground">by {reviewer.name}</span>}
+                                                                    </div>
+                                                                );
+                                                            })}
+                                                        </div>
+                                                    )}
                                                 </div>
                                                 {version.status === "submitted" && (hasRole("admin") || hasRole("manager") || user?.id === sr.pmId) && (
                                                     <div className="flex gap-2">
@@ -766,8 +838,11 @@ export function WbsManagementPage() {
                                                                         <span className="font-mono text-xs font-bold text-primary bg-primary/10 px-1.5 py-0.5 rounded">
                                                                             {computeItemNumbers(version.items)[idx]}
                                                                         </span>
-                                                                        {item.title}
-                                                                        {isAdded && <span className="rounded bg-emerald-100 px-1.5 py-0.5 text-[10px] font-semibold text-emerald-700">新增</span>}
+	                                                                        {item.title}
+	                                                                        <span className="rounded bg-muted px-1.5 py-0.5 text-[10px] font-semibold text-muted-foreground">
+	                                                                            {wbsStatusLabels[item.status || "not_started"]}
+	                                                                        </span>
+	                                                                        {isAdded && <span className="rounded bg-emerald-100 px-1.5 py-0.5 text-[10px] font-semibold text-emerald-700">新增</span>}
                                                                         {assigneeChanged && <span className="rounded bg-blue-100 px-1.5 py-0.5 text-[10px] font-semibold text-blue-700">改派</span>}
                                                                     </div>
                                                                     {item.description && (
@@ -966,24 +1041,41 @@ export function WbsManagementPage() {
                                                             />
                                                         </div>
 
-                                                        <div className="grid grid-cols-2 gap-3">
-                                                            <div className="flex flex-col gap-1 text-xs text-muted-foreground">
-                                                                <label>指派給 (人員):</label>
-                                                                <select value={item.assigneeId || ""}
-                                                                    onChange={(e) => handleUpdateDraftItem(idx, 'assigneeId', e.target.value ? e.target.value : undefined)}
-                                                                    className="px-2 py-1.5 bg-muted rounded border border-transparent focus:bg-background focus:border-primary outline-none">
-                                                                    <option value="">-- 未指派 --</option>
-                                                                    {techs?.map(tech => <option key={tech.id} value={tech.id}>{tech.name}</option>)}
-                                                                </select>
-                                                            </div>
-                                                            <div className="flex flex-col gap-1 text-xs text-muted-foreground">
-                                                                <label>備註:</label>
-                                                                <input type="text" placeholder="選填" value={item.remarks || ""}
-                                                                    onChange={(e) => handleUpdateDraftItem(idx, 'remarks', e.target.value)}
-                                                                    className="px-2 py-1.5 bg-muted rounded border border-transparent focus:bg-background focus:border-primary outline-none"
-                                                                />
-                                                            </div>
-                                                        </div>
+	                                                        <div className="grid grid-cols-2 gap-3">
+	                                                            <div className="flex flex-col gap-1 text-xs text-muted-foreground">
+	                                                                <label>指派給 (人員):</label>
+	                                                                <UserSearchPicker
+	                                                                    users={techs || []}
+	                                                                    selectedUserId={item.assigneeId}
+	                                                                    placeholder="搜尋姓名或 Email..."
+	                                                                    onSelect={(selectedUser) => handleUpdateDraftItem(idx, "assigneeId", selectedUser.id)}
+	                                                                    onClear={() => handleUpdateDraftItem(idx, "assigneeId", undefined)}
+	                                                                />
+	                                                            </div>
+	                                                            <div className="flex flex-col gap-1 text-xs text-muted-foreground">
+	                                                                <label>狀態:</label>
+	                                                                <select
+	                                                                    value={item.status || "not_started"}
+	                                                                    onChange={(e) => {
+	                                                                        const status = e.target.value as WbsDraftItem["status"];
+	                                                                        handleUpdateDraftItem(idx, "status", status);
+	                                                                        handleUpdateDraftItem(idx, "completionPercentage", status === "completed" ? 100 : status === "not_started" ? 0 : Math.max(item.completionPercentage || 0, 50));
+	                                                                    }}
+	                                                                    className="px-2 py-1.5 bg-muted rounded border border-transparent focus:bg-background focus:border-primary outline-none"
+	                                                                >
+	                                                                    <option value="not_started">尚未開始</option>
+	                                                                    <option value="in_progress">進行中</option>
+	                                                                    <option value="completed">完成</option>
+	                                                                </select>
+	                                                            </div>
+	                                                        </div>
+	                                                        <div className="flex flex-col gap-1 text-xs text-muted-foreground">
+	                                                            <label>備註:</label>
+	                                                            <input type="text" placeholder="選填" value={item.remarks || ""}
+	                                                                onChange={(e) => handleUpdateDraftItem(idx, 'remarks', e.target.value)}
+	                                                                className="px-2 py-1.5 bg-muted rounded border border-transparent focus:bg-background focus:border-primary outline-none"
+	                                                            />
+	                                                        </div>
                                                         <div className="flex gap-4 items-center flex-wrap pt-2 border-t border-border/50">
                                                             <div className="flex items-center text-xs text-muted-foreground">
                                                                 <span className="mr-2">色標:</span>
@@ -1006,10 +1098,18 @@ export function WbsManagementPage() {
                                                             </div>
                                                         </div>
                                                     </div>
-                                                </div>
-                                                <div className="flex flex-col gap-1">
-                                                    <button onClick={() => handleAddSubTask(idx)}
-                                                        className="p-1.5 text-muted-foreground hover:text-primary hover:bg-primary/10 rounded" title="新增子任務">
+	                                                </div>
+	                                                <div className="flex flex-col gap-1">
+	                                                    <button onClick={() => handleMoveDraftItem(idx, -1)} disabled={idx === 0}
+	                                                        className="p-1.5 text-muted-foreground hover:text-primary hover:bg-primary/10 rounded disabled:opacity-30" title="上移">↑</button>
+	                                                    <button onClick={() => handleMoveDraftItem(idx, 1)} disabled={idx === draftItems.length - 1}
+	                                                        className="p-1.5 text-muted-foreground hover:text-primary hover:bg-primary/10 rounded disabled:opacity-30" title="下移">↓</button>
+	                                                    <button onClick={() => handleShiftDraftLevel(idx, -1)} disabled={(item.level || 0) === 0}
+	                                                        className="p-1.5 text-muted-foreground hover:text-primary hover:bg-primary/10 rounded disabled:opacity-30" title="升層">←</button>
+	                                                    <button onClick={() => handleShiftDraftLevel(idx, 1)} disabled={idx === 0}
+	                                                        className="p-1.5 text-muted-foreground hover:text-primary hover:bg-primary/10 rounded disabled:opacity-30" title="降層">→</button>
+	                                                    <button onClick={() => handleAddSubTask(idx)}
+	                                                        className="p-1.5 text-muted-foreground hover:text-primary hover:bg-primary/10 rounded" title="新增子任務">
                                                         <Plus className="w-4 h-4" />
                                                     </button>
                                                     <button onClick={() => handleRemoveDraftItem(idx)}
@@ -1140,14 +1240,17 @@ export function WbsManagementPage() {
                                         <option value="high">高優先 (High)</option>
                                         <option value="critical">緊急且阻礙進度 (Critical)</option>
                                     </select>
-                                </div>
-                                <div>
-                                    <label className="block text-sm font-semibold mb-1.5 text-foreground/90">指派對象</label>
-                                    <select value={newIssueData.assigneeId} onChange={e => setNewIssueData({...newIssueData, assigneeId: e.target.value})} className="w-full border border-input rounded-lg px-3 py-2.5 bg-background text-sm focus:outline-none focus:ring-2 focus:ring-primary/50 transition-shadow">
-                                        <option value="">-- 保留未指派 --</option>
-                                        {techs?.map(t => <option key={t.id} value={t.id}>{t.name} ({t.role})</option>)}
-                                    </select>
-                                </div>
+	                                </div>
+	                                <div>
+	                                    <label className="block text-sm font-semibold mb-1.5 text-foreground/90">指派對象</label>
+	                                    <UserSearchPicker
+	                                        users={techs || []}
+	                                        selectedUserId={newIssueData.assigneeId}
+	                                        placeholder="搜尋姓名或 Email..."
+	                                        onSelect={(selectedUser) => setNewIssueData({ ...newIssueData, assigneeId: selectedUser.id })}
+	                                        onClear={() => setNewIssueData({ ...newIssueData, assigneeId: "" })}
+	                                    />
+	                                </div>
                             </div>
                         </div>
                         <div className="flex justify-end gap-3 mt-6 pt-4 border-t border-border/50">

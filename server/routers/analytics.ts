@@ -17,7 +17,7 @@ import { settlementTypes } from "../../shared/types";
 import { getManagedDepartments, hasAnyRole } from "../_core/authorization";
 import { toObjectId } from "../_core/cursor";
 
-const reportTypes = ["utilization", "settlement", "timesheets", "project_profitability", "pm_ranking", "budget_variance", "sla_compliance", "renewal_rate", "open_cases", "kpi_revenue"] as const;
+const reportTypes = ["utilization", "settlement", "timesheets", "project_profitability", "pm_ranking", "budget_variance", "sla_compliance", "renewal_rate", "open_cases", "kpi_revenue", "project_completion_rate"] as const;
 
 const defaultKpiSourceDefinitions = [
     { key: "target", label: "年度目標", source: "系統 KPI 目標設定", rule: "部門/個人目標以系統內 KPI 目標設定為準。", isActive: true },
@@ -45,8 +45,9 @@ const defaultReportTemplates = [
     { reportType: "project_profitability", label: "客戶/專案毛利報表", category: "project", description: "專案營收、成本、管銷與毛利分析。", outputFormat: "xlsx", isExecutiveFormat: false, sortOrder: 60 },
     { reportType: "pm_ranking", label: "PM 排行榜", category: "project", description: "PM 營收與毛利排行。", outputFormat: "xlsx", isExecutiveFormat: false, sortOrder: 70 },
     { reportType: "budget_variance", label: "預算偏差分析", category: "project", description: "專案預算與實際花費偏差。", outputFormat: "xlsx", isExecutiveFormat: false, sortOrder: 80 },
-    { reportType: "sla_compliance", label: "SLA 達成率報表", category: "project", description: "專案準時與 SLA 達成狀況。", outputFormat: "xlsx", isExecutiveFormat: false, sortOrder: 90 },
-    { reportType: "renewal_rate", label: "客戶續約/勝率報表", category: "project", description: "客戶維度成交與續約表現。", outputFormat: "xlsx", isExecutiveFormat: false, sortOrder: 100 }
+    { reportType: "project_completion_rate", label: "專案結算率報表", category: "project", description: "依 WBS 項目應完成日期與完成狀態計算月結算率。", outputFormat: "xlsx", isExecutiveFormat: false, sortOrder: 90 },
+    { reportType: "sla_compliance", label: "SLA 達成率報表", category: "project", description: "專案準時與 SLA 達成狀況。", outputFormat: "xlsx", isExecutiveFormat: false, sortOrder: 100 },
+    { reportType: "renewal_rate", label: "客戶續約/勝率報表", category: "project", description: "客戶維度成交與續約表現。", outputFormat: "xlsx", isExecutiveFormat: false, sortOrder: 110 }
 ] as const;
 
 const toIdMap = (items: Array<{ _id: unknown; totalHours?: number; totalCost?: number; totalRevenue?: number }>, key: "totalHours" | "totalCost" | "totalRevenue") =>
@@ -108,9 +109,13 @@ const getOrCreateKpiPolicy = async (year: number) => {
 };
 
 const seedReportTemplatesIfNeeded = async () => {
-    const existingCount = await ReportTemplateModel.countDocuments();
-    if (existingCount > 0) return;
-    await ReportTemplateModel.insertMany(defaultReportTemplates);
+    for (const template of defaultReportTemplates) {
+        await ReportTemplateModel.updateOne(
+            { reportType: template.reportType },
+            { $setOnInsert: template },
+            { upsert: true }
+        );
+    }
 };
 
 const getWeightedPipelineAmount = (amount: number, status: string | undefined, weights: Record<string, number>) => {
@@ -137,6 +142,17 @@ const toDateText = (value?: Date | string | null) => {
     if (!value) return "";
     const date = new Date(value);
     return Number.isNaN(date.getTime()) ? "" : date.toISOString().slice(0, 10);
+};
+
+const toMonthKey = (value: Date | string) => {
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) return "";
+    return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}`;
+};
+
+const getWbsItemCompletionStatus = (item: any) => {
+    if (item?.status) return item.status;
+    return Number(item?.completionPercentage || 0) >= 100 ? "completed" : "not_started";
 };
 
 const parseMonthDate = (month?: string | null) => {
@@ -1370,7 +1386,7 @@ export const analyticsRouter = router({
 
     generateReport: roleProcedure(["admin", "manager"])
         .input(z.object({
-            reportType: z.enum(["utilization", "settlement", "timesheets", "project_profitability", "pm_ranking", "budget_variance", "sla_compliance", "renewal_rate", "open_cases", "kpi_revenue"]),
+            reportType: z.enum(["utilization", "settlement", "timesheets", "project_profitability", "pm_ranking", "budget_variance", "sla_compliance", "renewal_rate", "open_cases", "kpi_revenue", "project_completion_rate"]),
             startDate: z.string(),
             endDate: z.string(),
             department: z.string().optional(),
@@ -1632,6 +1648,121 @@ export const analyticsRouter = router({
                         "\u72c0\u614b": variance >= 0 ? "\u9810\u7b97\u5167" : "\u8d85\u652f"
                     };
                 });
+            } else if (input.reportType === "project_completion_rate") {
+                const allowedDepartments = await buildDepartmentAccessFilter(ctx.user, input.department);
+                if (allowedDepartments !== null && allowedDepartments.length === 0) return [];
+                const scopedUser = input.userId
+                    ? (await getScopedReportUsers(ctx.user, input.department, input.userId))[0]
+                    : null;
+                if (input.userId && !scopedUser) return [];
+
+                const srs = await ServiceRequestModel.find({ status: { $ne: "cancelled" } })
+                    .populate("pmId", "name department")
+                    .populate("wbsVersions.items.assigneeId", "name email department")
+                    .sort({ createdAt: 1 })
+                    .lean();
+
+                const today = new Date();
+                today.setHours(0, 0, 0, 0);
+                const rows = new Map<string, {
+                    month: string;
+                    department: string;
+                    project: string;
+                    projectCode: string;
+                    expectedHours: number;
+                    completedHours: number;
+                    overdueHours: number;
+                    expectedItems: number;
+                    completedItems: number;
+                    anomalyNotes: Set<string>;
+                }>();
+
+                const upsertRow = (month: string, department: string, sr: any) => {
+                    const key = `${month}|${department}|${sr._id.toString()}`;
+                    if (!rows.has(key)) {
+                        rows.set(key, {
+                            month,
+                            department,
+                            project: sr.title || "",
+                            projectCode: sr.externalProjectCode || sr._id.toString(),
+                            expectedHours: 0,
+                            completedHours: 0,
+                            overdueHours: 0,
+                            expectedItems: 0,
+                            completedItems: 0,
+                            anomalyNotes: new Set<string>()
+                        });
+                    }
+                    return rows.get(key)!;
+                };
+
+                const canIncludeDepartment = (department: string) =>
+                    allowedDepartments === null || allowedDepartments.includes(department);
+
+                for (const sr of srs as any[]) {
+                    const version = getLatestWbsVersion(sr);
+                    for (const item of version?.items || []) {
+                        const assignee = item.assigneeId as any;
+                        const assigneeId = assignee?._id?.toString() || assignee?.toString?.() || "";
+                        if (scopedUser && assigneeId !== scopedUser._id.toString()) continue;
+
+                        const department = assignee?.department || "未指定";
+                        if (!canIncludeDepartment(department)) continue;
+
+                        const estimatedHours = Number(item.estimatedHours || 0);
+                        const status = getWbsItemCompletionStatus(item);
+                        const notes: string[] = [];
+                        if (!assigneeId) notes.push(`未指派：${item.title}`);
+                        if (estimatedHours <= 0) notes.push(`預估工時為 0：${item.title}`);
+                        if (!item.endDate) {
+                            const row = upsertRow("未排程", department, sr);
+                            row.anomalyNotes.add(`缺少 WBS 結束日期：${item.title}`);
+                            for (const note of notes) row.anomalyNotes.add(note);
+                            continue;
+                        }
+
+                        const endDateValue = new Date(item.endDate);
+                        if (Number.isNaN(endDateValue.getTime())) {
+                            const row = upsertRow("未排程", department, sr);
+                            row.anomalyNotes.add(`WBS 結束日期格式錯誤：${item.title}`);
+                            for (const note of notes) row.anomalyNotes.add(note);
+                            continue;
+                        }
+                        endDateValue.setHours(0, 0, 0, 0);
+                        if (endDateValue < start || endDateValue > end) continue;
+
+                        const row = upsertRow(toMonthKey(endDateValue), department, sr);
+                        row.expectedHours += estimatedHours;
+                        row.expectedItems += 1;
+                        if (status === "completed") {
+                            row.completedHours += estimatedHours;
+                            row.completedItems += 1;
+                        } else if (endDateValue < today) {
+                            row.overdueHours += estimatedHours;
+                        }
+                        for (const note of notes) row.anomalyNotes.add(note);
+                    }
+                }
+
+                return Array.from(rows.values())
+                    .sort((left, right) =>
+                        left.month.localeCompare(right.month)
+                        || left.department.localeCompare(right.department)
+                        || left.project.localeCompare(right.project)
+                    )
+                    .map((row) => ({
+                        "月份": row.month,
+                        "部門": row.department,
+                        "專案": row.project,
+                        "專案編號": row.projectCode,
+                        "應完成工時": row.expectedHours,
+                        "已完成工時": row.completedHours,
+                        "結算率%": row.expectedHours > 0 ? Math.round((row.completedHours / row.expectedHours) * 100) : "",
+                        "逾期未完成工時": row.overdueHours,
+                        "完成項目數": row.completedItems,
+                        "應完成項目數": row.expectedItems,
+                        "資料異常備註": row.anomalyNotes.size > 0 ? Array.from(row.anomalyNotes).join("；") : ""
+                    }));
             } else if (input.reportType === "sla_compliance") {
                 // SLA Compliance - based on project on-time completion
                 let srMatch: any = {};

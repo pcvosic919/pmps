@@ -1,17 +1,18 @@
 import mongoose, { Schema, Document } from "mongoose";
-import { changeRequestStatuses, memberRoles, srStatuses, srTypes, wbsVersionStatuses, type ChangeRequestInput, type ChangeRequestStatus, type CustomFieldValue, type MemberRole, type ServiceRequestAttachment, type SrStatus, type SrType, type WbsItemInput, type WbsVersionInput, type WbsVersionStatus } from "../../shared/types";
+import { changeRequestStatuses, memberRoles, srStatuses, srTypes, wbsItemStatuses, wbsVersionStatuses, type ChangeRequestInput, type ChangeRequestStatus, type CustomFieldValue, type DepartmentApproval, type MemberRole, type ServiceRequestAttachment, type SrStatus, type SrType, type WbsItemInput, type WbsVersionInput, type WbsVersionStatus } from "../../shared/types";
 
 export interface IWbsItem extends Omit<WbsItemInput, "assigneeId"> {
     id: mongoose.Types.ObjectId;
     assigneeId?: mongoose.Types.ObjectId;
 }
 
-export interface IWbsVersion extends Omit<WbsVersionInput, "submittedBy" | "reviewedBy" | "items" | "auditLogs"> {
+export interface IWbsVersion extends Omit<WbsVersionInput, "submittedBy" | "reviewedBy" | "items" | "auditLogs" | "departmentApprovals"> {
     _id: mongoose.Types.ObjectId;
     status: WbsVersionStatus;
     submittedBy?: mongoose.Types.ObjectId;
     reviewedBy?: mongoose.Types.ObjectId;
     items: IWbsItem[];
+    departmentApprovals?: Array<Omit<DepartmentApproval, "reviewedBy"> & { reviewedBy?: mongoose.Types.ObjectId }>;
     auditLogs?: { action: string; userId: mongoose.Types.ObjectId; timestamp: Date; reason?: string }[];
 }
 
@@ -100,6 +101,7 @@ const WbsItemSchema = new Schema<IWbsItem>({
     endDate: { type: Date },
     assigneeId: { type: Schema.Types.ObjectId, ref: "User" },
     completionPercentage: { type: Number, default: 0, min: 0, max: 100 },
+    status: { type: String, enum: wbsItemStatuses, default: "not_started", required: true },
     colorCode: { type: String, default: "#E2E8F0" },
     level: { type: Number, default: 0 },
     description: { type: String },
@@ -114,6 +116,14 @@ const AuditLogSchema = new Schema({
     reason: { type: String }
 });
 
+const DepartmentApprovalSchema = new Schema({
+    department: { type: String, required: true },
+    status: { type: String, enum: ["pending", "approved", "rejected"], default: "pending", required: true },
+    reviewedBy: { type: Schema.Types.ObjectId, ref: "User" },
+    reviewedAt: { type: Date },
+    rejectionReason: { type: String }
+}, { _id: false });
+
 const WbsVersionSchema = new Schema<IWbsVersion>({
     versionNumber: { type: Number, required: true },
     status: { type: String, enum: wbsVersionStatuses, default: "draft", required: true },
@@ -121,6 +131,7 @@ const WbsVersionSchema = new Schema<IWbsVersion>({
     submittedBy: { type: Schema.Types.ObjectId, ref: "User" },
     reviewedBy: { type: Schema.Types.ObjectId, ref: "User" },
     items: [WbsItemSchema],
+    departmentApprovals: [DepartmentApprovalSchema],
     auditLogs: [AuditLogSchema],
     createdAt: { type: Date, default: Date.now }
 });

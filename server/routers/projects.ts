@@ -19,6 +19,7 @@ import {
     canManageServiceRequestStatus,
     canManageTimesheet,
     canReviewChangeRequest,
+    getManagedDepartments,
     hasAnyRole,
 } from "../_core/authorization";
 import { createNotification, createNotifications } from "../_core/notifications";
@@ -109,6 +110,20 @@ const getScheduledDayCount = (startDate?: Date | string, endDate?: Date | string
     return Math.max(1, Math.floor((end.getTime() - start.getTime()) / (1000 * 60 * 60 * 24)) + 1);
 };
 
+const getWbsItemStatus = (item: { status?: string; completionPercentage?: number }) => {
+    if (item.status) return item.status as "not_started" | "in_progress" | "completed";
+    const completion = Number(item.completionPercentage || 0);
+    if (completion >= 100) return "completed";
+    if (completion > 0) return "in_progress";
+    return "not_started";
+};
+
+const getCompletionPercentageForStatus = (status: "not_started" | "in_progress" | "completed", current = 0) => {
+    if (status === "completed") return 100;
+    if (status === "not_started") return 0;
+    return current > 0 && current < 100 ? current : 50;
+};
+
 const buildServiceRequestSearchQuery = (search?: string) => {
     const keyword = search?.trim();
     if (!keyword) {
@@ -189,6 +204,23 @@ const getManagerIds = async () => {
 
     return [...new Set(managers.map((manager: any) => manager._id.toString()))];
 };
+
+const buildDepartmentApprovals = async (items: Array<{ assigneeId?: string }>) => {
+    const assigneeIds = Array.from(new Set(items.map(item => item.assigneeId).filter(Boolean))) as string[];
+    if (assigneeIds.length === 0) return [];
+
+    const users = await UserModel.find({ _id: { $in: assigneeIds.map(id => toObjectId(id)) } })
+        .select("department")
+        .lean();
+    const departments = Array.from(new Set(users.map(user => user.department).filter(Boolean) as string[])).sort();
+
+    return departments.map(department => ({
+        department,
+        status: "pending" as const
+    }));
+};
+
+const getReviewerDepartments = (user: any): string[] | null => getManagedDepartments(user);
 
 export const projectsRouter = router({
     srList: protectedProcedure.input(z.object({
@@ -428,39 +460,71 @@ export const projectsRouter = router({
                 throw new TRPCError({ code: "BAD_REQUEST", message: "此版本不在待審核狀態" });
             }
 
-            const updatePayload: any = {
-                $set: {
-                    "wbsVersions.$.status": input.action,
-                    "wbsVersions.$.reviewedBy": ctx.user.id,
-                    "wbsVersions.$.rejectionReason": input.rejectionReason ?? null
-                },
-                $push: {
-                    "wbsVersions.$.auditLogs": {
-                        action: input.action,
-                        userId: toObjectId(ctx.user.id),
-                        timestamp: new Date(),
-                        reason: input.rejectionReason ?? null
-                    }
-                }
-            };
+            const approvals = version.departmentApprovals || [];
+            const reviewerDepartments = getReviewerDepartments(ctx.user);
+            const canApproveAll = reviewerDepartments === null;
+            const actionableApprovals = approvals.filter((approval: any) =>
+                canApproveAll || reviewerDepartments.includes(approval.department)
+            );
 
-            if (input.action === "approved" && sr.status === "new") {
-                updatePayload.$set.status = "in_progress";
+            if (approvals.length > 0 && actionableApprovals.length === 0) {
+                throw new TRPCError({ code: "FORBIDDEN", message: "此 WBS 不包含您可核准的部門" });
             }
 
-            await ServiceRequestModel.updateOne(
-                { "wbsVersions._id": input.id },
-                updatePayload
-            );
+            if (approvals.length === 0) {
+                version.status = input.action;
+                version.reviewedBy = toObjectId(ctx.user.id);
+                version.rejectionReason = input.rejectionReason ?? null;
+            } else if (input.action === "rejected") {
+                for (const approval of actionableApprovals) {
+                    approval.status = "rejected";
+                    approval.reviewedBy = toObjectId(ctx.user.id);
+                    approval.reviewedAt = new Date();
+                    approval.rejectionReason = input.rejectionReason ?? null;
+                }
+                version.status = "rejected";
+                version.reviewedBy = toObjectId(ctx.user.id);
+                version.rejectionReason = input.rejectionReason ?? null;
+            } else {
+                for (const approval of actionableApprovals) {
+                    approval.status = "approved";
+                    approval.reviewedBy = toObjectId(ctx.user.id);
+                    approval.reviewedAt = new Date();
+                    approval.rejectionReason = undefined;
+                }
+                const isFullyApproved = approvals.every((approval: any) => approval.status === "approved");
+                if (isFullyApproved) {
+                    version.status = "approved";
+                    version.reviewedBy = toObjectId(ctx.user.id);
+                    version.rejectionReason = null;
+                }
+            }
+
+            version.auditLogs = version.auditLogs || [];
+            version.auditLogs.push({
+                action: input.action,
+                userId: toObjectId(ctx.user.id),
+                timestamp: new Date(),
+                reason: input.rejectionReason ?? null
+            });
+
+            if (version.status === "approved" && sr.status === "new") {
+                sr.status = "in_progress";
+            }
+
+            sr.markModified("wbsVersions");
+            await sr.save();
 
             const recipients = [sr.pmId?.toString(), version.submittedBy?.toString()]
                 .filter((value): value is string => !!value);
             await createNotifications(recipients.map((userId) => ({
                 userId,
-                type: input.action === "approved" ? "approval" : "warning",
-                message: input.action === "approved"
+                type: version.status === "approved" ? "approval" : input.action === "rejected" ? "warning" : "info",
+                message: version.status === "approved"
                     ? `專案「${sr.title}」的 WBS v${version.versionNumber} 已核准。`
-                    : `專案「${sr.title}」的 WBS v${version.versionNumber} 已退回，請檢查原因後重新送審。`,
+                    : input.action === "rejected"
+                        ? `專案「${sr.title}」的 WBS v${version.versionNumber} 已退回，請檢查原因後重新送審。`
+                        : `專案「${sr.title}」的 WBS v${version.versionNumber} 已完成部分部門核准，仍待其他部門核准。`,
                 actionUrl: `/service-requests/${sr._id.toString()}`
             })));
 
@@ -566,6 +630,7 @@ export const projectsRouter = router({
                         ...item,
                         id: item._id.toString(),
                         assigneeId: item.assigneeId?.toString(),
+                        status: getWbsItemStatus(item),
                         startDate: item.startDate,
                         endDate: item.endDate
                     })),
@@ -574,6 +639,13 @@ export const projectsRouter = router({
                         userId: log.userId.toString(),
                         timestamp: log.timestamp,
                         reason: log.reason
+                    })),
+                    departmentApprovals: (v.departmentApprovals || []).map((approval: any) => ({
+                        department: approval.department,
+                        status: approval.status,
+                        reviewedBy: approval.reviewedBy?.toString(),
+                        reviewedAt: approval.reviewedAt,
+                        rejectionReason: approval.rejectionReason
                     })),
                     totalEstimatedHours
                 };
@@ -627,6 +699,7 @@ export const projectsRouter = router({
                 startDate: z.coerce.date().optional(),
                 endDate: z.coerce.date().optional(),
                 completionPercentage: z.number().optional(),
+                status: z.enum(["not_started", "in_progress", "completed"]).optional(),
                 colorCode: z.string().optional(),
                 level: z.number().optional(),
                 description: z.string().optional(),
@@ -646,6 +719,7 @@ export const projectsRouter = router({
             const isTechOrPresales = hasAnyRole(ctx.user, ["tech", "presales"]);
             assertAuthorized(canAccessServiceRequest(ctx.user, sr, opportunity) || isTechOrPresales, "您沒有權限提交 WBS 版本");
 
+            const departmentApprovals = await buildDepartmentApprovals(input.items);
             const newVersion = {
                 versionNumber: input.versionNumber,
                 status: "submitted" as const,
@@ -656,11 +730,15 @@ export const projectsRouter = router({
                     assigneeId: item.assigneeId ? new mongoose.Types.ObjectId(item.assigneeId) : undefined,
                     startDate: item.startDate,
                     endDate: item.endDate,
-                    completionPercentage: item.completionPercentage,
+                    status: item.status || getWbsItemStatus(item),
+                    completionPercentage: item.completionPercentage ?? getCompletionPercentageForStatus(item.status || getWbsItemStatus(item)),
                     colorCode: item.colorCode,
                     level: item.level || 0,
-                    description: item.description
+                    description: item.description,
+                    code: item.code,
+                    remarks: item.remarks
                 })),
+                departmentApprovals,
                 auditLogs: [{
                     action: "submitted",
                     userId: toObjectId(ctx.user.id),
@@ -899,6 +977,7 @@ export const projectsRouter = router({
                             scheduledDays,
                             remainingDays,
                             actualHours: item.actualHours || 0,
+                            status: getWbsItemStatus(item),
                             srTitle: sr.title,
                             assigneeId,
                             assigneeName: item.assigneeId?.name || "未指派",
@@ -1171,7 +1250,8 @@ export const projectsRouter = router({
             wbsItemId: z.string(),
             workDate: z.coerce.date(),
             hours: z.number(),
-            description: z.string()
+            description: z.string(),
+            taskStatus: z.enum(["not_started", "in_progress", "completed"]).optional()
         }))
         .mutation(async ({ ctx, input }) => {
             await assertSettlementUnlocked(getMonthKey(input.workDate), "project");
@@ -1219,6 +1299,9 @@ export const projectsRouter = router({
             });
 
             wbsItem.actualHours = (wbsItem.actualHours || 0) + input.hours;
+            const nextStatus = input.taskStatus || (wbsItem.status === "completed" ? "completed" : "in_progress");
+            wbsItem.status = nextStatus;
+            wbsItem.completionPercentage = getCompletionPercentageForStatus(nextStatus, wbsItem.completionPercentage || 0);
             if (!["in_progress", "completed", "cancelled"].includes(sr.status)) {
                 sr.status = "in_progress";
             }

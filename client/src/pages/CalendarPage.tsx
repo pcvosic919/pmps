@@ -18,6 +18,7 @@ export function CalendarPage() {
     const [quickScheduleTaskId, setQuickScheduleTaskId] = useState("");
     const [projectFilter, setProjectFilter] = useState("");
     const [newTaskTitle, setNewTaskTitle] = useState("");
+    const [draggedTask, setDraggedTask] = useState<any>(null);
 
     // Fetch WBS items assigned to current user
     const { data: assignments, isLoading } = trpc.projects.getMyProjectAssignments.useQuery();
@@ -108,11 +109,14 @@ export function CalendarPage() {
     const handleQuickSchedule = (taskId: string) => {
         const task = (assignments || []).find((a: any) => a.id === taskId);
         if (!task || !selectedDay) return;
-        
-        const startDate = selectedDay;
-        const endDate = selectedDay;
+        scheduleTaskOnDay(task, selectedDay);
+    };
 
-        if (task.sourceType === "manual") {
+    const scheduleTaskOnDay = (task: any, day: Date) => {
+        const startDate = day;
+        const endDate = day;
+
+        if (task.calendarTaskId || task.sourceType === "manual") {
             updateManualScheduleMutation.mutate({ id: task.calendarTaskId || task.id, startDate, endDate });
             return;
         }
@@ -122,6 +126,12 @@ export function CalendarPage() {
             startDate,
             endDate
         });
+    };
+
+    const handleDropOnDay = (day: Date) => {
+        if (!draggedTask) return;
+        scheduleTaskOnDay(draggedTask, day);
+        setDraggedTask(null);
     };
 
     const nextMonth = () => setCurrentDate(new Date(currentDate.getFullYear(), currentDate.getMonth() + 1, 1));
@@ -194,6 +204,14 @@ export function CalendarPage() {
                                    hover:bg-muted/20`}
                         key={dayCursor.toString()}
                         onClick={() => openDayModal(cloneDay)}
+                        onDragOver={(event) => {
+                            if (draggedTask) event.preventDefault();
+                        }}
+                        onDrop={(event) => {
+                            event.preventDefault();
+                            event.stopPropagation();
+                            handleDropOnDay(cloneDay);
+                        }}
                     >
                         <div className="flex justify-between items-start mb-2">
                             <span className={`w-7 h-7 flex items-center justify-center rounded-full text-sm font-bold ${isToday ? "bg-primary text-primary-foreground shadow-md" : "text-foreground/80"}`}>
@@ -202,7 +220,17 @@ export function CalendarPage() {
                         </div>
                         <div className="space-y-1.5 overflow-y-auto max-h-[100px] pr-1">
                             {dayAssignments.map((event: any, idx: number) => (
-                                <div key={idx} onClick={(e) => { e.stopPropagation(); openEditModal(event); }} className="bg-primary/5 border border-primary/20 rounded-md flex flex-col p-2 cursor-pointer hover:bg-primary/10 transition-all group shadow-sm">
+                                <div
+                                    key={idx}
+                                    draggable
+                                    onDragStart={(e) => {
+                                        e.stopPropagation();
+                                        setDraggedTask(event);
+                                    }}
+                                    onDragEnd={() => setDraggedTask(null)}
+                                    onClick={(e) => { e.stopPropagation(); openEditModal(event); }}
+                                    className="bg-primary/5 border border-primary/20 rounded-md flex flex-col p-2 cursor-grab active:cursor-grabbing hover:bg-primary/10 transition-all group shadow-sm"
+                                >
                                     <div className="text-[10px] text-primary/70 font-bold mb-0.5 truncate uppercase tracking-wider">{event.srTitle}</div>
                                     <div className="text-xs font-semibold truncate text-foreground/90 leading-tight">{event.title}</div>
                                     {event.isPmView && (
@@ -276,7 +304,14 @@ export function CalendarPage() {
                                 <p className="text-xs text-muted-foreground text-center py-4">目前沒有待排程的任務</p>
                             ) : (
                                 unscheduledAssignments.map((event: any) => (
-                                    <div key={event.id} onClick={() => openEditModal(event)} className="bg-background border border-border p-2.5 rounded shadow-sm hover:border-primary cursor-pointer transition-colors group">
+                                    <div
+                                        key={event.id}
+                                        draggable
+                                        onDragStart={() => setDraggedTask(event)}
+                                        onDragEnd={() => setDraggedTask(null)}
+                                        onClick={() => openEditModal(event)}
+                                        className="bg-background border border-border p-2.5 rounded shadow-sm hover:border-primary cursor-grab active:cursor-grabbing transition-colors group"
+                                    >
                                         <div className="text-[10px] text-primary/80 font-semibold mb-1 truncate">{event.srTitle}</div>
                                         <div className="text-sm font-medium text-foreground mb-1 group-hover:text-primary">{event.title}</div>
                                         {event.isPmView && (
@@ -286,7 +321,7 @@ export function CalendarPage() {
                                         )}
                                         <div className="text-xs text-muted-foreground flex items-center justify-between">
                                             <span className="flex items-center"><Clock className="w-3 h-3 mr-1" /> 剩 {event.remainingDays ?? event.estimatedHours} 天</span>
-                                            <span className="text-[10px] bg-muted px-1.5 rounded">點擊排程</span>
+                                            <span className="text-[10px] bg-muted px-1.5 rounded">拖曳排程</span>
                                         </div>
                                     </div>
                                 ))

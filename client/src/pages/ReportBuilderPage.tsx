@@ -15,7 +15,8 @@ type ReportType =
     | "sla_compliance"
     | "renewal_rate"
     | "open_cases"
-    | "kpi_revenue";
+    | "kpi_revenue"
+    | "project_completion_rate";
 
 export function ReportBuilderPage() {
     const [reportType, setReportType] = useState<ReportType>("timesheets");
@@ -43,6 +44,7 @@ export function ReportBuilderPage() {
         { reportType: "project_profitability", label: "客戶/專案毛利報表", category: "project", description: "專案毛利分析。", isExecutiveFormat: false },
         { reportType: "pm_ranking", label: "PM 排行榜", category: "project", description: "PM 營收與毛利排行。", isExecutiveFormat: false },
         { reportType: "budget_variance", label: "預算偏差分析", category: "project", description: "預算與實際偏差。", isExecutiveFormat: false },
+        { reportType: "project_completion_rate", label: "專案結算率報表", category: "project", description: "依 WBS 項目應完成日期與狀態計算月結算率。", isExecutiveFormat: false },
         { reportType: "sla_compliance", label: "SLA 達成率報表", category: "project", description: "專案準時狀況。", isExecutiveFormat: false },
         { reportType: "renewal_rate", label: "客戶續約/勝率報表", category: "project", description: "客戶維度勝率。", isExecutiveFormat: false },
     ];

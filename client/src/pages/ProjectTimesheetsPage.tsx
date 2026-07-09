@@ -13,6 +13,7 @@ export function ProjectTimesheetsPage() {
     const [workDate, setWorkDate] = useState<string>(new Date().toISOString().split("T")[0]);
     const [hours, setHours] = useState<number | "">("");
     const [description, setDescription] = useState("");
+    const [taskStatus, setTaskStatus] = useState<"not_started" | "in_progress" | "completed">("in_progress");
 
     // Filter state
     const [filterProjectId, setFilterProjectId] = useState<string>("all");
@@ -31,6 +32,7 @@ export function ProjectTimesheetsPage() {
             setSelectedWbsId("");
             setHours("");
             setDescription("");
+            setTaskStatus("in_progress");
         }
     });
 
@@ -53,6 +55,7 @@ export function ProjectTimesheetsPage() {
                 workDate: new Date(workDate),
                 hours: Number(hours),
                 description,
+                taskStatus,
             });
         } finally {
             setIsSubmitting(false);
@@ -64,10 +67,14 @@ export function ProjectTimesheetsPage() {
         if (!assignments) return [];
         const unique = new Map<string, { id: string; title: string; items: any[] }>();
         assignments.forEach((a: any) => {
+            if (!a.srId || !a.wbsItemId) return;
             if (!unique.has(a.srId)) {
                 unique.set(a.srId, { id: a.srId, title: a.srTitle, items: [] });
             }
-            unique.get(a.srId)?.items.push(a);
+            const project = unique.get(a.srId);
+            if (project && a.wbsItemId && !project.items.some(item => item.wbsItemId === a.wbsItemId)) {
+                project.items.push(a);
+            }
         });
         return Array.from(unique.values());
     }, [assignments]);
@@ -157,11 +164,11 @@ export function ProjectTimesheetsPage() {
                                     disabled={!selectedProjectId}
                                 >
                                     <option value="">-- 再選擇該專案下的 WBS --</option>
-                                    {availableWbsItems.map((a: any) => (
-                                        <option key={a.id} value={a.id}>
-                                            {a.title} ({a.estimatedHours} 天 / 已填 {a.actualHours || 0} 天)
-                                        </option>
-                                    ))}
+	                                    {availableWbsItems.map((a: any) => (
+	                                        <option key={a.wbsItemId || a.id} value={a.wbsItemId || a.id}>
+	                                            {a.title} ({a.estimatedHours} 天 / 已填 {a.actualHours || 0} 天)
+	                                        </option>
+	                                    ))}
                                 </select>
                                 {assignments?.length === 0 && (
                                     <p className="text-xs text-yellow-600 dark:text-yellow-400 mt-1 flex items-center gap-1">
@@ -175,8 +182,21 @@ export function ProjectTimesheetsPage() {
                                 )}
                             </div>
 
-                            <div>
-                                <label className="block text-sm font-medium mb-1">工作日期</label>
+	                            <div>
+	                                <label className="block text-sm font-medium mb-1">Task 狀態</label>
+	                                <select
+	                                    className="w-full border border-border bg-background rounded-md px-3 py-2 text-sm focus:ring-1 focus:ring-primary outline-none"
+	                                    value={taskStatus}
+	                                    onChange={(e) => setTaskStatus(e.target.value as any)}
+	                                >
+	                                    <option value="not_started">尚未開始</option>
+	                                    <option value="in_progress">進行中</option>
+	                                    <option value="completed">完成</option>
+	                                </select>
+	                            </div>
+
+	                            <div>
+	                                <label className="block text-sm font-medium mb-1">工作日期</label>
                                 <input
                                     type="date"
                                     className="w-full border border-border bg-background rounded-md px-3 py-2 text-sm focus:ring-1 focus:ring-primary outline-none"

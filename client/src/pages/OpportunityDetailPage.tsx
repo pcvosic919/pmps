@@ -8,6 +8,7 @@ import {
 import { useCurrentUser } from "../lib/useCurrentUser";
 import { SharePointFilesSection } from "../components/SharePointFilesSection";
 import { BusinessUserPicker } from "../components/BusinessUserPicker";
+import { UserSearchPicker } from "../components/UserSearchPicker";
 
 
 const OPP_STATUSES = [
@@ -35,8 +36,6 @@ export function OpportunityDetailPage() {
     // ------ Modal states ------
     const [showAssignModal, setShowAssignModal] = useState(false);
     const [assignTechId, setAssignTechId] = useState("");
-    const [assignTechSearchTerm, setAssignTechSearchTerm] = useState("");
-    const [showAssignSearchDropdown, setShowAssignSearchDropdown] = useState(false);
     const [assignHours, setAssignHours] = useState("8");
     const [assignError, setAssignError] = useState("");
 
@@ -50,8 +49,6 @@ export function OpportunityDetailPage() {
     const [memberUserId, setMemberUserId] = useState("");
     const [memberRole, setMemberRole] = useState<"owner" | "assignee" | "watcher">("watcher");
     const [memberError, setMemberError] = useState("");
-    const [memberSearchTerm, setMemberSearchTerm] = useState("");
-    const [showSearchDropdown, setShowSearchDropdown] = useState(false);
 
     const [showSRModal, setShowSRModal] = useState(false);
     const [srTitle, setSrTitle] = useState("");
@@ -97,7 +94,7 @@ export function OpportunityDetailPage() {
 
     // ------ Mutations ------
     const assignMutation = trpc.opportunities.assignPresales.useMutation({
-        onSuccess: () => { refetchAssignments(); refetchOpp(); setShowAssignModal(false); setAssignTechId(""); setAssignTechSearchTerm(""); setShowAssignSearchDropdown(false); setAssignHours("8"); setAssignError(""); },
+        onSuccess: () => { refetchAssignments(); refetchOpp(); setShowAssignModal(false); setAssignTechId(""); setAssignHours("8"); setAssignError(""); },
         onError: (err) => setAssignError(err.message || "指派失敗")
     });
 
@@ -107,7 +104,7 @@ export function OpportunityDetailPage() {
     });
 
     const addMemberMutation = trpc.opportunities.addMember.useMutation({
-        onSuccess: () => { refetchMembers(); setShowMemberModal(false); setMemberUserId(""); setMemberSearchTerm(""); setShowSearchDropdown(false); setMemberRole("watcher"); setMemberError(""); },
+        onSuccess: () => { refetchMembers(); setShowMemberModal(false); setMemberUserId(""); setMemberRole("watcher"); setMemberError(""); },
         onError: (err) => setMemberError(err.message || "新增失敗")
     });
 
@@ -704,45 +701,21 @@ export function OpportunityDetailPage() {
                             <h2 className="text-lg font-bold flex items-center"><Briefcase className="w-5 h-5 mr-2 text-primary" />新增協銷指派</h2>
                             <button onClick={() => setShowAssignModal(false)} className="p-1 rounded-full hover:bg-muted"><X className="w-5 h-5 text-muted-foreground" /></button>
                         </div>
-                        <div className="space-y-4">
-                            <div className="relative">
-                                <label className="block text-sm font-medium mb-1">選擇技術員 / 售前人員</label>
-                                <input
-                                    type="text"
-                                    placeholder="輸入姓名搜尋..."
-                                    value={assignTechSearchTerm}
-                                    onChange={e => {
-                                        setAssignTechSearchTerm(e.target.value);
-                                        setShowAssignSearchDropdown(true);
-                                        if (!e.target.value) setAssignTechId("");
-                                    }}
-                                    onFocus={() => setShowAssignSearchDropdown(true)}
-                                    className="w-full border border-border rounded-lg px-3 py-2 bg-background text-sm focus:outline-none focus:ring-2 focus:ring-primary/50"
-                                />
-                                {showAssignSearchDropdown && (
-                                    <div className="absolute z-10 w-full mt-1 bg-card border border-border rounded-lg shadow-lg max-h-48 overflow-auto">
-                                        {presalesList?.filter((u: any) =>
-                                            u.name.toLowerCase().includes(assignTechSearchTerm.toLowerCase())
-                                        ).map((u: any) => (
-                                            <button
-                                                key={u.id}
-                                                type="button"
-                                                onClick={() => {
-                                                    setAssignTechId(u.id);
-                                                    setAssignTechSearchTerm(`${u.name} (${u.role})`);
-                                                    setShowAssignSearchDropdown(false);
-                                                }}
-                                                className={`w-full text-left px-3 py-2 text-sm hover:bg-muted transition-colors ${assignTechId === u.id ? 'bg-primary/10 text-primary font-medium' : ''}`}
-                                            >
-                                                {u.name} <span className="text-xs text-muted-foreground ml-1">({u.role})</span>
-                                            </button>
-                                        ))}
-                                        {presalesList?.filter((u: any) => u.name.toLowerCase().includes(assignTechSearchTerm.toLowerCase())).length === 0 && (
-                                            <div className="px-3 py-2 text-sm text-muted-foreground">找不到符合的使用者</div>
-                                        )}
-                                    </div>
-                                )}
-                            </div>
+	                        <div className="space-y-4">
+	                            <div>
+	                                <label className="block text-sm font-medium mb-1">選擇技術員 / 售前人員</label>
+	                                <UserSearchPicker
+	                                    users={presalesList || []}
+	                                    selectedUserId={assignTechId}
+	                                    placeholder="搜尋姓名或 Email..."
+	                                    onSelect={(selectedUser) => setAssignTechId(selectedUser.id)}
+	                                    onClear={() => setAssignTechId("")}
+	                                    filterUser={(pickerUser) => {
+	                                        const roles = [pickerUser.role, ...(pickerUser.roles || [])];
+	                                        return roles.some(role => ["presales", "tech", "pm"].includes(role || ""));
+	                                    }}
+	                                />
+	                            </div>
                             <div>
                                 <label className="block text-sm font-medium mb-1">預估時數（小時）</label>
                                 <input type="number" min="0.5" step="0.5" value={assignHours} onChange={e => setAssignHours(e.target.value)}
@@ -770,49 +743,17 @@ export function OpportunityDetailPage() {
                             <button onClick={() => setShowMemberModal(false)} className="p-1 rounded-full hover:bg-muted"><X className="w-5 h-5 text-muted-foreground" /></button>
                         </div>
                         <div className="space-y-4">
-                            <div>
-                                <label className="block text-sm font-medium mb-1">選擇使用者</label>
-                                <div className="relative">
-                                    <input
-                                        type="text"
-                                        placeholder="輸入姓名或 Email 搜尋..."
-                                        value={memberSearchTerm}
-                                        onChange={e => {
-                                            setMemberSearchTerm(e.target.value);
-                                            setShowSearchDropdown(true);
-                                        }}
-                                        onFocus={() => setShowSearchDropdown(true)}
-                                        className="w-full border border-border rounded-lg px-3 py-2 bg-background text-sm focus:outline-none focus:ring-2 focus:ring-primary/50"
-                                    />
-                                    {showSearchDropdown && (
-                                        <div className="absolute z-50 mt-1 w-full bg-card border border-border rounded-lg shadow-lg max-h-48 overflow-y-auto">
-                                            {allUsers?.items?.filter((u: any) =>
-                                                !members?.find((m: any) => m.userId === u.id) &&
-                                                (u.name.toLowerCase().includes(memberSearchTerm.toLowerCase()) || u.email.toLowerCase().includes(memberSearchTerm.toLowerCase()))
-                                            ).length === 0 ? (
-                                                <div className="p-2 text-sm text-muted-foreground text-center">找不到對應人員</div>
-                                            ) : (
-                                                allUsers?.items?.filter((u: any) =>
-                                                    !members?.find((m: any) => m.userId === u.id) &&
-                                                    (u.name.toLowerCase().includes(memberSearchTerm.toLowerCase()) || u.email.toLowerCase().includes(memberSearchTerm.toLowerCase()))
-                                                ).map((u: any) => (
-                                                    <div
-                                                        key={u.id}
-                                                        onClick={() => {
-                                                            setMemberUserId(u.id);
-                                                            setMemberSearchTerm(u.name);
-                                                            setShowSearchDropdown(false);
-                                                        }}
-                                                        className={`p-2 hover:bg-muted cursor-pointer text-sm ${memberUserId === u.id ? 'bg-primary/10 font-medium' : ''}`}
-                                                    >
-                                                        {u.name} <span className="text-xs text-muted-foreground">({u.email} - {u.role})</span>
-                                                    </div>
-                                                ))
-                                            )}
-                                        </div>
-                                    )}
-                                </div>
-                            </div>
+	                            <div>
+	                                <label className="block text-sm font-medium mb-1">選擇使用者</label>
+	                                <UserSearchPicker
+	                                    users={allUsers?.items || []}
+	                                    selectedUserId={memberUserId}
+	                                    placeholder="搜尋姓名或 Email..."
+	                                    onSelect={(selectedUser) => setMemberUserId(selectedUser.id)}
+	                                    onClear={() => setMemberUserId("")}
+	                                    filterUser={(pickerUser) => !members?.find((m: any) => m.userId === pickerUser.id)}
+	                                />
+	                            </div>
                             <div>
                                 <label className="block text-sm font-medium mb-1">角色</label>
                                 <select value={memberRole} onChange={e => setMemberRole(e.target.value as any)}
