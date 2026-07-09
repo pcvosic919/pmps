@@ -34,6 +34,7 @@ export interface IOpportunity extends Document {
     approvedAzure?: boolean;
     approvedSecurity?: boolean;
     sharePointFolderUrl?: string;
+    localFolderPath?: string;
     createdAt: Date;
     updatedAt: Date;
 }
@@ -75,7 +76,8 @@ const OpportunitySchema = new Schema<IOpportunity>({
         uploadedById: { type: Schema.Types.ObjectId, ref: "User", required: true },
         uploadedAt: { type: Date, default: Date.now }
     }],
-    sharePointFolderUrl: { type: String }
+    sharePointFolderUrl: { type: String },
+    localFolderPath: { type: String }
 }, { timestamps: true });
 
 OpportunitySchema.index({ ownerId: 1, status: 1, createdAt: -1 });

@@ -1,11 +1,11 @@
 import { z } from "zod";
 import { router, protectedProcedure, roleProcedure } from "../_core/trpc";
-import { sharePointService, SharePointService } from "../services/SharePointService";
+import { sharePointService } from "../services/SharePointService";
+import { folderStorageService } from "../services/FolderStorageService";
 import { ServiceRequestModel } from "../models/ServiceRequest";
 import { SettlementLockModel } from "../models/SettlementLock";
 import { TimesheetModel } from "../models/Timesheet";
 import { UserModel } from "../models/User";
-import { SystemSettingModel } from "../models/Settings";
 import { OpportunityModel } from "../models/Opportunity";
 import { CalendarTaskModel } from "../models/CalendarTask";
 import mongoose from "mongoose";
@@ -315,19 +315,18 @@ export const projectsRouter = router({
                 members: buildSrMembers(ctx.user.id, input.pmId, input.joinPmAsMember)
             });
 
-            // SharePoint Folder Hook
+            // Document folder hook
             try {
-                const setting = await SystemSettingModel.findOne({ key: "sharePointSiteUrl" }).lean();
-                if (setting?.value) {
-                    const pm = await UserModel.findById(input.pmId).select("name").lean();
-                    const folderName = SharePointService.buildFolderName(input.title, input.customerName || oppCustomerName || "未知公司", pm?.name || "PM");
-                    const { folderUrl } = await sharePointService.createProjectFolder(setting.value, "專案", folderName);
-                    if (folderUrl) {
-                        await ServiceRequestModel.updateOne({ _id: sr._id }, { $set: { sharePointFolderUrl: folderUrl } });
-                    }
+                const pm = await UserModel.findById(input.pmId).select("name").lean();
+                const folder = await folderStorageService.createRecordFolder(input.title, "專案", input.customerName || oppCustomerName || "未知公司", pm?.name || "PM");
+                if (folder) {
+                    await ServiceRequestModel.updateOne(
+                        { _id: sr._id },
+                        { $set: { sharePointFolderUrl: folder.sharePointFolderUrl || "", localFolderPath: folder.localFolderPath || "" } }
+                    );
                 }
             } catch (err) {
-                console.error("[SharePoint Hook] Project creation folder failed:", err);
+                console.error("[FolderStorage Hook] Project creation folder failed:", err);
             }
 
             if (input.opportunityId) {

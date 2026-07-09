@@ -87,6 +87,7 @@ export interface IServiceRequest extends Document {
     changeRequests: IChangeRequest[];
     customFields?: Array<Omit<CustomFieldValue, "fieldId"> & { fieldId: mongoose.Types.ObjectId }>;
     sharePointFolderUrl?: string;
+    localFolderPath?: string;
     createdAt: Date;
     updatedAt: Date;
 }
@@ -201,6 +202,7 @@ const ServiceRequestSchema = new Schema<IServiceRequest>({
         createdAt: { type: Date, default: Date.now }
     }],
     sharePointFolderUrl: { type: String },
+    localFolderPath: { type: String },
     wbsVersions: [WbsVersionSchema],
     changeRequests: [ChangeRequestSchema],
     customFields: [{

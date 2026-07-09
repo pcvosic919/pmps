@@ -57,7 +57,7 @@ export function WbsManagementPage() {
 
     // Version comparison state
     const [compareTargets, setCompareTargets] = useState<Record<string, string>>({});
-    
+
     // Upload state
     const [isDragging, setIsDragging] = useState(false);
     const [isUploading, setIsUploading] = useState(false);
@@ -77,7 +77,7 @@ export function WbsManagementPage() {
     const { data: wbsQuote, refetch: refetchWbsQuote } = trpc.projects.generateWbsQuote.useQuery({ srId }, { enabled: false });
 
     // Review state...
-    
+
     const reviewMutation = trpc.projects.reviewWbsVersion.useMutation({
         onSuccess: () => {
             utils.projects.srById.invalidate({ id: srId });
@@ -419,7 +419,7 @@ export function WbsManagementPage() {
     // File upload (Mock implementation)
     const handleFileUpload = async (files: FileList | null) => {
         if (!files || files.length === 0) return;
-        
+
         setIsUploading(true);
         try {
             for (let i = 0; i < files.length; i++) {
@@ -587,8 +587,8 @@ export function WbsManagementPage() {
                                     <div key={i.id} className="p-3 border border-border rounded-lg bg-background text-sm hover:border-primary/40 transition-colors">
                                         <div className="flex justify-between items-start mb-2">
                                             <span className="font-bold truncate text-[13px]" title={i.title}>{i.title}</span>
-                                            <select 
-                                                value={i.status} 
+                                            <select
+                                                value={i.status}
                                                 onChange={e => updateIssueMutation.mutate({ id: i.id, status: e.target.value as any })}
                                                 className={`text-[10px] px-1.5 py-0.5 rounded border font-semibold outline-none focus:ring-2 focus:ring-primary/30 ${i.status === 'resolved' || i.status === 'closed' ? 'bg-green-100 text-green-700 border-green-200' : 'bg-amber-100 text-amber-700 border-amber-200'}`}
                                             >
@@ -631,7 +631,7 @@ export function WbsManagementPage() {
                                     {(!latestVersion || latestVersion.status !== "submitted") && (hasRole("admin") || hasRole("manager") || hasRole("tech") || hasRole("presales") || user?.id === sr.pmId) && (
                                         <button onClick={handleStartBuild}
                                             className="bg-primary text-primary-foreground hover:bg-primary/90 px-4 py-1.5 rounded-md inline-flex items-center text-sm font-medium transition-colors shadow-sm">
-                                            <Plus className="w-4 h-4 mr-1.5" />建立 v{nextVersionNumber} 
+                                            <Plus className="w-4 h-4 mr-1.5" />建立 v{nextVersionNumber}
                                         </button>
                                     )}
                                 </div>
@@ -822,13 +822,25 @@ export function WbsManagementPage() {
                                         <p className="text-muted-foreground">目前還沒有任何 WBS 版本，請建立以開始派工</p>
                                     </div>
                                 )}
-                                
+
                                 <div className="mt-8 border-t pt-8">
-                                    <SharePointFilesSection 
-                                        category="專案" 
-                                        sharePointFolderUrl={sr.sharePointFolderUrl} 
-                                        title="專案專屬 SharePoint 文件庫"
-                                    />
+                                    {sr.localFolderPath ? (
+                                        <div className="space-y-2">
+                                            <div className="flex items-center gap-2 font-semibold">
+                                                <FileText className="w-4 h-4 text-primary" />
+                                                專案專屬本機文件目錄
+                                            </div>
+                                            <div className="rounded-lg border border-border bg-muted/30 px-3 py-2 font-mono text-sm break-all">
+                                                {sr.localFolderPath}
+                                            </div>
+                                        </div>
+                                    ) : (
+                                        <SharePointFilesSection
+                                            category="專案"
+                                            sharePointFolderUrl={sr.sharePointFolderUrl}
+                                            title="專案專屬 SharePoint 文件庫"
+                                        />
+                                    )}
                                 </div>
                             </div>
                         </>
@@ -838,7 +850,7 @@ export function WbsManagementPage() {
                             <div className="p-4 border-b border-border bg-muted/30 flex justify-between items-center rounded-t-xl">
                                 <h3 className="font-bold text-lg flex items-center"><Plus className="w-5 h-5 mr-2 text-primary" />草稿：建立版本 v{nextVersionNumber}</h3>
                                 <div className="flex items-center gap-2">
-                                    <button 
+                                    <button
                                         onClick={() => document.getElementById('wbs-excel-import')?.click()}
                                         className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-xs font-semibold transition-all shadow-sm hover:shadow-md"
                                         title="從 Excel/CSV 匯入 WBS 項目"
@@ -846,12 +858,12 @@ export function WbsManagementPage() {
                                         <Upload className="w-3.5 h-3.5" />
                                         Excel 匯入
                                     </button>
-                                    <input 
+                                    <input
                                         id="wbs-excel-import"
-                                        type="file" 
-                                        accept=".xlsx, .xls, .csv" 
-                                        className="hidden" 
-                                        onChange={handleExcelImport} 
+                                        type="file"
+                                        accept=".xlsx, .xls, .csv"
+                                        className="hidden"
+                                        onChange={handleExcelImport}
                                     />
                                     <button onClick={() => { setIsBuildingVersion(false); setDraftItems([]); }}
                                         className="p-1 hover:bg-muted rounded text-muted-foreground hover:text-foreground transition-colors">

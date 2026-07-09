@@ -22,6 +22,8 @@ const defaultSettings = {
     hrSyncEnabled: false,
     availableProducts: [] as string[],
     sharePointSiteUrl: "",
+    folderStorageProvider: "sharepoint" as "sharepoint" | "local" | "disabled",
+    localFolderRootPath: "",
 };
 
 export function SystemSettingsPage() {
@@ -268,13 +270,25 @@ export function SystemSettingsPage() {
 
                             <div>
                                 <div className="flex items-center justify-between mb-4 border-b pb-2">
-                                    <h3 className="text-lg font-bold">Microsoft Graph API & SharePoint 整合</h3>
+                                    <h3 className="text-lg font-bold">自動建立文件目錄</h3>
                                 </div>
                                 <div className="grid gap-4 max-w-2xl">
                                     <div className="rounded-lg border border-dashed border-border bg-muted/30 p-3 text-xs text-muted-foreground">
-                                        用於自動建立 SharePoint 資料夾。需要 Microsoft Graph API 的 
+                                        建立商機或專案時，系統會依此設定自動建立文件目錄。SharePoint 需要 Microsoft Graph API 的
                                         <span className="font-semibold text-foreground"> Sites.Manage.All、Files.ReadWrite.All</span>
-                                        應用程式權限。
+                                        應用程式權限；本機目錄請確認 Docker 有掛載並具備寫入權限。
+                                    </div>
+                                    <div>
+                                        <label className="block text-sm font-medium mb-1">目錄儲存位置</label>
+                                        <select
+                                            value={settings.folderStorageProvider}
+                                            onChange={e => setSettings(s => ({ ...s, folderStorageProvider: e.target.value as "sharepoint" | "local" | "disabled" }))}
+                                            className="w-full p-2.5 rounded-lg border border-input bg-background/50 focus:bg-background text-sm"
+                                        >
+                                            <option value="sharepoint">SharePoint Online</option>
+                                            <option value="local">本機路徑</option>
+                                            <option value="disabled">停用自動建立目錄</option>
+                                        </select>
                                     </div>
                                     <div>
                                         <label className="block text-sm font-medium mb-1">SharePoint 站台 URL</label>
@@ -284,16 +298,29 @@ export function SystemSettingsPage() {
                                                 value={settings.sharePointSiteUrl}
                                                 placeholder="https://yourcompany.sharepoint.com/sites/PMP"
                                                 onChange={e => setSettings(s => ({ ...s, sharePointSiteUrl: e.target.value }))}
+                                                disabled={settings.folderStorageProvider !== "sharepoint"}
                                                 className="flex-1 p-2.5 rounded-lg border border-input bg-background/50 focus:bg-background font-mono text-sm"
                                             />
                                             <button
                                                 onClick={() => testSharePoint.mutate()}
-                                                disabled={testSharePoint.isPending || !settings.sharePointSiteUrl}
+                                                disabled={testSharePoint.isPending || !settings.sharePointSiteUrl || settings.folderStorageProvider !== "sharepoint"}
                                                 className="whitespace-nowrap px-4 py-2 bg-primary/10 text-primary hover:bg-primary/20 rounded-lg text-sm font-medium transition-colors disabled:opacity-50"
                                             >
                                                 {testSharePoint.isPending ? "建立中..." : "建立測試資料夾"}
                                             </button>
                                         </div>
+                                    </div>
+                                    <div>
+                                        <label className="block text-sm font-medium mb-1">本機根目錄路徑</label>
+                                        <input
+                                            type="text"
+                                            value={settings.localFolderRootPath}
+                                            placeholder="/app/storage/documents"
+                                            onChange={e => setSettings(s => ({ ...s, localFolderRootPath: e.target.value }))}
+                                            disabled={settings.folderStorageProvider !== "local"}
+                                            className="w-full p-2.5 rounded-lg border border-input bg-background/50 focus:bg-background font-mono text-sm disabled:opacity-60"
+                                        />
+                                        <p className="text-xs text-muted-foreground mt-1">Ubuntu + Docker 環境建議填容器內掛載路徑，例如 /app/storage/documents。</p>
                                     </div>
                                     <div>
                                         <label className="block text-sm font-medium mb-1">Graph API Client Secret</label>
@@ -302,6 +329,7 @@ export function SystemSettingsPage() {
                                             value={settings.graphApiSecret}
                                             placeholder="••••••••••••••••"
                                             onChange={e => setSettings(s => ({ ...s, graphApiSecret: e.target.value }))}
+                                            disabled={settings.folderStorageProvider !== "sharepoint"}
                                             className="w-full p-2.5 rounded-lg border border-input bg-background/50 focus:bg-background font-mono text-sm"
                                         />
                                         <p className="text-xs text-muted-foreground mt-1">來自 Azure App Registration 的 Client Secret</p>
@@ -380,37 +408,6 @@ export function SystemSettingsPage() {
                                             className="w-full p-2.5 rounded-lg border border-input bg-background/50 focus:bg-background text-sm"
                                         />
                                         <p className="text-xs text-muted-foreground mt-1">自動同步員工名單與部門資訊</p>
-                                    </div>
-                                </div>
-                            </div>
-
-                            <div>
-                                <h3 className="text-lg font-bold mb-4 border-b pb-2">📁 SharePoint Online 整合</h3>
-                                <div className="grid gap-4 max-w-2xl">
-                                    <div className="rounded-lg border border-dashed border-blue-200 bg-blue-50/50 dark:bg-blue-950/20 p-3 text-xs text-muted-foreground">
-                                        建立商機／SR 時，系統將自動在指定 SharePoint Site 建立目錄。<br />
-                                        目錄命名：<span className="font-mono font-semibold">YYYYMMDD_名稱_Owner</span><br />
-                                        需要 Entra App 具備 <span className="font-semibold text-foreground">Sites.Manage.All</span> 應用程式權限。
-                                    </div>
-                                    <div>
-                                        <label className="block text-sm font-medium mb-1">SharePoint Site URL</label>
-                                        <div className="flex gap-2">
-                                            <input
-                                                type="url"
-                                                value={(settings as any).sharePointSiteUrl || ""}
-                                                placeholder="https://yourdomain.sharepoint.com/sites/PMP"
-                                                onChange={e => setSettings(s => ({ ...s, sharePointSiteUrl: e.target.value }))}
-                                                className="flex-1 p-2.5 rounded-lg border border-input bg-background/50 focus:bg-background text-sm"
-                                            />
-                                            <button
-                                                onClick={() => testSharePoint.mutate()}
-                                                disabled={testSharePoint.isPending || !settings.sharePointSiteUrl}
-                                                className="whitespace-nowrap px-4 py-2 bg-primary/10 text-primary hover:bg-primary/20 rounded-lg text-sm font-medium transition-colors disabled:opacity-50"
-                                            >
-                                                {testSharePoint.isPending ? "建立中..." : "建立測試資料夾"}
-                                            </button>
-                                        </div>
-                                        <p className="text-xs text-muted-foreground mt-1">留空則會停用自動建立目錄功能（mock 模式）</p>
                                     </div>
                                 </div>
                             </div>

@@ -1,12 +1,12 @@
 import { z } from "zod";
 import { router, protectedProcedure, roleProcedure } from "../_core/trpc";
-import { sharePointService, SharePointService } from "../services/SharePointService";
+import { sharePointService } from "../services/SharePointService";
+import { folderStorageService } from "../services/FolderStorageService";
 import { OpportunityModel } from "../models/Opportunity";
 import { SettlementLockModel } from "../models/SettlementLock";
 import { TimesheetModel } from "../models/Timesheet";
 import { ServiceRequestModel } from "../models/ServiceRequest";
 import { UserModel } from "../models/User";
-import { SystemSettingModel } from "../models/Settings";
 import { TRPCError } from "@trpc/server";
 import { memberRoles, opportunityStatuses, opportunityTypes } from "../../shared/types";
 import {
@@ -207,19 +207,18 @@ export const opportunitiesRouter = router({
                 }]
             });
 
-            // SharePoint Folder Hook
+            // Document folder hook
             try {
-                const setting = await SystemSettingModel.findOne({ key: "sharePointSiteUrl" }).lean();
-                if (setting?.value) {
-                    const owner = await UserModel.findById(ownerId).select("name").lean();
-                    const folderName = SharePointService.buildFolderName(input.title, input.customerName || "未知公司", owner?.name || "Owner");
-                    const { folderUrl } = await sharePointService.createProjectFolder(setting.value, "商機", folderName);
-                    if (folderUrl) {
-                        await OpportunityModel.updateOne({ _id: result._id }, { $set: { sharePointFolderUrl: folderUrl } });
-                    }
+                const owner = await UserModel.findById(ownerId).select("name").lean();
+                const folder = await folderStorageService.createRecordFolder(input.title, "商機", input.customerName || "未知公司", owner?.name || "Owner");
+                if (folder) {
+                    await OpportunityModel.updateOne(
+                        { _id: result._id },
+                        { $set: { sharePointFolderUrl: folder.sharePointFolderUrl || "", localFolderPath: folder.localFolderPath || "" } }
+                    );
                 }
             } catch (err) {
-                console.error("[SharePoint Hook] Opportunity creation folder failed:", err);
+                console.error("[FolderStorage Hook] Opportunity creation folder failed:", err);
             }
 
             return { success: true, id: result._id.toString() };
@@ -520,19 +519,18 @@ export const opportunitiesRouter = router({
                 status: "new"
             });
 
-            // SharePoint Folder Hook
+            // Document folder hook
             try {
-                const setting = await SystemSettingModel.findOne({ key: "sharePointSiteUrl" }).lean();
-                if (setting?.value) {
-                    const pm = input.pmId ? await UserModel.findById(input.pmId).select("name").lean() : null;
-                    const folderName = SharePointService.buildFolderName(input.title, input.customerName || opportunity.customerName || "未知公司", pm?.name || ctx.user.name || "PM");
-                    const { folderUrl } = await sharePointService.createProjectFolder(setting.value, "專案", folderName);
-                    if (folderUrl) {
-                        await ServiceRequestModel.updateOne({ _id: result._id }, { $set: { sharePointFolderUrl: folderUrl } });
-                    }
+                const pm = input.pmId ? await UserModel.findById(input.pmId).select("name").lean() : null;
+                const folder = await folderStorageService.createRecordFolder(input.title, "專案", input.customerName || opportunity.customerName || "未知公司", pm?.name || ctx.user.name || "PM");
+                if (folder) {
+                    await ServiceRequestModel.updateOne(
+                        { _id: result._id },
+                        { $set: { sharePointFolderUrl: folder.sharePointFolderUrl || "", localFolderPath: folder.localFolderPath || "" } }
+                    );
                 }
             } catch (err) {
-                console.error("[SharePoint Hook] SR creation folder failed:", err);
+                console.error("[FolderStorage Hook] SR creation folder failed:", err);
             }
 
             await OpportunityModel.updateOne(

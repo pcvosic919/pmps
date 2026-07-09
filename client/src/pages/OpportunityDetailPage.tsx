@@ -193,15 +193,15 @@ export function OpportunityDetailPage() {
         if (!srTitle.trim()) { setSrError("請輸入 SR 名稱"); return; }
         const amount = parseFloat(srAmount);
         if (isNaN(amount) || amount <= 0) { setSrError("請輸入有效合約金額"); return; }
-        
-        createSRMutation.mutate({ 
-            opportunityId: id, 
-            title: srTitle, 
+
+        createSRMutation.mutate({
+            opportunityId: id,
+            title: srTitle,
             customerName: srCustomerName,
             salesUserId: srSalesUserId,
             salesDepartment: srSalesDepartment,
             salesRep: srSalesRep,
-            contractAmount: amount, 
+            contractAmount: amount,
             pmId: srPmId || undefined,
             techId: srTechId || undefined
         });
@@ -255,9 +255,9 @@ export function OpportunityDetailPage() {
             {/* 商機狀態流向圖 (Stepper) */}
             <div className="bg-card border border-border/50 rounded-xl p-5 shadow-sm flex items-center justify-between relative overflow-hidden">
                 <div className="absolute top-[2.1rem] left-0 right-0 h-0.5 bg-muted mx-16 z-0" />
-                <div 
-                    className="absolute top-[2.1rem] left-0 right-0 h-0.5 bg-primary mx-16 z-0 transition-all duration-500" 
-                    style={{ 
+                <div
+                    className="absolute top-[2.1rem] left-0 right-0 h-0.5 bg-primary mx-16 z-0 transition-all duration-500"
+                    style={{
                         width: `calc(${((() => {
                             switch(opp.status) {
                                 case 'new': return 0;
@@ -271,9 +271,9 @@ export function OpportunityDetailPage() {
                             if (p === 'new') return '0%';
                             return '2rem'; // Offset for right aligns
                         })()})`
-                    }} 
+                    }}
                 />
-                
+
                 {[
                     { value: "new", label: "待處理" },
                     { value: "qualified", label: "已確認" },
@@ -289,22 +289,22 @@ export function OpportunityDetailPage() {
                             default: return 0;
                         }
                     })();
-                    
+
                     const isCompleted = currentProgress > index;
                     const isActive = currentProgress === index;
-                    
+
                     return (
                         <div key={step.value} className="flex flex-col items-center z-10 relative">
                             <div className={`w-9 h-9 rounded-full flex items-center justify-center font-bold text-sm border-2 transition-all ${
-                                isCompleted ? 'bg-primary border-primary text-primary-foreground' : 
-                                isActive ? 'bg-background border-primary text-primary shadow-sm shadow-primary/20' : 
+                                isCompleted ? 'bg-primary border-primary text-primary-foreground' :
+                                isActive ? 'bg-background border-primary text-primary shadow-sm shadow-primary/20' :
                                 'bg-background border-muted text-muted-foreground'
                             }`}>
                                 {isCompleted ? <Check className="w-4 h-4" /> : index + 1}
                             </div>
                             <span className={`text-xs mt-1.5 font-semibold ${isActive || isCompleted ? 'text-foreground' : 'text-muted-foreground'}`}>
-                                {step.value === "final" && (opp.status === "won" || opp.status === "lost" || opp.status === "converted") 
-                                    ? currentStatus.label 
+                                {step.value === "final" && (opp.status === "won" || opp.status === "lost" || opp.status === "converted")
+                                    ? currentStatus.label
                                     : step.label}
                             </span>
                         </div>
@@ -502,18 +502,18 @@ export function OpportunityDetailPage() {
                         <FileText className="w-5 h-5 mr-2 text-primary" /> 商機自訂欄位
                     </h3>
                     {!isConverted && (hasRole("admin") || hasRole("manager") || user?.id === opp.ownerId) && !hasRole("business") && (
-                        <button 
-                            onClick={() => { 
-                                setShowCustomFieldsModal(true); 
+                        <button
+                            onClick={() => {
+                                setShowCustomFieldsModal(true);
                                 setEditingCustomFields(opp.customFields?.map((c: any) => ({ fieldId: c.fieldId, value: c.value })) || []);
-                            }} 
+                            }}
                             className="text-xs font-medium bg-primary/10 text-primary hover:bg-primary/20 px-3 py-1.5 flex items-center rounded-lg transition-colors"
                         >
                             編輯欄位
                         </button>
                     )}
                 </div>
-                
+
                 {oppFields.length > 0 ? (
                     <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mt-4">
                         {oppFields.map((f: any) => (
@@ -675,11 +675,23 @@ export function OpportunityDetailPage() {
 
             <div className="grid grid-cols-1 lg:grid-cols-1 gap-6 mb-8">
                 <div className="bg-card border border-border/50 rounded-xl shadow-sm overflow-hidden p-6">
-                    <SharePointFilesSection 
-                        category="商機" 
-                        sharePointFolderUrl={opp.sharePointFolderUrl} 
-                        title="商機專屬 SharePoint 文件庫"
-                    />
+                    {opp.localFolderPath ? (
+                        <div className="space-y-2">
+                            <div className="flex items-center gap-2 font-semibold">
+                                <FileText className="w-4 h-4 text-primary" />
+                                商機專屬本機文件目錄
+                            </div>
+                            <div className="rounded-lg border border-border bg-muted/30 px-3 py-2 font-mono text-sm break-all">
+                                {opp.localFolderPath}
+                            </div>
+                        </div>
+                    ) : (
+                        <SharePointFilesSection
+                            category="商機"
+                            sharePointFolderUrl={opp.sharePointFolderUrl}
+                            title="商機專屬 SharePoint 文件庫"
+                        />
+                    )}
                 </div>
             </div>
 
@@ -761,31 +773,31 @@ export function OpportunityDetailPage() {
                             <div>
                                 <label className="block text-sm font-medium mb-1">選擇使用者</label>
                                 <div className="relative">
-                                    <input 
-                                        type="text" 
-                                        placeholder="輸入姓名或 Email 搜尋..." 
-                                        value={memberSearchTerm} 
+                                    <input
+                                        type="text"
+                                        placeholder="輸入姓名或 Email 搜尋..."
+                                        value={memberSearchTerm}
                                         onChange={e => {
                                             setMemberSearchTerm(e.target.value);
                                             setShowSearchDropdown(true);
                                         }}
                                         onFocus={() => setShowSearchDropdown(true)}
-                                        className="w-full border border-border rounded-lg px-3 py-2 bg-background text-sm focus:outline-none focus:ring-2 focus:ring-primary/50" 
+                                        className="w-full border border-border rounded-lg px-3 py-2 bg-background text-sm focus:outline-none focus:ring-2 focus:ring-primary/50"
                                     />
                                     {showSearchDropdown && (
                                         <div className="absolute z-50 mt-1 w-full bg-card border border-border rounded-lg shadow-lg max-h-48 overflow-y-auto">
-                                            {allUsers?.items?.filter((u: any) => 
-                                                !members?.find((m: any) => m.userId === u.id) && 
+                                            {allUsers?.items?.filter((u: any) =>
+                                                !members?.find((m: any) => m.userId === u.id) &&
                                                 (u.name.toLowerCase().includes(memberSearchTerm.toLowerCase()) || u.email.toLowerCase().includes(memberSearchTerm.toLowerCase()))
                                             ).length === 0 ? (
                                                 <div className="p-2 text-sm text-muted-foreground text-center">找不到對應人員</div>
                                             ) : (
-                                                allUsers?.items?.filter((u: any) => 
-                                                    !members?.find((m: any) => m.userId === u.id) && 
+                                                allUsers?.items?.filter((u: any) =>
+                                                    !members?.find((m: any) => m.userId === u.id) &&
                                                     (u.name.toLowerCase().includes(memberSearchTerm.toLowerCase()) || u.email.toLowerCase().includes(memberSearchTerm.toLowerCase()))
                                                 ).map((u: any) => (
-                                                    <div 
-                                                        key={u.id} 
+                                                    <div
+                                                        key={u.id}
                                                         onClick={() => {
                                                             setMemberUserId(u.id);
                                                             setMemberSearchTerm(u.name);
@@ -1047,7 +1059,7 @@ export function OpportunityDetailPage() {
                             <h2 className="text-xl font-bold flex items-center tracking-tight"><FileText className="w-5 h-5 mr-2 text-primary" />編輯商機細節欄位</h2>
                             <button onClick={() => setShowCustomFieldsModal(false)} className="p-1.5 rounded-full hover:bg-muted bg-muted/50 transition-colors"><X className="w-5 h-5 text-muted-foreground" /></button>
                         </div>
-                        
+
                         <div className="space-y-5 flex-1 overflow-y-auto pr-2">
                             {oppFields.length === 0 ? (
                                 <p className="text-sm text-muted-foreground p-4 text-center">後台設定中尚未建立對應商機的可用欄位。</p>
@@ -1066,16 +1078,16 @@ export function OpportunityDetailPage() {
                                             <label className="block text-sm font-semibold text-foreground/90">
                                                 {field.name} {field.isRequired && <span className="text-red-500">*</span>}
                                             </label>
-                                            
+
                                             {field.fieldType === "textarea" ? (
-                                                <textarea 
-                                                    rows={4} 
+                                                <textarea
+                                                    rows={4}
                                                     value={currentValue}
                                                     onChange={e => handleFieldChange(e.target.value)}
                                                     className="w-full border border-input rounded-lg px-3 py-2 bg-background text-sm focus:outline-none focus:ring-2 focus:ring-primary/50 resize-y"
                                                 />
                                             ) : field.fieldType === "switch" ? (
-                                                <select 
+                                                <select
                                                     value={currentValue}
                                                     onChange={e => handleFieldChange(e.target.value)}
                                                     className="w-full border border-input rounded-lg px-3 py-2 bg-background text-sm focus:outline-none focus:ring-2 focus:ring-primary/50"
@@ -1085,7 +1097,7 @@ export function OpportunityDetailPage() {
                                                     <option value="false">關閉</option>
                                                 </select>
                                             ) : field.fieldType === "select" && field.options ? (
-                                                <select 
+                                                <select
                                                     value={currentValue}
                                                     onChange={e => handleFieldChange(e.target.value)}
                                                     className="w-full border border-input rounded-lg px-3 py-2 bg-background text-sm focus:outline-none focus:ring-2 focus:ring-primary/50"
@@ -1094,8 +1106,8 @@ export function OpportunityDetailPage() {
                                                     {field.options.map((opt: string) => <option key={opt} value={opt}>{opt}</option>)}
                                                 </select>
                                             ) : (
-                                                <input 
-                                                    type={field.fieldType === "number" ? "number" : field.fieldType === "date" ? "date" : "text"} 
+                                                <input
+                                                    type={field.fieldType === "number" ? "number" : field.fieldType === "date" ? "date" : "text"}
                                                     value={currentValue}
                                                     onChange={e => handleFieldChange(e.target.value)}
                                                     className="w-full border border-input rounded-lg px-3 py-2 bg-background text-sm focus:outline-none focus:ring-2 focus:ring-primary/50"
@@ -1109,7 +1121,7 @@ export function OpportunityDetailPage() {
 
                         <div className="flex justify-end gap-3 pt-4 border-t border-border/50">
                             <button onClick={() => setShowCustomFieldsModal(false)} className="px-5 py-2 text-sm font-medium border border-border rounded-lg hover:bg-muted transition-colors">取消</button>
-                            <button 
+                            <button
                                 onClick={() => updateCustomFieldsMutation.mutate({ id, customFields: editingCustomFields })}
                                 disabled={updateCustomFieldsMutation.isPending}
                                 className="px-5 py-2 text-sm font-medium bg-primary text-primary-foreground rounded-lg hover:bg-primary/90 transition-all active:scale-95 disabled:opacity-50 shadow-sm"

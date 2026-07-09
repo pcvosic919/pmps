@@ -33,7 +33,9 @@ const settingsPayloadSchema = z.object({
     pcMaintenancePointValue: z.number().min(0).default(500),
     pcKpiTarget: z.number().min(0).default(5000000),
     pcDeptKpiTargets: z.record(z.number().min(0)).default({}),
-    sharePointSiteUrl: z.string().trim().default("")
+    sharePointSiteUrl: z.string().trim().default(""),
+    folderStorageProvider: z.enum(["sharepoint", "local", "disabled"]).default("sharepoint"),
+    localFolderRootPath: z.string().trim().default("")
 });
 
 const defaultSettings = {
@@ -63,7 +65,9 @@ const defaultSettings = {
     pcMaintenancePointValue: 500,
     pcKpiTarget: 5000000,
     pcDeptKpiTargets: {},
-    sharePointSiteUrl: ""
+    sharePointSiteUrl: "",
+    folderStorageProvider: "sharepoint",
+    localFolderRootPath: ""
 };
 
 type SettingsKey = keyof typeof defaultSettings;
@@ -100,7 +104,9 @@ const settingDefinitions: Record<SettingsKey, SettingDefinition> = {
     pcMaintenancePointValue: { category: "general", valueType: "number" },
     pcKpiTarget: { category: "general", valueType: "number" },
     pcDeptKpiTargets: { category: "general", valueType: "json" },
-    sharePointSiteUrl: { category: "integrations", valueType: "string" }
+    sharePointSiteUrl: { category: "integrations", valueType: "string" },
+    folderStorageProvider: { category: "integrations", valueType: "string" },
+    localFolderRootPath: { category: "integrations", valueType: "string" }
 };
 
 function parseStoredValue(value: string, valueType: SettingDefinition["valueType"]) {
