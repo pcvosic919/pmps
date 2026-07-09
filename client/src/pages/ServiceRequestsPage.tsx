@@ -31,7 +31,7 @@ import { useCurrentUser } from "../lib/useCurrentUser";
 export function ServiceRequestsPage() {
     const { hasRole } = useCurrentUser();
     const { data: srs, isLoading, refetch } = trpc.projects.srList.useQuery();
-    const { data: users } = trpc.users.list.useQuery({ limit: 100 });
+    const { data: users } = trpc.users.list.useQuery({ limit: 500 });
 
     const [isCreating, setIsCreating] = useState(false);
 

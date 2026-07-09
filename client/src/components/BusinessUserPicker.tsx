@@ -6,6 +6,7 @@ type PickerUser = {
     name: string;
     email?: string;
     department?: string;
+    title?: string;
     role?: string;
     roles?: string[];
     isActive?: boolean;
@@ -25,6 +26,55 @@ const buildUserLabel = (user?: PickerUser, fallback = "") => {
     if (!user) return fallback;
     const email = user.email ? ` (${user.email})` : "";
     return `${user.name}${email}`;
+};
+
+const normalizeSearchText = (value: string) =>
+    value
+        .normalize("NFKC")
+        .toLowerCase()
+        .replace(/[\s\-_.@()[\]{}、，,。/\\]+/g, "")
+        .trim();
+
+const isSubsequence = (query: string, target: string) => {
+    if (!query) return true;
+    let targetIndex = 0;
+    for (const char of query) {
+        targetIndex = target.indexOf(char, targetIndex);
+        if (targetIndex === -1) return false;
+        targetIndex += 1;
+    }
+    return true;
+};
+
+const getUserSearchValues = (user: PickerUser) => [
+    user.name,
+    user.email,
+    user.department,
+    user.title,
+    user.role,
+    ...(user.roles || []),
+    `${user.name || ""} ${user.email || ""} ${user.department || ""} ${user.title || ""}`
+].filter(Boolean).map((value) => String(value));
+
+const getFuzzyScore = (user: PickerUser, rawQuery: string) => {
+    const normalizedQuery = normalizeSearchText(rawQuery);
+    if (!normalizedQuery) return 1;
+
+    const rawTokens = rawQuery
+        .split(/\s+/)
+        .map(normalizeSearchText)
+        .filter(Boolean);
+    const searchValues = getUserSearchValues(user);
+    const normalizedValues = searchValues.map(normalizeSearchText).filter(Boolean);
+    const combinedValue = normalizeSearchText(searchValues.join(" "));
+
+    if (normalizedValues.some((value) => value === normalizedQuery)) return 100;
+    if (normalizedValues.some((value) => value.startsWith(normalizedQuery))) return 85;
+    if (normalizedValues.some((value) => value.includes(normalizedQuery))) return 70;
+    if (rawTokens.length > 1 && rawTokens.every((token) => combinedValue.includes(token))) return 60;
+    if (isSubsequence(normalizedQuery, combinedValue)) return 40;
+
+    return 0;
 };
 
 export function BusinessUserPicker({
@@ -49,13 +99,11 @@ export function BusinessUserPicker({
         setSearchTerm(buildUserLabel(selectedUser, legacyName || ""));
     }, [legacyName, selectedUser]);
 
-    const normalizedSearch = searchTerm.trim().toLowerCase();
     const filteredUsers = activeUsers
-        .filter((user) => {
-            if (!normalizedSearch) return true;
-            return [user.name, user.email, user.department]
-                .some((value) => String(value || "").toLowerCase().includes(normalizedSearch));
-        })
+        .map((user) => ({ user, score: getFuzzyScore(user, searchTerm) }))
+        .filter((item) => item.score > 0)
+        .sort((left, right) => right.score - left.score || left.user.name.localeCompare(right.user.name, "zh-Hant"))
+        .map((item) => item.user)
         .slice(0, 30);
 
     return (
