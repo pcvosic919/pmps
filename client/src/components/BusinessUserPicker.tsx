@@ -1,5 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { Search, X } from "lucide-react";
+import { trpc } from "../lib/trpc";
+import { useDebounce } from "../lib/useDebounce";
 
 type PickerUser = {
     id: string;
@@ -49,6 +51,7 @@ const isSubsequence = (query: string, target: string) => {
 const getUserSearchValues = (user: PickerUser) => [
     user.name,
     user.email,
+    user.email?.split("@")[0],
     user.department,
     user.title,
     user.role,
@@ -88,10 +91,24 @@ export function BusinessUserPicker({
 }: BusinessUserPickerProps) {
     const [searchTerm, setSearchTerm] = useState("");
     const [isOpen, setIsOpen] = useState(false);
+    const debouncedSearchTerm = useDebounce(searchTerm, 250);
+    const shouldSearchServer = normalizeSearchText(debouncedSearchTerm).length >= 2;
+
+    const { data: searchedUsersData, isFetching: isSearching } = trpc.users.list.useQuery(
+        { limit: 50, search: debouncedSearchTerm, sortBy: "email" },
+        { enabled: shouldSearchServer }
+    );
+
+    const mergedUsers = useMemo(() => {
+        const userMap = new Map<string, PickerUser>();
+        for (const user of users || []) userMap.set(user.id, user);
+        for (const user of searchedUsersData?.items || []) userMap.set(user.id, user);
+        return Array.from(userMap.values());
+    }, [searchedUsersData?.items, users]);
 
     const activeUsers = useMemo(
-        () => (users || []).filter((user) => user.isActive !== false),
-        [users]
+        () => mergedUsers.filter((user) => user.isActive !== false),
+        [mergedUsers]
     );
     const selectedUser = activeUsers.find((user) => user.id === selectedUserId);
 
@@ -139,7 +156,9 @@ export function BusinessUserPicker({
             {isOpen && !disabled && (
                 <div className="absolute z-50 mt-1 w-full bg-card border border-border rounded-lg shadow-lg max-h-64 overflow-y-auto">
                     {filteredUsers.length === 0 ? (
-                        <div className="px-3 py-2 text-sm text-muted-foreground">找不到符合的帳號</div>
+                        <div className="px-3 py-2 text-sm text-muted-foreground">
+                            {isSearching ? "搜尋帳號中..." : "找不到符合的帳號"}
+                        </div>
                     ) : (
                         filteredUsers.map((user) => (
                             <button
