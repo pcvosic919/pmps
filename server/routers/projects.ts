@@ -929,7 +929,7 @@ export const projectsRouter = router({
                 ]
             })
                 .select("title pmId wbsVersions createdAt updatedAt plannedStartDate plannedEndDate closeDate completedAt")
-                .populate("wbsVersions.items.assigneeId", "name")
+                .populate("wbsVersions.items.assigneeId", "name email department")
                 .lean();
 
             const srIds = srs.map((sr: any) => sr._id);
@@ -973,18 +973,22 @@ export const projectsRouter = router({
                             srId: sr._id.toString(),
                             wbsItemId: item._id.toString(),
                             title: item.title,
-                            totalEstimatedHours: totalDays,
-                            scheduledDays,
-                            remainingDays,
-                            actualHours: item.actualHours || 0,
-                            status: getWbsItemStatus(item),
-                            srTitle: sr.title,
-                            assigneeId,
-                            assigneeName: item.assigneeId?.name || "未指派",
-                            isPmView: isPm && assigneeId !== ctx.user.id,
-                            sourceType: "wbs",
-                            projectWindowStart: projectWindow?.start,
-                            projectWindowEnd: projectWindow?.end
+	                            totalEstimatedHours: totalDays,
+	                            scheduledDays,
+	                            remainingDays,
+	                            actualHours: item.actualHours || 0,
+	                            status: getWbsItemStatus(item),
+	                            description: item.description || "",
+	                            code: item.code || "",
+	                            srTitle: sr.title,
+	                            assigneeId,
+	                            assigneeName: item.assigneeId?.name || "未指派",
+	                            assigneeEmail: item.assigneeId?.email || "",
+	                            assigneeDepartment: item.assigneeId?.department || "",
+	                            isPmView: isPm && assigneeId !== ctx.user.id,
+	                            sourceType: "wbs",
+	                            projectWindowStart: projectWindow?.start,
+	                            projectWindowEnd: projectWindow?.end
                         };
 
                         const scheduledEvents = scheduledTasks.map((task: any) => ({
@@ -1021,12 +1025,14 @@ export const projectsRouter = router({
                 actualHours: 0,
                 startDate: task.startDate,
                 endDate: task.endDate,
-                srTitle: "自行新增",
-                assigneeId: task.assigneeId?.toString(),
-                assigneeName: ctx.user.name || "我",
-                isPmView: false,
-                sourceType: "manual"
-            }));
+	                srTitle: "自行新增",
+	                assigneeId: task.assigneeId?.toString(),
+	                assigneeName: ctx.user.name || "我",
+	                assigneeEmail: ctx.user.email || "",
+	                assigneeDepartment: ctx.user.department || "",
+	                isPmView: false,
+	                sourceType: "manual"
+	            }));
 
             return [...wbsAssignments, ...manualAssignments];
         }),

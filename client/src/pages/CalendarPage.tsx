@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { trpc } from "../lib/trpc";
 import { format, startOfWeek, addDays, startOfMonth, isSameMonth, isSameDay } from "date-fns";
-import { ChevronLeft, ChevronRight, Calendar as CalendarIcon, Clock, X, AlertCircle, Plus } from "lucide-react";
+import { ChevronLeft, ChevronRight, Calendar as CalendarIcon, Clock, X, AlertCircle, Plus, Search, Users } from "lucide-react";
 import toast from "react-hot-toast";
 
 export function CalendarPage() {
@@ -19,6 +19,9 @@ export function CalendarPage() {
     const [projectFilter, setProjectFilter] = useState("");
     const [newTaskTitle, setNewTaskTitle] = useState("");
     const [draggedTask, setDraggedTask] = useState<any>(null);
+    const [daySearchTerm, setDaySearchTerm] = useState("");
+    const [dayDepartmentFilter, setDayDepartmentFilter] = useState("");
+    const [dayStatusFilter, setDayStatusFilter] = useState("");
 
     // Fetch WBS items assigned to current user
     const { data: assignments, isLoading } = trpc.projects.getMyProjectAssignments.useQuery();
@@ -104,6 +107,9 @@ export function CalendarPage() {
         setSelectedDay(day);
         setShowDayModal(true);
         setQuickScheduleTaskId("");
+        setDaySearchTerm("");
+        setDayDepartmentFilter("");
+        setDayStatusFilter("");
     };
 
     const handleQuickSchedule = (taskId: string) => {
@@ -142,6 +148,30 @@ export function CalendarPage() {
     const endDate = addDays(startDate, 41); // 6 weeks
 
     const dateFormat = "d";
+    const statusLabels: Record<string, string> = {
+        not_started: "尚未開始",
+        in_progress: "進行中",
+        completed: "完成"
+    };
+    const statusColors: Record<string, string> = {
+        not_started: "bg-muted text-muted-foreground border-border",
+        in_progress: "bg-sky-50 text-sky-700 border-sky-200",
+        completed: "bg-emerald-50 text-emerald-700 border-emerald-200"
+    };
+
+    const getAssignmentsOnDay = (day: Date, source = visibleAssignments) => {
+        const dayStart = new Date(day).setHours(0, 0, 0, 0);
+        return source.filter((assignment: any) => {
+            if (!assignment.startDate || !assignment.endDate) return false;
+            const eventStart = new Date(assignment.startDate).setHours(0, 0, 0, 0);
+            const eventEnd = new Date(assignment.endDate).setHours(23, 59, 59, 999);
+            return dayStart >= eventStart && dayStart <= eventEnd;
+        });
+    };
+
+    const getStatusText = (status?: string) => statusLabels[status || "not_started"] || "尚未開始";
+
+    const getStatusClass = (status?: string) => statusColors[status || "not_started"] || statusColors.not_started;
 
     const renderHeader = () => {
         return (
@@ -188,14 +218,10 @@ export function CalendarPage() {
                 const isCurrentMonth = isSameMonth(dayCursor, currentDate);
                 const isToday = isSameDay(dayCursor, new Date());
 
-                // Find assignments falling on this day
-                const dayAssignments = visibleAssignments.filter((a: any) => {
-                    if (!a.startDate || !a.endDate) return false;
-                    const eventStart = new Date(a.startDate);
-                    const eventEnd = new Date(a.endDate);
-                    return cloneDay >= new Date(eventStart.setHours(0,0,0,0)) && 
-                           cloneDay <= new Date(eventEnd.setHours(23,59,59,999));
-                });
+                const dayAssignments = getAssignmentsOnDay(cloneDay);
+                const visibleDayAssignments = dayAssignments.slice(0, 2);
+                const hiddenCount = Math.max(0, dayAssignments.length - visibleDayAssignments.length);
+                const peopleCount = new Set(dayAssignments.map((event: any) => event.assigneeId || event.assigneeName).filter(Boolean)).size;
 
                 daysArray.push(
                     <div 
@@ -218,8 +244,17 @@ export function CalendarPage() {
                                 {formattedDate}
                             </span>
                         </div>
-                        <div className="space-y-1.5 overflow-y-auto max-h-[100px] pr-1">
-                            {dayAssignments.map((event: any, idx: number) => (
+                        {dayAssignments.length > 0 && (
+                            <div className="mb-2 flex flex-wrap gap-1">
+                                <span className="text-[10px] border border-border bg-muted/40 rounded px-1.5 py-0.5">{peopleCount} 人</span>
+                                <span className="text-[10px] border border-border bg-muted/40 rounded px-1.5 py-0.5">{dayAssignments.length} 項</span>
+                                {dayAssignments.some((event: any) => event.status !== "completed") && (
+                                    <span className="text-[10px] border border-amber-200 bg-amber-50 text-amber-700 rounded px-1.5 py-0.5">進行中</span>
+                                )}
+                            </div>
+                        )}
+                        <div className="space-y-1.5">
+                            {visibleDayAssignments.map((event: any, idx: number) => (
                                 <div
                                     key={idx}
                                     draggable
@@ -233,19 +268,22 @@ export function CalendarPage() {
                                 >
                                     <div className="text-[10px] text-primary/70 font-bold mb-0.5 truncate uppercase tracking-wider">{event.srTitle}</div>
                                     <div className="text-xs font-semibold truncate text-foreground/90 leading-tight">{event.title}</div>
-                                    {event.isPmView && (
-                                        <div className="text-[9px] bg-primary/10 text-primary px-1.5 py-0.5 rounded-sm mt-1 inline-block truncate w-fit">
-                                            👤 {event.assigneeName}
-                                        </div>
-                                    )}
+                                    <div className="text-[10px] text-muted-foreground truncate mt-1">{event.assigneeName || "未指派"}</div>
                                     <div className="text-[10px] text-muted-foreground mt-1 flex items-center gap-1.5">
                                         <Clock className="w-3 h-3" />
                                         <span>{event.estimatedHours} 天</span>
-                                        <span className="opacity-40">|</span>
-                                        <span>{event.remainingDays ? `剩 ${event.remainingDays}天` : `已報 ${event.actualHours}h`}</span>
                                     </div>
                                 </div>
                             ))}
+                            {hiddenCount > 0 && (
+                                <button
+                                    type="button"
+                                    onClick={(event) => { event.stopPropagation(); openDayModal(cloneDay); }}
+                                    className="w-full text-[11px] font-semibold text-primary bg-primary/5 border border-primary/20 rounded-md px-2 py-1.5 hover:bg-primary/10"
+                                >
+                                    +{hiddenCount} 更多
+                                </button>
+                            )}
                         </div>
                     </div>
                 );
@@ -395,9 +433,38 @@ export function CalendarPage() {
                 </div>
             )}
 
-            {showDayModal && selectedDay && (
+            {showDayModal && selectedDay && (() => {
+                const dayTasks = getAssignmentsOnDay(selectedDay, assignments || []);
+                const departments = Array.from(new Set(dayTasks.map((task: any) => task.assigneeDepartment || "未指定").filter(Boolean))).sort();
+                const normalizedSearch = daySearchTerm.trim().toLowerCase();
+                const filteredDayTasks = dayTasks.filter((task: any) => {
+                    const searchText = [
+                        task.assigneeName,
+                        task.assigneeEmail,
+                        task.assigneeDepartment,
+                        task.srTitle,
+                        task.title,
+                        task.code,
+                        task.description
+                    ].filter(Boolean).join(" ").toLowerCase();
+                    const department = task.assigneeDepartment || "未指定";
+                    return (!normalizedSearch || searchText.includes(normalizedSearch))
+                        && (!dayDepartmentFilter || department === dayDepartmentFilter)
+                        && (!dayStatusFilter || (task.status || "not_started") === dayStatusFilter);
+                });
+                const groupedTasks = filteredDayTasks.reduce((groups: Record<string, any[]>, task: any) => {
+                    const key = task.assigneeId || task.assigneeName || "未指派";
+                    if (!groups[key]) groups[key] = [];
+                    groups[key].push(task);
+                    return groups;
+                }, {});
+                const peopleCount = new Set(dayTasks.map((task: any) => task.assigneeId || task.assigneeName).filter(Boolean)).size;
+                const totalDays = dayTasks.reduce((sum: number, task: any) => sum + Number(task.estimatedHours || 0), 0);
+                const completedCount = dayTasks.filter((task: any) => task.status === "completed").length;
+
+                return (
                 <div className="fixed inset-0 bg-background/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-                    <div className="bg-card w-full max-w-lg rounded-xl shadow-2xl border border-border overflow-hidden">
+                    <div className="bg-card w-full max-w-5xl max-h-[90vh] rounded-xl shadow-2xl border border-border overflow-hidden flex flex-col">
                         <div className="p-4 border-b border-border flex justify-between items-center bg-primary/5">
                             <h3 className="font-bold flex items-center gap-2">
                                 <CalendarIcon className="w-5 h-5 text-primary" />
@@ -407,105 +474,130 @@ export function CalendarPage() {
                                 <X className="w-5 h-5" />
                             </button>
                         </div>
-                        
-                        <div className="p-6 space-y-6">
-                            {/* Current Day Status */}
-                            <div>
-                                <h4 className="text-sm font-bold mb-3 flex justify-between items-center">
-                                    當日已安排任務
-                                    <span className="text-[10px] bg-muted px-2 py-0.5 rounded-full font-normal text-muted-foreground">一天以 8 小時為限</span>
-                                </h4>
-                                <div className="space-y-2">
-                                    {(() => {
-                                        const dayTasks = (assignments || []).filter((a: any) => {
-                                            if (!a.startDate || !a.endDate) return false;
-                                            const d = new Date(selectedDay).setHours(0,0,0,0);
-                                            return d >= new Date(a.startDate).setHours(0,0,0,0) && d <= new Date(a.endDate).setHours(0,0,0,0);
-                                        });
-                                        
-                                        if (dayTasks.length === 0) return <div className="text-center py-6 border border-dashed rounded-lg text-xs text-muted-foreground bg-muted/20">此日尚無安排任何任務</div>;
-                                        
-                                        let totalHours = 0;
-                                        return (
-                                            <>
-                                                {dayTasks.map((t, i) => {
-                                                    totalHours += 4; // Mocking 4h per task slot as requested (AM/PM logic)
-                                                    return (
-                                                        <div key={i} className="flex items-center gap-3 p-3 bg-background border border-border rounded-lg group hover:border-primary/50 transition-colors">
-                                                            <div className={`w-2 h-10 rounded-full ${i === 0 ? "bg-amber-400" : "bg-blue-400"}`} title={i === 0 ? "上午時段 (4h)" : "下午時段 (4h)"} />
-                                                            <div className="flex-1 min-w-0">
-                                                                <div className="text-[10px] text-muted-foreground truncate">{t.srTitle}</div>
-                                                                <div className="text-sm font-bold truncate">{t.title}</div>
-                                                                <div className="flex items-center gap-2 mt-1">
-                                                                    <span className="text-[10px] text-primary bg-primary/5 px-1.5 rounded">{i === 0 ? "早上 (AM) 4h" : "下午 (PM) 4h"}</span>
-                                                                    <span className="text-[10px] text-muted-foreground">本次: {t.estimatedHours} 天</span>
-                                                                </div>
-                                                            </div>
-                                                            <button onClick={() => openEditModal(t)} className="p-2 opacity-0 group-hover:opacity-100 text-muted-foreground hover:text-primary transition-all">
-                                                                <Clock className="w-4 h-4" />
-                                                            </button>
-                                                        </div>
-                                                    );
-                                                })}
-                                                <div className="pt-2 flex justify-end">
-                                                    <div className="text-xs font-semibold text-muted-foreground">
-                                                        當日佔用: <span className={totalHours > 8 ? "text-red-500" : "text-primary"}>{totalHours}h / 8h</span>
-                                                    </div>
-                                                </div>
-                                            </>
-                                        );
-                                    })()}
+
+                        <div className="p-5 overflow-y-auto space-y-5">
+                            <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                                <div className="border border-border rounded-lg p-3 bg-background">
+                                    <div className="text-xs text-muted-foreground">安排人數</div>
+                                    <div className="mt-1 text-xl font-bold">{peopleCount}</div>
+                                </div>
+                                <div className="border border-border rounded-lg p-3 bg-background">
+                                    <div className="text-xs text-muted-foreground">WBS 項目</div>
+                                    <div className="mt-1 text-xl font-bold">{dayTasks.length}</div>
+                                </div>
+                                <div className="border border-border rounded-lg p-3 bg-background">
+                                    <div className="text-xs text-muted-foreground">排程天數</div>
+                                    <div className="mt-1 text-xl font-bold">{totalDays}</div>
+                                </div>
+                                <div className="border border-border rounded-lg p-3 bg-background">
+                                    <div className="text-xs text-muted-foreground">完成項目</div>
+                                    <div className="mt-1 text-xl font-bold">{completedCount}</div>
                                 </div>
                             </div>
 
-                            {/* Quick Schedule Section */}
-                            <div className="pt-4 border-t border-border bg-muted/5 p-4 -mx-6 mb-[-1.5rem]">
+                            <div className="grid md:grid-cols-[1fr_180px_160px] gap-3">
+                                <div className="relative">
+                                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground pointer-events-none" />
+                                    <input
+                                        value={daySearchTerm}
+                                        onChange={(event) => setDaySearchTerm(event.target.value)}
+                                        placeholder="搜尋人員、Email、專案或 WBS"
+                                        className="w-full border border-border rounded-lg pl-9 pr-3 py-2 bg-background text-sm focus:outline-none focus:ring-2 focus:ring-primary/30"
+                                    />
+                                </div>
+                                <select
+                                    value={dayDepartmentFilter}
+                                    onChange={(event) => setDayDepartmentFilter(event.target.value)}
+                                    className="border border-border rounded-lg px-3 py-2 bg-background text-sm focus:outline-none focus:ring-2 focus:ring-primary/30"
+                                >
+                                    <option value="">全部部門</option>
+                                    {departments.map((department) => (
+                                        <option key={department} value={department}>{department}</option>
+                                    ))}
+                                </select>
+                                <select
+                                    value={dayStatusFilter}
+                                    onChange={(event) => setDayStatusFilter(event.target.value)}
+                                    className="border border-border rounded-lg px-3 py-2 bg-background text-sm focus:outline-none focus:ring-2 focus:ring-primary/30"
+                                >
+                                    <option value="">全部狀態</option>
+                                    <option value="not_started">尚未開始</option>
+                                    <option value="in_progress">進行中</option>
+                                    <option value="completed">完成</option>
+                                </select>
+                            </div>
+
+                            <div className="space-y-3">
+                                {filteredDayTasks.length === 0 ? (
+                                    <div className="text-center py-8 border border-dashed rounded-lg text-sm text-muted-foreground bg-muted/20">此日沒有符合條件的排程</div>
+                                ) : (
+                                    Object.entries(groupedTasks).map(([assigneeKey, tasks]) => {
+                                        const firstTask = (tasks as any[])[0];
+                                        const personDays = (tasks as any[]).reduce((sum, task) => sum + Number(task.estimatedHours || 0), 0);
+                                        return (
+                                            <div key={assigneeKey} className="border border-border rounded-lg bg-background overflow-hidden">
+                                                <div className="px-4 py-3 bg-muted/30 border-b border-border flex flex-wrap items-center justify-between gap-2">
+                                                    <div className="min-w-0">
+                                                        <div className="font-semibold truncate flex items-center gap-2">
+                                                            <Users className="w-4 h-4 text-primary" />
+                                                            {firstTask.assigneeName || "未指派"}
+                                                        </div>
+                                                        <div className="text-xs text-muted-foreground truncate">
+                                                            {firstTask.assigneeDepartment || "未指定部門"}{firstTask.assigneeEmail ? ` / ${firstTask.assigneeEmail}` : ""}
+                                                        </div>
+                                                    </div>
+                                                    <div className="text-xs text-muted-foreground">{(tasks as any[]).length} 項 / {personDays} 天</div>
+                                                </div>
+                                                <div className="divide-y divide-border/60">
+                                                    {(tasks as any[]).map((task) => (
+                                                        <div key={task.calendarTaskId || task.id} className="p-4 group hover:bg-muted/20 transition-colors">
+                                                            <div className="flex flex-col md:flex-row md:items-start md:justify-between gap-3">
+                                                                <div className="min-w-0">
+                                                                    <div className="text-xs text-muted-foreground truncate">{task.srTitle}</div>
+                                                                    <div className="font-semibold text-sm truncate">{task.title}</div>
+                                                                    {task.description && <div className="mt-1 text-xs text-muted-foreground line-clamp-2">{task.description}</div>}
+                                                                    <div className="mt-2 flex flex-wrap gap-2 text-[11px] text-muted-foreground">
+                                                                        {task.code && <span className="border border-border rounded px-1.5 py-0.5">WBS {task.code}</span>}
+                                                                        <span className="border border-border rounded px-1.5 py-0.5">{new Date(task.startDate).toISOString().slice(0, 10)} ~ {new Date(task.endDate).toISOString().slice(0, 10)}</span>
+                                                                        <span className="border border-border rounded px-1.5 py-0.5">本次 {task.estimatedHours} 天</span>
+                                                                        <span className="border border-border rounded px-1.5 py-0.5">已填 {task.actualHours || 0}h</span>
+                                                                    </div>
+                                                                </div>
+                                                                <div className="flex items-center gap-2 shrink-0">
+                                                                    <span className={`text-[11px] border rounded-full px-2 py-1 ${getStatusClass(task.status)}`}>{getStatusText(task.status)}</span>
+                                                                    <button onClick={() => openEditModal(task)} className="p-2 rounded-lg border border-border text-muted-foreground hover:text-primary hover:border-primary/50 transition-colors">
+                                                                        <Clock className="w-4 h-4" />
+                                                                    </button>
+                                                                </div>
+                                                            </div>
+                                                        </div>
+                                                    ))}
+                                                </div>
+                                            </div>
+                                        );
+                                    })
+                                )}
+                            </div>
+
+                            <div className="pt-4 border-t border-border bg-muted/5 p-4 -mx-5 mb-[-1.25rem]">
                                 <h4 className="text-sm font-bold mb-3 px-2">快速加入排程</h4>
-                                <div className="space-y-4 px-2">
-                                    <div className="space-y-2">
-                                        <label className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest">選擇待排程任務</label>
-                                        <select 
-                                            value={quickScheduleTaskId} 
-                                            onChange={(e) => setQuickScheduleTaskId(e.target.value)}
-                                            className="w-full text-sm rounded-lg border border-border bg-background px-4 py-2.5 outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all shadow-sm"
-                                        >
-                                            <option value="">-- 請選擇 --</option>
-                                            {unscheduledAssignments.map(a => (
-                                                <option key={a.id} value={a.id}>
-                                                    [{a.srTitle.slice(0, 8)}...] {a.title} (餘 {a.remainingDays ?? a.estimatedHours} 天)
-                                                </option>
-                                            ))}
-                                        </select>
-                                    </div>
-
-                                    {quickScheduleTaskId && (
-                                        <div className="bg-primary/5 rounded-lg p-3 border border-primary/10 animate-in fade-in slide-in-from-top-2">
-                                            <div className="flex justify-between items-center mb-2">
-                                                <span className="text-xs font-medium text-muted-foreground">本次排程預覽:</span>
-                                                <span className="text-xs font-bold text-primary bg-primary/10 px-2 py-0.5 rounded-full">
-                                                    {(() => {
-                                                        const t = (assignments || []).find(a => a.id === quickScheduleTaskId);
-                                                        if (!t) return "";
-                                                        return `排 1 天，剩 ${Math.max(0, (t.remainingDays ?? t.estimatedHours) - 1)} 天`;
-                                                    })()}
-                                                </span>
-                                            </div>
-                                            <div className="flex items-center gap-2 text-xs font-bold text-foreground/70">
-                                                <div className="flex-1 bg-background border border-border p-2 rounded text-center">
-                                                    {format(selectedDay, "MM/dd")}
-                                                </div>
-                                                <ChevronRight className="w-4 h-4 text-muted-foreground" />
-                                                <div className="flex-1 bg-background border border-border p-2 rounded text-center">
-                                                    {format(selectedDay, "MM/dd")}
-                                                </div>
-                                            </div>
-                                        </div>
-                                    )}
-
-                                    <button 
+                                <div className="grid md:grid-cols-[1fr_auto] gap-3 px-2">
+                                    <select
+                                        value={quickScheduleTaskId}
+                                        onChange={(e) => setQuickScheduleTaskId(e.target.value)}
+                                        className="w-full text-sm rounded-lg border border-border bg-background px-4 py-2.5 outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all shadow-sm"
+                                    >
+                                        <option value="">選擇待排程任務</option>
+                                        {unscheduledAssignments.map(a => (
+                                            <option key={a.id} value={a.id}>
+                                                [{a.srTitle.slice(0, 8)}...] {a.title} (餘 {a.remainingDays ?? a.estimatedHours} 天)
+                                            </option>
+                                        ))}
+                                    </select>
+                                    <button
                                         disabled={!quickScheduleTaskId || updateScheduleMutation.isPending || createWbsScheduleMutation.isPending}
                                         onClick={() => handleQuickSchedule(quickScheduleTaskId)}
-                                        className="w-full flex justify-center items-center gap-2 px-4 py-3 bg-primary text-primary-foreground rounded-xl text-sm font-bold hover:bg-primary/90 disabled:opacity-50 transition-all shadow-lg shadow-primary/20 active:scale-95"
+                                        className="flex justify-center items-center gap-2 px-4 py-2.5 bg-primary text-primary-foreground rounded-lg text-sm font-bold hover:bg-primary/90 disabled:opacity-50 transition-all"
                                     >
                                         <CalendarIcon className="w-4 h-4" />
                                         {(updateScheduleMutation.isPending || createWbsScheduleMutation.isPending) ? "儲存中..." : "排入選取日期"}
@@ -513,15 +605,10 @@ export function CalendarPage() {
                                 </div>
                             </div>
                         </div>
-
-                        <div className="p-4 bg-muted/20 border-t border-border flex justify-end">
-                            <button onClick={() => setShowDayModal(false)} className="px-4 py-2 text-sm font-medium border border-border rounded-lg hover:bg-background transition-colors">
-                                關閉
-                            </button>
-                        </div>
                     </div>
                 </div>
-            )}
+                );
+            })()}
         </div>
     );
 }
