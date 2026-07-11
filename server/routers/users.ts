@@ -6,6 +6,7 @@ import { roles } from "../../shared/types";
 import { decodeCursor, encodeCursor, toObjectId } from "../_core/cursor";
 import { assertEntraSyncConfigured, getEntraSettings, pruneStaleEntraUsersJob, syncEntraUsersJob } from "../_core/entra";
 import { hashPassword } from "../_core/password";
+import { canDeleteRecord } from "../_core/authorization";
 
 const userSortFields = ["name", "email", "role", "createdAt"] as const;
 
@@ -155,11 +156,11 @@ export const usersRouter = router({
         }),
 
     syncEntraUsers: roleProcedure(["admin"])
-        .mutation(async () => {
+        .mutation(async ({ ctx }) => {
             const settings = await getEntraSettings();
             assertEntraSyncConfigured(settings);
 
-            const result = await syncEntraUsersJob();
+            const result = await syncEntraUsersJob({ pruneStale: canDeleteRecord(ctx.user) });
             if (!result) {
                 throw new TRPCError({ code: "PRECONDITION_FAILED", message: "Entra ID sync is not configured properly." });
             }
@@ -168,7 +169,10 @@ export const usersRouter = router({
         }),
 
     clearAllEntraUsers: roleProcedure(["admin"])
-        .mutation(async () => {
+        .mutation(async ({ ctx }) => {
+            if (!canDeleteRecord(ctx.user)) {
+                throw new TRPCError({ code: "FORBIDDEN", message: "只有 Demo@demo.com 可以刪除資料" });
+            }
             const settings = await getEntraSettings();
             assertEntraSyncConfigured(settings);
 
@@ -205,7 +209,10 @@ export const usersRouter = router({
 
     deleteManual: roleProcedure(["admin"])
         .input(z.object({ id: z.string() }))
-        .mutation(async ({ input }) => {
+        .mutation(async ({ input, ctx }) => {
+            if (!canDeleteRecord(ctx.user)) {
+                throw new TRPCError({ code: "FORBIDDEN", message: "只有 Demo@demo.com 可以刪除資料" });
+            }
             const user = await UserModel.findById(input.id);
             if (!user) throw new TRPCError({ code: "NOT_FOUND" });
             if (user.provider !== "manual") {

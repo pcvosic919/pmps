@@ -32,6 +32,7 @@ export function OpportunityDetailPage() {
 
     const { user } = useCurrentUser();
     const hasRole = (role: string) => user?.role === role || (user?.roles || []).includes(role as any);
+    const canDelete = user?.email?.trim().toLowerCase() === "demo@demo.com";
 
     // ------ Modal states ------
     const [showAssignModal, setShowAssignModal] = useState(false);
@@ -373,7 +374,7 @@ export function OpportunityDetailPage() {
                                 {isConverted ? "已轉案，請結案重建" : "一鍵建立 SR / 專案"}
                             </button>
                         )}
-                        {hasRole("admin") && (
+                        {canDelete && (
                             <button
                                 onClick={() => {
                                     if (confirm("確定要刪除此商機嗎？此操作無法復原。")) {

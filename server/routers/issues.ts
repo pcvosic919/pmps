@@ -5,6 +5,7 @@ import { ServiceRequestModel } from "../models/ServiceRequest";
 import mongoose from "mongoose";
 import { issueStatuses, issuePriorities } from "../../shared/types";
 import { TRPCError } from "@trpc/server";
+import { canDeleteRecord } from "../_core/authorization";
 
 const syncIssueAssigneeToWbs = async (issue: any) => {
     if (!issue?.assigneeId) return;
@@ -95,7 +96,10 @@ export const issuesRouter = router({
 
     delete: protectedProcedure
         .input(z.object({ id: z.string() }))
-        .mutation(async ({ input }) => {
+        .mutation(async ({ input, ctx }) => {
+            if (!canDeleteRecord(ctx.user)) {
+                throw new TRPCError({ code: "FORBIDDEN", message: "只有 Demo@demo.com 可以刪除資料" });
+            }
             const issue = await IssueModel.findByIdAndDelete(input.id);
             if (!issue) throw new TRPCError({ code: "NOT_FOUND" });
             return { success: true };

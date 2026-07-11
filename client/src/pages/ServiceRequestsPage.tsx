@@ -29,7 +29,8 @@ const srSchema = z.object({
 import { useCurrentUser } from "../lib/useCurrentUser";
 
 export function ServiceRequestsPage() {
-    const { hasRole } = useCurrentUser();
+    const { user, hasRole } = useCurrentUser();
+    const canDelete = user?.email?.trim().toLowerCase() === "demo@demo.com";
     const { data: srs, isLoading, refetch } = trpc.projects.srList.useQuery();
     const { data: users } = trpc.users.list.useQuery({ limit: 500 });
 
@@ -184,7 +185,7 @@ export function ServiceRequestsPage() {
                                                     <ChevronRight className="w-3.5 h-3.5 ml-1" />
                                                 </a>
                                             </Link>
-                                            {hasRole("admin") && (
+                                            {canDelete && (
                                                 <button
                                                     onClick={() => {
                                                         if (confirm("確定要刪除此專案與 SR 嗎？此操作無法復原。")) {

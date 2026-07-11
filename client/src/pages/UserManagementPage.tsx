@@ -12,6 +12,7 @@ import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useDebounce } from "../lib/useDebounce";
 import { toast } from "react-hot-toast";
+import { useCurrentUser } from "../lib/useCurrentUser";
 
 const userSchema = z.object({
     name: z.string().min(1, "姓名不可為空"),
@@ -37,6 +38,8 @@ export function UserManagementPage() {
     const [searchTerm, setSearchTerm] = useState("");
     const [sortBy, setSortBy] = useState("name");
     const [sortOrder, setSortOrder] = useState<"asc" | "desc">("asc");
+    const { user: currentUser } = useCurrentUser();
+    const canDelete = currentUser?.email?.trim().toLowerCase() === "demo@demo.com";
 
     const debouncedSearchTerm = useDebounce(searchTerm, 500);
 
@@ -248,15 +251,17 @@ export function UserManagementPage() {
                         <RefreshCw className={`w-4 h-4 mr-2 ${syncEntraUsers.isPending ? "animate-spin" : ""}`} />
                         {syncEntraUsers.isPending ? "同步中..." : "同步 Entra ID"}
                     </button>
-                    <button
-                        type="button"
-                        onClick={handleClearEntraUsers}
-                        disabled={clearAllEntraUsers.isPending || syncEntraUsers.isPending}
-                        className="border border-destructive/20 text-destructive bg-destructive/5 hover:bg-destructive/10 px-5 py-2.5 rounded-lg inline-flex items-center text-sm font-medium transition-all shadow-sm disabled:opacity-50"
-                    >
-                        <Trash2 className="w-4 h-4 mr-2" />
-                        {clearAllEntraUsers.isPending ? "刪除中..." : "刪除舊帳號"}
-                    </button>
+                    {canDelete && (
+                        <button
+                            type="button"
+                            onClick={handleClearEntraUsers}
+                            disabled={clearAllEntraUsers.isPending || syncEntraUsers.isPending}
+                            className="border border-destructive/20 text-destructive bg-destructive/5 hover:bg-destructive/10 px-5 py-2.5 rounded-lg inline-flex items-center text-sm font-medium transition-all shadow-sm disabled:opacity-50"
+                        >
+                            <Trash2 className="w-4 h-4 mr-2" />
+                            {clearAllEntraUsers.isPending ? "刪除中..." : "刪除舊帳號"}
+                        </button>
+                    )}
                     <button
                         onClick={() => setIsCreatingUser(true)}
                         className="bg-primary text-primary-foreground hover:bg-primary/90 px-5 py-2.5 rounded-lg inline-flex items-center text-sm font-medium transition-all shadow-md hover:shadow-lg">
@@ -379,7 +384,7 @@ export function UserManagementPage() {
                                             >
                                                 <Edit className="w-4 h-4" />
                                             </button>
-                                            {user.provider === "manual" && (
+                                            {canDelete && user.provider === "manual" && (
                                                 <button
                                                     onClick={() => handleDelete(user.id, user.name)}
                                                     className="p-2 text-red-600 hover:bg-red-50 rounded-md transition-colors ml-2"

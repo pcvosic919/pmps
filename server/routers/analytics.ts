@@ -1,4 +1,5 @@
 import { router, protectedProcedure, roleProcedure } from "../_core/trpc";
+import { TRPCError } from "@trpc/server";
 import { ServiceRequestModel } from "../models/ServiceRequest";
 import { OpportunityModel } from "../models/Opportunity";
 import { TimesheetModel } from "../models/Timesheet";
@@ -14,7 +15,7 @@ import { ReportTemplateModel, reportTemplateCategories } from "../models/ReportT
 import { SettlementAuditLogModel, SettlementSnapshotModel } from "../models/SettlementSnapshot";
 import { z } from "zod";
 import { settlementTypes } from "../../shared/types";
-import { getManagedDepartments, hasAnyRole } from "../_core/authorization";
+import { canDeleteRecord, getManagedDepartments, hasAnyRole } from "../_core/authorization";
 import { toObjectId } from "../_core/cursor";
 
 const reportTypes = ["utilization", "settlement", "timesheets", "project_profitability", "pm_ranking", "budget_variance", "sla_compliance", "renewal_rate", "open_cases", "kpi_revenue", "project_completion_rate"] as const;
@@ -670,7 +671,10 @@ export const analyticsRouter = router({
 
     deleteKpiTarget: roleProcedure(["admin", "manager"])
         .input(z.object({ id: z.string() }))
-        .mutation(async ({ input }) => {
+        .mutation(async ({ input, ctx }) => {
+            if (!canDeleteRecord(ctx.user)) {
+                throw new TRPCError({ code: "FORBIDDEN", message: "只有 Demo@demo.com 可以刪除資料" });
+            }
             await KpiTargetModel.findByIdAndDelete(input.id);
             return { success: true };
         }),

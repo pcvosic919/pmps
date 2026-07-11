@@ -42,6 +42,7 @@ export function WbsManagementPage() {
     const srId = params?.id || "";
     const utils = trpc.useContext();
     const { hasRole, user } = useCurrentUser();
+    const canDelete = user?.email?.trim().toLowerCase() === "demo@demo.com";
 
     const [isBuildingVersion, setIsBuildingVersion] = useState(false);
     const [draftItems, setDraftItems] = useState<WbsDraftItem[]>([]);
@@ -1157,10 +1158,12 @@ export function WbsManagementPage() {
 	                                                        className="p-1.5 text-muted-foreground hover:text-primary hover:bg-primary/10 rounded" title="新增子任務">
                                                         <Plus className="w-4 h-4" />
                                                     </button>
-                                                    <button onClick={() => handleRemoveDraftItem(idx)}
-                                                        className="p-1.5 text-muted-foreground hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-950/30 rounded" title="移除此項">
-                                                        <Trash2 className="w-4 h-4" />
-                                                    </button>
+                                                    {canDelete && (
+                                                        <button onClick={() => handleRemoveDraftItem(idx)}
+                                                            className="p-1.5 text-muted-foreground hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-950/30 rounded" title="移除此項">
+                                                            <Trash2 className="w-4 h-4" />
+                                                        </button>
+                                                    )}
                                                 </div>
                                             </div>
                                         ))}

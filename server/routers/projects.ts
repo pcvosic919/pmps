@@ -14,6 +14,7 @@ import { approvalActions, srStatuses } from "../../shared/types";
 import {
     assertAuthorized,
     assertFound,
+    canDeleteRecord,
     canAccessChangeRequest,
     canAccessServiceRequest,
     canManageServiceRequestStatus,
@@ -25,6 +26,7 @@ import {
 import { createNotification, createNotifications } from "../_core/notifications";
 import { getAccessibleOpportunityQuery } from "./opportunities.listing";
 import { toObjectId } from "../_core/cursor";
+import { ensureCompanyByName } from "../_core/companies";
 
 const getMonthKey = (value: Date) => value.toISOString().slice(0, 7);
 
@@ -394,10 +396,12 @@ export const projectsRouter = router({
                 }
             }
             const salesUserFields = await getSalesUserFields(input.salesUserId);
+            const customerName = input.customerName || oppCustomerName;
+            await ensureCompanyByName(customerName, ctx.user.id);
 
             const sr = await ServiceRequestModel.create({
                 title: input.title,
-                customerName: input.customerName || oppCustomerName,
+                customerName,
                 salesUserId: salesUserFields?.salesUserId || oppSalesUserId,
                 salesDepartment: salesUserFields?.salesDepartment || input.salesDepartment || oppSalesDepartment,
                 salesRep: salesUserFields?.salesRep || input.salesRep || oppSalesRep,
@@ -414,7 +418,7 @@ export const projectsRouter = router({
             // Document folder hook
             try {
                 const pm = await UserModel.findById(input.pmId).select("name").lean();
-                const folder = await folderStorageService.createRecordFolder(input.title, "專案", input.customerName || oppCustomerName || "未知公司", pm?.name || "PM");
+                const folder = await folderStorageService.createRecordFolder(input.title, "專案", customerName || "未知公司", pm?.name || "PM");
                 if (folder) {
                     await ServiceRequestModel.updateOne(
                         { _id: sr._id },
@@ -1383,6 +1387,9 @@ export const projectsRouter = router({
     deleteProjectTimesheet: roleProcedure(["admin", "tech", "presales"])
         .input(z.object({ id: z.string() }))
         .mutation(async ({ ctx, input }) => {
+            if (!canDeleteRecord(ctx.user)) {
+                throw new TRPCError({ code: "FORBIDDEN", message: "只有 Demo@demo.com 可以刪除資料" });
+            }
             const ts = assertFound(await TimesheetModel.findById(input.id).lean(), "找不到該專案工時");
             await assertSettlementUnlocked(getMonthKey(new Date(ts.workDate)), "project");
             const serviceRequestDoc = ts.srId
@@ -1412,7 +1419,10 @@ export const projectsRouter = router({
 
     delete: roleProcedure(["admin"])
         .input(z.object({ id: z.string() }))
-        .mutation(async ({ input }) => {
+        .mutation(async ({ input, ctx }) => {
+            if (!canDeleteRecord(ctx.user)) {
+                throw new TRPCError({ code: "FORBIDDEN", message: "只有 Demo@demo.com 可以刪除資料" });
+            }
             const sr = await ServiceRequestModel.findById(input.id);
             assertFound(sr, "找不到該專案");
             

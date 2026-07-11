@@ -128,6 +128,7 @@ const navGroups: NavGroup[] = [
         label: "系統管理",
         items: [
             { icon: Settings, label: "帳號管理", href: "/users", roles: ["admin"] },
+            { icon: Building2, label: "公司管理", href: "/companies", roles: ["admin"] },
             { icon: Settings, label: "系統設定", href: "/system-settings", roles: ["admin"] },
         ],
     },

@@ -2,9 +2,12 @@ import { useState, useMemo } from "react";
 import { trpc } from "../lib/trpc";
 import { cn } from "../lib/utils";
 import { CalendarDays, Plus, Trash2, AlertCircle, Filter, Package } from "lucide-react";
+import { useCurrentUser } from "../lib/useCurrentUser";
 
 export function ProjectTimesheetsPage() {
     const utils = trpc.useContext();
+    const { user } = useCurrentUser();
+    const canDelete = user?.email?.trim().toLowerCase() === "demo@demo.com";
     const [isSubmitting, setIsSubmitting] = useState(false);
 
     // Form state
@@ -403,16 +406,18 @@ export function ProjectTimesheetsPage() {
                                                         <span>約 NT$ {t.costAmount?.toLocaleString()}</span>
                                                     </div>
                                                 </div>
-                                                <div className="flex items-center gap-2">
-                                                    <button
-                                                        onClick={() => deleteTime.mutate({ id: t.id })}
-                                                        className="p-2 text-muted-foreground hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-950/30 rounded-md transition-colors"
-                                                        title="刪除"
-                                                        disabled={deleteTime.isPending}
-                                                    >
-                                                        <Trash2 className="w-4 h-4" />
-                                                    </button>
-                                                </div>
+                                                {canDelete && (
+                                                    <div className="flex items-center gap-2">
+                                                        <button
+                                                            onClick={() => deleteTime.mutate({ id: t.id })}
+                                                            className="p-2 text-muted-foreground hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-950/30 rounded-md transition-colors"
+                                                            title="刪除"
+                                                            disabled={deleteTime.isPending}
+                                                        >
+                                                            <Trash2 className="w-4 h-4" />
+                                                        </button>
+                                                    </div>
+                                                )}
                                             </div>
                                         ))}
                                     </div>
@@ -436,13 +441,15 @@ export function ProjectTimesheetsPage() {
                                                             </div>
                                                             <div className="flex items-center justify-between md:justify-end gap-4 min-w-[120px]">
                                                                 <div className="text-xs text-muted-foreground font-medium">{t.hours} hr / {new Date(t.workDate).toLocaleDateString()}</div>
-                                                                <button
-                                                                    onClick={() => deleteTime.mutate({ id: t.id })}
-                                                                    className="p-1.5 text-muted-foreground hover:text-red-500 rounded-md transition-colors"
-                                                                    disabled={deleteTime.isPending}
-                                                                >
-                                                                    <Trash2 className="w-3.5 h-3.5" />
-                                                                </button>
+                                                                {canDelete && (
+                                                                    <button
+                                                                        onClick={() => deleteTime.mutate({ id: t.id })}
+                                                                        className="p-1.5 text-muted-foreground hover:text-red-500 rounded-md transition-colors"
+                                                                        disabled={deleteTime.isPending}
+                                                                    >
+                                                                        <Trash2 className="w-3.5 h-3.5" />
+                                                                    </button>
+                                                                )}
                                                             </div>
                                                         </div>
                                                     ))}

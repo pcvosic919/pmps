@@ -1,9 +1,12 @@
 import { useState } from "react";
 import { trpc } from "../lib/trpc";
 import { Settings2, Plus, Trash2, Edit } from "lucide-react";
+import { useCurrentUser } from "../lib/useCurrentUser";
 
 export function CustomFieldsPage() {
     const { data: fields, isLoading, refetch } = trpc.system.getCustomFields.useQuery();
+    const { user } = useCurrentUser();
+    const canDelete = user?.email?.trim().toLowerCase() === "demo@demo.com";
     const [editingId, setEditingId] = useState<string | null>(null);
     const createField = trpc.system.createCustomField.useMutation({ onSuccess: () => { setIsModalOpen(false); refetch(); } });
     const updateField = trpc.system.updateCustomField.useMutation({ onSuccess: () => { setIsModalOpen(false); refetch(); } });
@@ -128,7 +131,9 @@ export function CustomFieldsPage() {
                                         >
                                             <Edit className="w-4 h-4" />
                                         </button>
-                                        <button onClick={() => handleDelete(f.id)} className="text-red-500 hover:text-red-700 p-1"><Trash2 className="w-4 h-4" /></button>
+                                        {canDelete && (
+                                            <button onClick={() => handleDelete(f.id)} className="text-red-500 hover:text-red-700 p-1"><Trash2 className="w-4 h-4" /></button>
+                                        )}
                                     </td>
                                 </tr>
                             ))

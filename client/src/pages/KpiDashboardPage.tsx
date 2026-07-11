@@ -149,8 +149,12 @@ export function KpiDashboardPage() {
                 </button>
             </div>
 
-            <div className="bg-card border border-border rounded-xl p-4 shadow-sm flex flex-col md:flex-row gap-4 items-start md:items-center justify-between">
-                <div>
+            <details open className="bg-card border border-border rounded-xl shadow-sm [&>summary::-webkit-details-marker]:hidden">
+                <summary className="cursor-pointer select-none border-b border-border px-4 py-3 text-sm font-bold hover:bg-muted/40">
+                    篩選與顯示模組
+                </summary>
+                <div className="p-4 flex flex-col md:flex-row gap-4 items-start md:items-center justify-between">
+                    <div>
                     <div className="text-sm font-semibold mb-2">資料篩選 (Data Filters)</div>
                     <div className="flex flex-wrap gap-4">
                         <div className="flex flex-col gap-1.5">
@@ -211,7 +215,7 @@ export function KpiDashboardPage() {
                     </div>
                 </div>
                 
-                <div className="border-t md:border-t-0 md:border-l border-border pt-4 md:pt-0 md:pl-6">
+                    <div className="border-t md:border-t-0 md:border-l border-border pt-4 md:pt-0 md:pl-6">
                     <div className="text-sm font-semibold mb-2">顯示模組 (Visible Layout)</div>
                     <div className="flex flex-wrap gap-2">
                         {[
@@ -234,11 +238,16 @@ export function KpiDashboardPage() {
                             );
                         })}
                     </div>
+                    </div>
                 </div>
-            </div>
+            </details>
 
             {importedRevenueData?.hasImport && (
-                <div className="grid gap-4 md:grid-cols-4">
+                <details open className="bg-card border border-border rounded-xl shadow-sm [&>summary::-webkit-details-marker]:hidden">
+                    <summary className="cursor-pointer select-none border-b border-border px-4 py-3 text-sm font-bold hover:bg-muted/40">
+                        匯入認列摘要
+                    </summary>
+                <div className="grid gap-4 p-4 md:grid-cols-4">
                     <div className="bg-card p-5 border border-border rounded-xl shadow-sm">
                         <div className="text-sm text-muted-foreground">年度目標</div>
                         <div className="text-2xl font-bold mt-1">NT$ {importedRevenueData.totalTarget.toLocaleString()}</div>
@@ -259,9 +268,14 @@ export function KpiDashboardPage() {
                         <div className="text-xs text-muted-foreground mt-1">認列 + 加權 Pipeline / 目標</div>
                     </div>
                 </div>
+                </details>
             )}
 
-            <div className="grid gap-4 lg:grid-cols-3">
+            <details open className="bg-card border border-border rounded-xl shadow-sm [&>summary::-webkit-details-marker]:hidden">
+                <summary className="cursor-pointer select-none border-b border-border px-4 py-3 text-sm font-bold hover:bg-muted/40">
+                    KPI 治理設定
+                </summary>
+            <div className="grid gap-4 p-4 lg:grid-cols-3">
                 <div className="bg-card border border-border rounded-xl p-5 shadow-sm lg:col-span-1">
                     <h3 className="font-bold mb-3">KPI 資料來源定義</h3>
                     <div className="space-y-3">
@@ -347,9 +361,14 @@ export function KpiDashboardPage() {
                     </div>
                 </div>
             </div>
+            </details>
 
             {/* Key Metrics */}
-            <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+            <details open className="bg-card border border-border rounded-xl shadow-sm [&>summary::-webkit-details-marker]:hidden">
+                <summary className="cursor-pointer select-none border-b border-border px-4 py-3 text-sm font-bold hover:bg-muted/40">
+                    關鍵指標
+                </summary>
+            <div className="grid gap-4 p-4 md:grid-cols-2 lg:grid-cols-4">
                 <div className="bg-card p-5 border border-border rounded-xl shadow-sm hover:shadow-md transition-shadow">
                     <div className="flex items-center text-muted-foreground mb-2">
                         <TrendingUp className="w-4 h-4 mr-2 text-green-500" />
@@ -386,9 +405,14 @@ export function KpiDashboardPage() {
                     <div className="text-xs text-muted-foreground mt-1">基於結算模型估計</div>
                 </div>
             </div>
+            </details>
 
             {/* Dept KPI Table */}
-            <div className="bg-card border border-border rounded-xl shadow-sm overflow-hidden">
+            <details open className="bg-card border border-border rounded-xl shadow-sm overflow-hidden [&>summary::-webkit-details-marker]:hidden">
+                <summary className="cursor-pointer select-none border-b border-border px-4 py-3 text-sm font-bold hover:bg-muted/40">
+                    部門達成明細
+                </summary>
+            <div>
                 <div className="p-6 border-b border-border flex items-center justify-between">
                     <div>
                         <h3 className="text-lg font-bold flex items-center gap-2">
@@ -467,8 +491,13 @@ export function KpiDashboardPage() {
                     </table>
                 </div>
             </div>
+            </details>
 
-            <div className="grid md:grid-cols-2 gap-6">
+            <details open className="bg-card border border-border rounded-xl shadow-sm [&>summary::-webkit-details-marker]:hidden">
+                <summary className="cursor-pointer select-none border-b border-border px-4 py-3 text-sm font-bold hover:bg-muted/40">
+                    圖表分析
+                </summary>
+            <div className="grid md:grid-cols-2 gap-6 p-4">
                 {/* Opp Status Pie Chart */}
                 {visibleCharts.opportunityMix && (
                     <div className="bg-card border border-border rounded-xl p-6 shadow-sm">
@@ -567,7 +596,7 @@ export function KpiDashboardPage() {
                 )}
             </div>
 
-            <div className="grid md:grid-cols-2 gap-6">
+            <div className="grid md:grid-cols-2 gap-6 px-4 pb-4">
                 {/* Win Rate Trend Line Chart */}
                 {visibleCharts.winRateTrend && (
                 <div className="bg-card border border-border rounded-xl p-6 shadow-sm">
@@ -611,6 +640,7 @@ export function KpiDashboardPage() {
                 </div>
                 )}
             </div>
+            </details>
         </div>
     );
 }

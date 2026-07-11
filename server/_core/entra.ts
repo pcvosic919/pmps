@@ -162,7 +162,7 @@ export async function pruneStaleEntraUsersJob() {
     };
 }
 
-export async function syncEntraUsersJob() {
+export async function syncEntraUsersJob(options: { pruneStale?: boolean } = {}) {
     try {
         const settings = await getEntraSettings();
         if (!settings.enabled || !settings.clientId || !settings.tenantId || !settings.clientSecret) {
@@ -209,10 +209,14 @@ export async function syncEntraUsersJob() {
             }
         }
 
-        const deleteResult = await UserModel.deleteMany({
-            provider: "entra",
-            providerId: { $nin: validProviderIds }
-        });
+        let deleted = 0;
+        if (options.pruneStale) {
+            const deleteResult = await UserModel.deleteMany({
+                provider: "entra",
+                providerId: { $nin: validProviderIds }
+            });
+            deleted = deleteResult.deletedCount;
+        }
 
         return {
             totalFetched: directoryUsers.length,
@@ -220,7 +224,7 @@ export async function syncEntraUsersJob() {
             created,
             updated,
             disabled,
-            deleted: deleteResult.deletedCount
+            deleted
         };
     } catch (error) {
         console.error("syncEntraUsersJob failed:", error);

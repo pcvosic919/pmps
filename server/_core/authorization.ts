@@ -43,9 +43,11 @@ export const hasAnyRole = (user: UserSession, roles: Role[]) =>
 export const isAdminOrManager = (user: UserSession) =>
     hasAnyRole(user, ["admin", "manager"]);
 
-// Only admin can delete records
+const normalizeEmail = (value?: string | null) => (value || "").trim().toLowerCase();
+
+// Only the demo owner account can delete records. Other admins keep create/edit permissions.
 export const canDeleteRecord = (user: UserSession) =>
-    hasAnyRole(user, ["admin"]);
+    normalizeEmail(user.email) === "demo@demo.com";
 
 // Admin and manager can create / edit (but not delete)
 export const canCreateOrEdit = (user: UserSession) =>

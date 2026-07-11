@@ -13,6 +13,7 @@ import {
     assertAuthorized,
     assertFound,
     canAccessOpportunity,
+    canDeleteRecord,
     canManageOpportunity,
     canManageTimesheet,
     getManagedDepartments,
@@ -21,6 +22,7 @@ import {
 } from "../_core/authorization";
 import { decodeCursor, encodeCursor, toObjectId } from "../_core/cursor";
 import { createNotification } from "../_core/notifications";
+import { ensureCompanyByName } from "../_core/companies";
 import {
     buildOpportunityListQuery,
     opportunitySortFields,
@@ -194,6 +196,7 @@ export const opportunitiesRouter = router({
         .mutation(async ({ input, ctx }) => {
             const ownerId = ctx.user.id;
             const salesUserFields = await getSalesUserFields(input.salesUserId);
+            await ensureCompanyByName(input.customerName, ownerId);
 
             const result = await OpportunityModel.create({
                 ...input,
@@ -750,6 +753,9 @@ export const opportunitiesRouter = router({
     deletePresalesTimesheet: roleProcedure(["admin", "tech", "presales", "pm"])
         .input(z.object({ id: z.string() }))
         .mutation(async ({ ctx, input }) => {
+            if (!canDeleteRecord(ctx.user)) {
+                throw new TRPCError({ code: "FORBIDDEN", message: "只有 Demo@demo.com 可以刪除資料" });
+            }
             const ts = assertFound(await TimesheetModel.findById(input.id).lean(), "找不到該協銷工時");
             await assertSettlementUnlocked(getMonthKey(new Date(ts.workDate)), "presales");
             const opportunity = ts.opportunityId
@@ -809,7 +815,10 @@ export const opportunitiesRouter = router({
 
     delete: roleProcedure(["admin"])
         .input(z.object({ id: z.string() }))
-        .mutation(async ({ input }) => {
+        .mutation(async ({ input, ctx }) => {
+            if (!canDeleteRecord(ctx.user)) {
+                throw new TRPCError({ code: "FORBIDDEN", message: "只有 Demo@demo.com 可以刪除資料" });
+            }
             const opp = await OpportunityModel.findById(input.id);
             assertFound(opp, "找不到該商機");
             

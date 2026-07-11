@@ -9,6 +9,7 @@ export function PresalesTimesheetsPage() {
     const utils = trpc.useContext();
     const { user } = useCurrentUser();
     const canViewAllTimesheets = !!user && (user.role === "manager" || user.role === "pm" || user.roles.includes("manager") || user.roles.includes("pm"));
+    const canDelete = user?.email?.trim().toLowerCase() === "demo@demo.com";
     const [isSubmitting, setIsSubmitting] = useState(false);
     const [viewMode, setViewMode] = useState<"list" | "week" | "month">("list");
 
@@ -235,7 +236,7 @@ export function PresalesTimesheetsPage() {
                                                         <span>約 NT$ {t.costAmount?.toLocaleString()}</span>
                                                     </div>
                                                 </div>
-                                                {!canViewAllTimesheets && (
+                                                {canDelete && (
                                                     <div className="flex items-center gap-2">
                                                         <button
                                                             onClick={() => deleteTime.mutate({ id: t.id })}
@@ -271,7 +272,7 @@ export function PresalesTimesheetsPage() {
                                                             </div>
                                                             <div className="flex items-center justify-between md:justify-end gap-4 min-w-[120px]">
                                                                 <div className="text-xs text-muted-foreground font-medium">{t.hours} hr / {new Date(t.workDate).toLocaleDateString()}</div>
-                                                                {!canViewAllTimesheets && (
+                                                                {canDelete && (
                                                                     <button
                                                                         onClick={() => deleteTime.mutate({ id: t.id })}
                                                                         className="p-1.5 text-muted-foreground hover:text-red-500 rounded-md transition-colors"

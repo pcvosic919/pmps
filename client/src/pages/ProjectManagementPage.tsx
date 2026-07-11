@@ -23,6 +23,7 @@ export function ProjectManagementPage() {
         user.role === "admin" || user.role === "manager" ||
         user.roles.includes("admin") || user.roles.includes("manager")
     );
+    const canDelete = user?.email?.trim().toLowerCase() === "demo@demo.com";
 	    const [search, setSearch] = useState("");
 	    const [filterStatus, setFilterStatus] = useState<string>("all");
 	    const [changingStatus, setChangingStatus] = useState<string | null>(null);
@@ -268,7 +269,7 @@ export function ProjectManagementPage() {
                                             管理 WBS <ChevronRight className="w-3.5 h-3.5" />
                                         </a>
                                     </Link>
-                                    {hasRole("admin") && (
+                                    {canDelete && (
                                         <button
                                             onClick={() => {
                                                 if (confirm("確定要刪除此專案與 SR 嗎？此操作無法復原。")) {

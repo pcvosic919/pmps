@@ -21,6 +21,7 @@ const SettlementsPage = lazy(() => import("./pages/SettlementsPage").then((modul
 const NotificationsPage = lazy(() => import("./pages/NotificationsPage").then((module) => ({ default: module.NotificationsPage })));
 const SystemSettingsPage = lazy(() => import("./pages/SystemSettingsPage").then((module) => ({ default: module.SystemSettingsPage })));
 const CustomFieldsPage = lazy(() => import("./pages/CustomFieldsPage").then((module) => ({ default: module.CustomFieldsPage })));
+const CompanyManagementPage = lazy(() => import("./pages/CompanyManagementPage").then((module) => ({ default: module.CompanyManagementPage })));
 const OpportunitiesPage = lazy(() => import("./pages/OpportunitiesPage").then((module) => ({ default: module.OpportunitiesPage })));
 const ServiceRequestsPage = lazy(() => import("./pages/ServiceRequestsPage").then((module) => ({ default: module.ServiceRequestsPage })));
 const ProjectTimesheetsPage = lazy(() => import("./pages/ProjectTimesheetsPage").then((module) => ({ default: module.ProjectTimesheetsPage })));
@@ -102,6 +103,7 @@ const activeRoutes: ActiveRouteDefinition[] = [
   { path: "/notifications", component: NotificationsPage, pageFile: "NotificationsPage.tsx", lifecycle: "保留 / 上線", notes: "通知中心。" },
   { path: "/system-settings", component: SystemSettingsPage, pageFile: "SystemSettingsPage.tsx", lifecycle: "保留 / 上線", notes: "系統設定。" },
   { path: "/custom-fields", component: CustomFieldsPage, pageFile: "CustomFieldsPage.tsx", lifecycle: "保留 / 上線", notes: "自訂欄位管理。" },
+  { path: "/companies", component: CompanyManagementPage, pageFile: "CompanyManagementPage.tsx", lifecycle: "保留 / 上線", notes: "公司主檔管理與商機客戶選擇來源。" },
   { path: "/opportunities", component: OpportunitiesPage, pageFile: "OpportunitiesPage.tsx", lifecycle: "保留 / 上線", notes: "商機清單。" },
   { path: "/opportunities/:id", component: OpportunityDetailPage, pageFile: "OpportunityDetailPage.tsx", lifecycle: "保留 / 上線", notes: "商機詳情。" },
   { path: "/projects", component: ProjectManagementRoute, pageFile: "ProjectManagementPage.tsx", lifecycle: "保留 / 上線（權限控管）", notes: "正式專案管理入口，僅 Manager / PM 可見。" },

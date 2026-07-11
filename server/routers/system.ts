@@ -4,6 +4,7 @@ import { CustomFieldModel } from "../models/CustomField";
 import { SystemSettingModel } from "../models/Settings";
 import { sharePointService } from "../services/SharePointService";
 import { z } from "zod";
+import { canDeleteRecord } from "../_core/authorization";
 
 const settingsPayloadSchema = z.object({
     companyName: z.string().trim().min(1),
@@ -203,7 +204,10 @@ export const systemRouter = router({
 
     deleteCustomField: roleProcedure(["admin"]).input(z.object({
         id: z.string()
-    })).mutation(async ({ input }) => {
+    })).mutation(async ({ input, ctx }) => {
+        if (!canDeleteRecord(ctx.user)) {
+            throw new TRPCError({ code: "FORBIDDEN", message: "只有 Demo@demo.com 可以刪除資料" });
+        }
         await CustomFieldModel.deleteOne({ _id: input.id });
         return { success: true };
     }),

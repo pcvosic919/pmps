@@ -39,10 +39,12 @@ const opportunityTypeLabels: Record<string, string> = {
 
 export function OpportunitiesPage() {
     const [searchTerm, setSearchTerm] = useState("");
+    const [companySearch, setCompanySearch] = useState("");
     const [sortBy] = useState("createdAt");
     const [sortOrder] = useState<"asc" | "desc">("desc");
 
     const debouncedSearchTerm = useDebounce(searchTerm, 500);
+    const debouncedCompanySearch = useDebounce(companySearch, 300);
 
     const {
         data,
@@ -65,11 +67,14 @@ export function OpportunitiesPage() {
     const { data: customFieldDefs } = trpc.system.getCustomFields.useQuery();
     const { data: settings } = trpc.system.getSettings.useQuery();
     const { data: usersData } = trpc.users.list.useQuery({ limit: 500 });
+    const { data: companiesData } = trpc.companies.list.useQuery({ search: debouncedCompanySearch, limit: 20 });
     const availableProducts = settings?.availableProducts || [];
     const businessUsers = usersData?.items || [];
+    const companies = companiesData?.items || [];
     const oppFields = customFieldDefs?.filter((f: any) => f.entityType === "opportunity") || [];
     const { user } = useCurrentUser();
-    const isAdmin = !!user && (user.role === "admin" || user.roles.includes("admin"));
+    const canDelete = user?.email?.trim().toLowerCase() === "demo@demo.com";
+    const utils = trpc.useUtils();
 
     const observerRef = useRef<HTMLDivElement>(null);
 
@@ -109,8 +114,17 @@ export function OpportunitiesPage() {
             setIsCreating(false);
             refetch();
             form.reset();
+            setCompanySearch("");
             setCustomFieldsValues({}); // 清空
         }
+    });
+    const createCompany = trpc.companies.create.useMutation({
+        onSuccess: async (result) => {
+            form.setValue("customerName", result.item.name, { shouldValidate: true });
+            setCompanySearch(result.item.name);
+            await utils.companies.list.invalidate();
+        },
+        onError: (err) => alert(err.message || "新增公司失敗")
     });
 
     const deleteOpp = trpc.opportunities.delete.useMutation({
@@ -260,7 +274,7 @@ export function OpportunitiesPage() {
                                     </td>
                                     <td className="px-6 py-4 text-right">
                                         <div className="flex items-center justify-end gap-3">
-                                            {isAdmin && (
+                                            {canDelete && (
                                                 <button
                                                     onClick={() => {
                                                         if (confirm(`確定要刪除商機「${opp.title}」嗎？此操作無法復原。`)) {
@@ -338,7 +352,52 @@ export function OpportunitiesPage() {
                                     <FormItem>
                                         <FormLabel>客戶名稱 (Customer Name) *</FormLabel>
                                         <FormControl>
-                                            <Input {...field} />
+                                            <div className="space-y-2">
+                                                <div className="relative">
+                                                    <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                                                    <Input
+                                                        value={companySearch || field.value || ""}
+                                                        onChange={(event: React.ChangeEvent<HTMLInputElement>) => {
+                                                            setCompanySearch(event.target.value);
+                                                            if (!event.target.value) field.onChange("");
+                                                        }}
+                                                        placeholder="搜尋公司名稱、統編或客戶關鍵字"
+                                                        className="pl-9"
+                                                    />
+                                                </div>
+                                                <div className="max-h-36 overflow-y-auto rounded-md border border-border bg-background">
+                                                    {companies.length === 0 ? (
+                                                        <div className="px-3 py-2 text-xs text-muted-foreground">沒有找到公司，可新增到公司管理。</div>
+                                                    ) : companies.map((company: any) => (
+                                                        <button
+                                                            key={company.id}
+                                                            type="button"
+                                                            onClick={() => {
+                                                                field.onChange(company.name);
+                                                                setCompanySearch(company.name);
+                                                            }}
+                                                            className={`flex w-full items-center justify-between px-3 py-2 text-left text-sm hover:bg-muted ${field.value === company.name ? "bg-primary/10 text-primary" : ""}`}
+                                                        >
+                                                            <span className="font-medium">{company.name}</span>
+                                                            <span className="text-xs text-muted-foreground">{company.taxId || company.industry || ""}</span>
+                                                        </button>
+                                                    ))}
+                                                </div>
+                                                {companySearch.trim() && !companies.some((company: any) => company.name === companySearch.trim()) && (
+                                                    <Button
+                                                        type="button"
+                                                        variant="outline"
+                                                        size="sm"
+                                                        disabled={createCompany.isPending}
+                                                        onClick={() => createCompany.mutate({ name: companySearch.trim() })}
+                                                    >
+                                                        新增「{companySearch.trim()}」到公司管理
+                                                    </Button>
+                                                )}
+                                                {field.value && (
+                                                    <p className="text-xs text-muted-foreground">已選擇：{field.value}</p>
+                                                )}
+                                            </div>
                                         </FormControl>
                                         <FormMessage />
                                     </FormItem>
