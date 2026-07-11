@@ -227,11 +227,11 @@ export function ProjectTimesheetsPage() {
                                     disabled={!selectedProjectId}
                                 >
                                     <option value="">-- 再選擇該專案下的 WBS --</option>
-	                                    {availableWbsItems.map((a: any) => (
-	                                        <option key={a.wbsItemId || a.id} value={a.wbsItemId || a.id}>
-	                                            {a.title} ({a.estimatedHours} 天 / 已填 {a.actualHours || 0} 天)
-	                                        </option>
-	                                    ))}
+                                    {availableWbsItems.map((a: any) => (
+                                        <option key={a.wbsItemId || a.id} value={a.wbsItemId || a.id}>
+                                            {a.title} ({a.estimatedHours} 天 / 已填 {a.actualHours || 0} 小時)
+                                        </option>
+                                    ))}
                                 </select>
                                 {assignments?.length === 0 && (
                                     <p className="text-xs text-yellow-600 dark:text-yellow-400 mt-1 flex items-center gap-1">
