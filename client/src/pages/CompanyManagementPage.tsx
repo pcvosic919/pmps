@@ -1,8 +1,9 @@
 import { useMemo, useRef, useState } from "react";
 import * as XLSX from "xlsx";
-import { Building2, Edit, FileSpreadsheet, Plus, Search, Trash2, Upload } from "lucide-react";
+import { Building2, Download, Edit, FileSpreadsheet, Plus, Search, Trash2, Upload } from "lucide-react";
 import { trpc } from "../lib/trpc";
 import { useCurrentUser } from "../lib/useCurrentUser";
+import { exportRowsToXlsx, formatExportDate, makeXlsxFileName } from "../lib/exportXlsx";
 
 type CompanyForm = {
     id?: string;
@@ -35,6 +36,13 @@ const getCell = (row: Record<string, unknown>, keys: string[]) => {
         if (value != null && String(value).trim()) return String(value).trim();
     }
     return "";
+};
+
+const formatDateTime = (value?: string | Date) => {
+    if (!value) return "";
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) return "";
+    return date.toLocaleString("zh-TW", { hour12: false });
 };
 
 export function CompanyManagementPage() {
@@ -129,6 +137,23 @@ export function CompanyManagementPage() {
         if (fileInputRef.current) fileInputRef.current.value = "";
     };
 
+    const handleExport = () => {
+        const rows = companies.map((company: any) => ({
+            公司名稱: company.name || "",
+            統一編號: company.taxId || "",
+            產業: company.industry || "",
+            聯絡人: company.contactName || "",
+            電話: company.phone || "",
+            Email: company.email || "",
+            地址: company.address || "",
+            狀態: company.isActive ? "啟用" : "停用",
+            備註: company.notes || "",
+            建立時間: formatDateTime(company.createdAt),
+            更新時間: formatDateTime(company.updatedAt)
+        }));
+        exportRowsToXlsx(rows, makeXlsxFileName("公司管理", formatExportDate()), "公司清單");
+    };
+
     return (
         <div className="space-y-6">
             <div className="flex flex-col gap-4 rounded-xl border border-border/50 bg-card p-6 shadow-sm lg:flex-row lg:items-center lg:justify-between">
@@ -147,6 +172,15 @@ export function CompanyManagementPage() {
                         className="hidden"
                         onChange={(event) => void handleFile(event.target.files?.[0])}
                     />
+                    <button
+                        type="button"
+                        onClick={handleExport}
+                        disabled={companies.length === 0}
+                        className="inline-flex items-center rounded-lg border border-border px-4 py-2 text-sm font-medium hover:bg-muted disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                        <Download className="mr-2 h-4 w-4" />
+                        匯出 Excel
+                    </button>
                     <button
                         type="button"
                         onClick={() => fileInputRef.current?.click()}
