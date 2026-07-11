@@ -52,18 +52,28 @@ export function ReportBuilderPage() {
     const selectedTemplate = catalog.find((template: any) => template.reportType === reportType);
     const executiveSourceKey = reportType === "open_cases" || reportType === "kpi_revenue" ? reportType : null;
     const selectedSourceStatus = executiveSourceKey ? (dataSourceStatus as any)?.[executiveSourceKey] : null;
-    const categoryLabels: Record<string, string> = {
-        executive: "主管檢視報表",
-        finance: "財務結算報表",
-        people: "人力資源報表",
-        project: "專案管理報表",
-        system: "系統報表"
-    };
-    const groupedTemplates = catalog.reduce((groups: Record<string, any[]>, template: any) => {
-        if (!groups[template.category]) groups[template.category] = [];
-        groups[template.category].push(template);
-        return groups;
-    }, {});
+	    const categoryLabels: Record<string, string> = {
+	        executive: "主管檢視報表",
+	        finance: "財務結算報表",
+	        people: "人力資源報表",
+	        project: "專案管理報表",
+	        system: "系統報表"
+	    };
+	    const priorityReportTypes: ReportType[] = ["open_cases", "kpi_revenue", "project_completion_rate", "timesheets"];
+	    const groupedTemplates = catalog.reduce((groups: Record<string, any[]>, template: any) => {
+	        if (!groups[template.category]) groups[template.category] = [];
+	        groups[template.category].push(template);
+	        return groups;
+	    }, {});
+	    const reportCards = [...catalog]
+	        .sort((left: any, right: any) => {
+	            const leftPriority = priorityReportTypes.indexOf(left.reportType);
+	            const rightPriority = priorityReportTypes.indexOf(right.reportType);
+	            if (leftPriority !== -1 || rightPriority !== -1) {
+	                return (leftPriority === -1 ? 99 : leftPriority) - (rightPriority === -1 ? 99 : rightPriority);
+	            }
+	            return String(left.label).localeCompare(String(right.label), "zh-Hant");
+	        });
 
     const { data: reportData, isLoading } = trpc.analytics.generateReport.useQuery({
         reportType,
@@ -97,15 +107,26 @@ export function ReportBuilderPage() {
         window.print();
     };
 
-    const getEmptyMessage = () => {
-        if (!selectedTemplate?.isExecutiveFormat || !selectedSourceStatus) return "符合條件的資料為空。";
-        if (selectedSourceStatus.dataRows === 0) return "系統內目前沒有符合此主管報表口徑的資料，請確認專案、WBS、金額或年度目標設定。";
-        return "系統資料已有內容，但目前篩選條件下沒有資料。";
-    };
+	    const getEmptyMessage = () => {
+	        if (!selectedTemplate?.isExecutiveFormat || !selectedSourceStatus) return "符合條件的資料為空。";
+	        if (selectedSourceStatus.dataRows === 0) return "系統內目前沒有符合此主管報表口徑的資料，請確認專案、WBS、金額或年度目標設定。";
+	        return "系統資料已有內容，但目前篩選條件下沒有資料。";
+	    };
+	    const dataQualityHints = (() => {
+	        const rows = (reportData || []) as any[];
+	        const anomalyRows = rows.filter((row) => String(row?.["資料異常備註"] || row?.["備註"] || "").trim());
+	        const zeroAmountRows = rows.filter((row) =>
+	            Object.entries(row || {}).some(([key, value]) => /金額|工時|目標|應完成/.test(key) && Number(value) === 0)
+	        );
+	        return [
+	            anomalyRows.length > 0 ? `${anomalyRows.length} 筆含資料異常備註` : "",
+	            zeroAmountRows.length > 0 ? `${zeroAmountRows.length} 筆金額/工時為 0` : ""
+	        ].filter(Boolean);
+	    })();
 
     return (
         <div className="space-y-6">
-            <div className="flex justify-between items-center bg-card p-6 rounded-xl shadow-sm border border-border/50 print:hidden">
+	            <div className="flex justify-between items-center bg-card p-6 rounded-xl shadow-sm border border-border/50 print:hidden">
                 <div>
                     <h2 className="text-3xl font-bold tracking-tight bg-clip-text text-transparent bg-gradient-to-r from-primary to-primary/60">自訂報表產生器</h2>
                     <p className="text-muted-foreground mt-1">建立效能分析報表並匯出為 Excel 檔或 PDF 格式（請運用列印功能）</p>
@@ -117,10 +138,32 @@ export function ReportBuilderPage() {
                     <button onClick={exportXlsx} disabled={!reportData || reportData.length === 0} className="px-4 py-2 bg-primary text-primary-foreground hover:bg-primary/90 rounded-lg flex items-center transition-colors disabled:opacity-50">
                         <Download className="w-4 h-4 mr-2" /> 匯出 Excel
                     </button>
-                </div>
-            </div>
+	                </div>
+	            </div>
 
-            <div className="grid md:grid-cols-4 gap-6 print:hidden">
+	            <div className="grid sm:grid-cols-2 xl:grid-cols-4 gap-3 print:hidden">
+	                {reportCards.slice(0, 8).map((template: any) => (
+	                    <button
+	                        key={template.reportType}
+	                        type="button"
+	                        onClick={() => setReportType(template.reportType as ReportType)}
+	                        className={`text-left border rounded-xl p-4 bg-card hover:border-primary/60 hover:shadow-sm transition-all ${reportType === template.reportType ? "border-primary shadow-sm" : "border-border/50"}`}
+	                    >
+	                        <div className="flex items-start justify-between gap-3">
+	                            <div className="min-w-0">
+	                                <div className="text-xs text-muted-foreground">{categoryLabels[template.category] || template.category}</div>
+	                                <div className="font-bold mt-1 truncate">{template.label}</div>
+	                            </div>
+	                            {priorityReportTypes.includes(template.reportType) && (
+	                                <span className="text-[10px] bg-primary/10 text-primary rounded-full px-2 py-0.5 shrink-0">常用</span>
+	                            )}
+	                        </div>
+	                        <div className="mt-2 text-xs text-muted-foreground line-clamp-2">{template.description}</div>
+	                    </button>
+	                ))}
+	            </div>
+
+	            <div className="grid md:grid-cols-4 gap-6 print:hidden">
                 <div className="bg-card border border-border p-5 rounded-xl shadow-sm space-y-4 col-span-1">
                     <h3 className="font-bold border-b border-border/50 pb-2 flex items-center"><FileText className="w-4 h-4 mr-2"/>報表條件</h3>
                     
@@ -189,8 +232,14 @@ export function ReportBuilderPage() {
                     </div>
                 </div>
 
-                <div className="col-span-3 bg-card border border-border rounded-xl shadow-sm overflow-hidden">
-                    {isLoading ? (
+	                <div className="col-span-3 bg-card border border-border rounded-xl shadow-sm overflow-hidden">
+	                    {dataQualityHints.length > 0 && (
+	                        <div className="m-4 mb-0 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+	                            <div className="font-semibold">資料品質提示</div>
+	                            <div className="mt-1 text-xs">{dataQualityHints.join("；")}</div>
+	                        </div>
+	                    )}
+	                    {isLoading ? (
                         <div className="p-12 text-center text-muted-foreground flex flex-col items-center">
                             <span className="w-6 h-6 border-2 border-primary border-t-transparent rounded-full animate-spin mb-3" />
                             產生中...

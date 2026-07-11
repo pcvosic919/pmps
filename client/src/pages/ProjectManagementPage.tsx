@@ -23,9 +23,10 @@ export function ProjectManagementPage() {
         user.role === "admin" || user.role === "manager" ||
         user.roles.includes("admin") || user.roles.includes("manager")
     );
-    const [search, setSearch] = useState("");
-    const [filterStatus, setFilterStatus] = useState<string>("all");
-    const [changingStatus, setChangingStatus] = useState<string | null>(null);
+	    const [search, setSearch] = useState("");
+	    const [filterStatus, setFilterStatus] = useState<string>("all");
+	    const [changingStatus, setChangingStatus] = useState<string | null>(null);
+	    const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null);
     const debouncedSearch = useDebounce(search, 300);
 
     const queryInput = useMemo(() => ({
@@ -57,12 +58,13 @@ export function ProjectManagementPage() {
         }
     };
 
-    const summary = useMemo(() => ({
-        total: allSrs?.length ?? 0,
-        new: allSrs?.filter((s: any) => s.status === "new").length ?? 0,
-        inProgress: allSrs?.filter((s: any) => s.status === "in_progress").length ?? 0,
-        completed: allSrs?.filter((s: any) => s.status === "completed").length ?? 0,
-    }), [allSrs]);
+	    const summary = useMemo(() => ({
+	        total: allSrs?.length ?? 0,
+	        new: allSrs?.filter((s: any) => s.status === "new").length ?? 0,
+	        inProgress: allSrs?.filter((s: any) => s.status === "in_progress").length ?? 0,
+	        completed: allSrs?.filter((s: any) => s.status === "completed").length ?? 0,
+	    }), [allSrs]);
+	    const selectedProject = (srs ?? []).find((sr: any) => sr.id === selectedProjectId) || (srs ?? [])[0];
 
     if (isLoading) return <div className="p-8 text-center animate-pulse">載入專案列表中...</div>;
 
@@ -150,13 +152,20 @@ export function ProjectManagementPage() {
                 </div>
             </div>
 
-            <div className="space-y-3">
-                {(srs ?? []).map((sr: any) => {
-                    const statusInfo = getStatusInfo(sr.status);
-                    return (
-                        <div key={sr.id} className="bg-card border border-border/50 rounded-xl p-5 hover:border-primary/40 hover:shadow-sm transition-all">
-                            <div className="flex items-start justify-between gap-4">
-                                <div className="flex-1 min-w-0">
+	            <div className="grid xl:grid-cols-[1fr_360px] gap-4 items-start">
+	                <div className="space-y-3">
+	                {(srs ?? []).map((sr: any) => {
+	                    const statusInfo = getStatusInfo(sr.status);
+	                    const projectSummary = sr.projectSummary || {};
+	                    const anomalyCounts = projectSummary.anomalyCounts || {};
+	                    return (
+	                        <div
+	                            key={sr.id}
+	                            onClick={() => setSelectedProjectId(sr.id)}
+	                            className={`bg-card border rounded-xl p-5 hover:border-primary/40 hover:shadow-sm transition-all cursor-pointer ${selectedProject?.id === sr.id ? "border-primary/60 shadow-sm" : "border-border/50"}`}
+	                        >
+	                            <div className="flex items-start justify-between gap-4">
+	                                <div className="flex-1 min-w-0">
                                     <div className="flex items-center gap-3 flex-wrap mb-2">
                                         <span className="text-xs font-mono text-muted-foreground bg-muted px-2 py-0.5 rounded border">SR-#{sr.id}</span>
                                         {sr.externalProjectCode && (
@@ -173,7 +182,7 @@ export function ProjectManagementPage() {
                                         )}
                                     </div>
                                     <h3 className="text-base font-bold text-foreground mb-2">{sr.title}</h3>
-                                    <div className="flex items-center gap-6 text-sm text-muted-foreground flex-wrap">
+	                                    <div className="flex items-center gap-6 text-sm text-muted-foreground flex-wrap">
                                         {sr.customerName && <span>客戶: <span className="font-semibold text-foreground">{sr.customerName}</span></span>}
                                         {sr.externalServiceType && <span>服務類型: <span className="font-semibold text-foreground">{sr.externalServiceType}</span></span>}
                                         {!hasRole("tech") && <span>合約金額: <span className="font-semibold text-foreground">NT$ {sr.contractAmount?.toLocaleString()}</span></span>}
@@ -190,8 +199,35 @@ export function ProjectManagementPage() {
                                         </span>
                                         {sr.plannedEndDate && <span>預計結束: {new Date(sr.plannedEndDate).toLocaleDateString()}</span>}
                                         <span>建立: {new Date(sr.createdAt).toLocaleDateString()}</span>
-                                    </div>
-                                </div>
+	                                    </div>
+	                                    <div className="mt-4 grid grid-cols-2 md:grid-cols-5 gap-2">
+	                                        <div className="border border-border rounded-lg px-3 py-2 bg-background">
+	                                            <div className="text-[11px] text-muted-foreground">WBS 完成率</div>
+	                                            <div className="text-sm font-bold">{projectSummary.completionRate ?? 0}%</div>
+	                                        </div>
+	                                        <div className="border border-border rounded-lg px-3 py-2 bg-background">
+	                                            <div className="text-[11px] text-muted-foreground">本月應完成</div>
+	                                            <div className="text-sm font-bold">{projectSummary.dueThisMonthHours ?? 0}h</div>
+	                                        </div>
+	                                        <div className="border border-border rounded-lg px-3 py-2 bg-background">
+	                                            <div className="text-[11px] text-muted-foreground">本月結算率</div>
+	                                            <div className="text-sm font-bold">{projectSummary.monthlyCompletionRate === null ? "-" : `${projectSummary.monthlyCompletionRate ?? 0}%`}</div>
+	                                        </div>
+	                                        <div className="border border-border rounded-lg px-3 py-2 bg-background">
+	                                            <div className="text-[11px] text-muted-foreground">逾期 WBS</div>
+	                                            <div className={`text-sm font-bold ${(projectSummary.overdueItems || 0) > 0 ? "text-red-600" : "text-emerald-600"}`}>{projectSummary.overdueItems ?? 0}</div>
+	                                        </div>
+	                                        <div className="border border-border rounded-lg px-3 py-2 bg-background">
+	                                            <div className="text-[11px] text-muted-foreground">資料異常</div>
+	                                            <div className="text-sm font-bold">{(anomalyCounts.missingAssignee || 0) + (anomalyCounts.missingSchedule || 0) + (anomalyCounts.zeroEstimate || 0)}</div>
+	                                        </div>
+	                                    </div>
+	                                    {projectSummary.pendingApprovalDepartments?.length > 0 && (
+	                                        <div className="mt-3 text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
+	                                            待核准部門：{projectSummary.pendingApprovalDepartments.join("、")}
+	                                        </div>
+	                                    )}
+	                                </div>
 
                                 <div className="flex items-center gap-2 flex-shrink-0">
                                     <div className="relative">
@@ -246,20 +282,68 @@ export function ProjectManagementPage() {
                                     )}
                                 </div>
                             </div>
-                        </div>
-                    );
-                })}
+	                        </div>
+	                    );
+	                })}
 
-                {(srs ?? []).length === 0 && (
+	                {(srs ?? []).length === 0 && (
                     <div className="p-12 text-center bg-card border border-dashed rounded-xl">
                         <FolderKanban className="w-12 h-12 text-muted-foreground/50 mx-auto mb-3" />
                         <h3 className="text-lg font-medium">{search || filterStatus !== "all" ? "找不到符合條件的專案" : "尚無服務請求 (SR)"}</h3>
                         <p className="text-muted-foreground mt-1 text-sm">
                             {search || filterStatus !== "all" ? "請調整搜尋條件或篩選器" : "從商機介面轉換已成交的商機後顯示於此"}
                         </p>
-                    </div>
-                )}
-            </div>
+	                    </div>
+	                )}
+	                </div>
+	                {selectedProject && (
+	                    <aside className="bg-card border border-border/50 rounded-xl p-5 shadow-sm sticky top-4 space-y-4">
+	                        <div>
+	                            <div className="text-xs text-muted-foreground">專案摘要</div>
+	                            <h3 className="font-bold mt-1">{selectedProject.title}</h3>
+	                            {selectedProject.customerName && <div className="text-sm text-muted-foreground mt-1">{selectedProject.customerName}</div>}
+	                        </div>
+	                        <div className="grid grid-cols-2 gap-2">
+	                            {[
+	                                { label: "WBS 項目", value: `${selectedProject.projectSummary?.completedItems || 0}/${selectedProject.projectSummary?.totalItems || 0}` },
+	                                { label: "完成率", value: `${selectedProject.projectSummary?.completionRate || 0}%` },
+	                                { label: "本月應完成", value: `${selectedProject.projectSummary?.dueThisMonthHours || 0}h` },
+	                                { label: "本月結算率", value: selectedProject.projectSummary?.monthlyCompletionRate === null ? "-" : `${selectedProject.projectSummary?.monthlyCompletionRate || 0}%` },
+	                                { label: "逾期 WBS", value: selectedProject.projectSummary?.overdueItems || 0 },
+	                                { label: "版本狀態", value: selectedProject.projectSummary?.versionStatus || "-" },
+	                            ].map((item) => (
+	                                <div key={item.label} className="border border-border rounded-lg p-3 bg-background">
+	                                    <div className="text-[11px] text-muted-foreground">{item.label}</div>
+	                                    <div className="mt-1 text-sm font-bold">{item.value}</div>
+	                                </div>
+	                            ))}
+	                        </div>
+	                        <div className="space-y-2">
+	                            <div className="text-sm font-semibold">資料品質</div>
+	                            {[
+	                                { label: "未指派", value: selectedProject.projectSummary?.anomalyCounts?.missingAssignee || 0 },
+	                                { label: "缺起訖日期", value: selectedProject.projectSummary?.anomalyCounts?.missingSchedule || 0 },
+	                                { label: "預估工時為 0", value: selectedProject.projectSummary?.anomalyCounts?.zeroEstimate || 0 },
+	                            ].map((item) => (
+	                                <div key={item.label} className="flex items-center justify-between text-sm border border-border rounded-lg px-3 py-2 bg-background">
+	                                    <span className="text-muted-foreground">{item.label}</span>
+	                                    <span className={item.value > 0 ? "font-bold text-amber-700" : "font-bold text-emerald-600"}>{item.value}</span>
+	                                </div>
+	                            ))}
+	                        </div>
+	                        {selectedProject.projectSummary?.pendingApprovalDepartments?.length > 0 && (
+	                            <div className="border border-amber-200 bg-amber-50 rounded-lg p-3 text-sm text-amber-800">
+	                                待核准：{selectedProject.projectSummary.pendingApprovalDepartments.join("、")}
+	                            </div>
+	                        )}
+	                        <Link href={`/service-requests/${selectedProject.id}`}>
+	                            <a className="w-full inline-flex justify-center items-center gap-1 px-3 py-2 text-sm bg-primary text-primary-foreground rounded-lg hover:bg-primary/90 transition-colors">
+	                                開啟 WBS <ChevronRight className="w-4 h-4" />
+	                            </a>
+	                        </Link>
+	                    </aside>
+	                )}
+	            </div>
         </div>
     );
 }

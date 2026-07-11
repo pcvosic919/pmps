@@ -220,6 +220,69 @@ const buildDepartmentApprovals = async (items: Array<{ assigneeId?: string }>) =
     }));
 };
 
+const getProjectWbsSummary = (sr: any) => {
+    const version = getEffectiveWbsVersion(sr) || [...(sr.wbsVersions || [])].sort((a: any, b: any) => b.versionNumber - a.versionNumber)[0];
+    const items = version?.items || [];
+    const now = new Date();
+    const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
+    const monthEnd = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59, 999);
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+
+    let estimatedHours = 0;
+    let completedHours = 0;
+    let dueThisMonthHours = 0;
+    let completedDueThisMonthHours = 0;
+    let overdueItems = 0;
+    let missingAssignee = 0;
+    let missingSchedule = 0;
+    let zeroEstimate = 0;
+
+    for (const item of items) {
+        const itemHours = Number(item.estimatedHours || 0);
+        const status = getWbsItemStatus(item);
+        estimatedHours += itemHours;
+        if (status === "completed") completedHours += itemHours;
+        if (!item.assigneeId) missingAssignee++;
+        if (!item.startDate || !item.endDate) missingSchedule++;
+        if (itemHours <= 0) zeroEstimate++;
+
+        if (item.endDate) {
+            const endDate = new Date(item.endDate);
+            if (endDate >= monthStart && endDate <= monthEnd) {
+                dueThisMonthHours += itemHours;
+                if (status === "completed") completedDueThisMonthHours += itemHours;
+            }
+            if (endDate < today && status !== "completed") overdueItems++;
+        }
+    }
+
+    const pendingDepartments = Array.from(new Set((version?.departmentApprovals || [])
+        .filter((approval: any) => approval.status === "pending")
+        .map((approval: any) => approval.department)
+        .filter(Boolean)));
+
+    return {
+        version: version?.versionNumber || null,
+        versionStatus: version?.status || null,
+        totalItems: items.length,
+        completedItems: items.filter((item: any) => getWbsItemStatus(item) === "completed").length,
+        estimatedHours,
+        completedHours,
+        completionRate: estimatedHours > 0 ? Math.round((completedHours / estimatedHours) * 100) : 0,
+        dueThisMonthHours,
+        completedDueThisMonthHours,
+        monthlyCompletionRate: dueThisMonthHours > 0 ? Math.round((completedDueThisMonthHours / dueThisMonthHours) * 100) : null,
+        overdueItems,
+        pendingApprovalDepartments: pendingDepartments,
+        anomalyCounts: {
+            missingAssignee,
+            missingSchedule,
+            zeroEstimate
+        }
+    };
+};
+
 const getReviewerDepartments = (user: any): string[] | null => getManagedDepartments(user);
 
 export const projectsRouter = router({
@@ -271,14 +334,15 @@ export const projectsRouter = router({
             .limit(input?.limit ?? 200)
             .lean();
 
-        return items.map(item => ({
-            ...item,
-            id: item._id.toString(),
-            opportunityId: item.opportunityId?.toString(),
-            salesUserId: item.salesUserId?.toString() || "",
-            pmId: item.pmId?.toString() || ""
-        }));
-    }),
+	        return items.map(item => ({
+	            ...item,
+	            id: item._id.toString(),
+	            opportunityId: item.opportunityId?.toString(),
+	            salesUserId: item.salesUserId?.toString() || "",
+	            pmId: item.pmId?.toString() || "",
+	            projectSummary: getProjectWbsSummary(item)
+	        }));
+	    }),
 
     getActiveProjectCount: protectedProcedure.query(async ({ ctx }) => {
         const query = await buildServiceRequestQuery({

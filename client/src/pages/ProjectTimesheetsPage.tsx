@@ -23,6 +23,12 @@ export function ProjectTimesheetsPage() {
     const { data: assignments } = trpc.projects.getMyProjectAssignments.useQuery();
     const { data: timesheets, isLoading: loadingTimesheets } = trpc.projects.getMyProjectTimesheets.useQuery();
 
+    const statusLabels: Record<string, string> = {
+        not_started: "尚未開始",
+        in_progress: "進行中",
+        completed: "完成"
+    };
+
     // Mutations
     const logTime = trpc.projects.logProjectTime.useMutation({
         onSuccess: () => {
@@ -81,6 +87,28 @@ export function ProjectTimesheetsPage() {
 
     const selectedProject = assignedProjects.find((project) => project.id === selectedProjectId);
     const availableWbsItems = selectedProject?.items || [];
+    const selectedWbsItem = availableWbsItems.find((item: any) => (item.wbsItemId || item.id) === selectedWbsId);
+    const scheduledDayAssignments = useMemo(() => {
+        if (!assignments || !workDate) return [];
+        const selectedDay = new Date(workDate).setHours(0, 0, 0, 0);
+        return assignments
+            .filter((assignment: any) => assignment.wbsItemId && assignment.startDate && assignment.endDate && !assignment.isBacklog)
+            .filter((assignment: any) => {
+                const start = new Date(assignment.startDate).setHours(0, 0, 0, 0);
+                const end = new Date(assignment.endDate).setHours(23, 59, 59, 999);
+                return selectedDay >= start && selectedDay <= end;
+            });
+    }, [assignments, workDate]);
+
+    const applyScheduledAssignment = (assignment: any) => {
+        setSelectedProjectId(assignment.srId);
+        setFilterProjectId(assignment.srId);
+        setSelectedWbsId(assignment.wbsItemId || assignment.id);
+        setTaskStatus(assignment.status === "completed" ? "completed" : "in_progress");
+        if (!description.trim()) {
+            setDescription(`處理 ${assignment.title}`);
+        }
+    };
 
     // Filtered timesheets
     const filteredTimesheets = useMemo(() => {
@@ -126,11 +154,46 @@ export function ProjectTimesheetsPage() {
                 {/* Form Section */}
                 <div className="md:col-span-1 space-y-4">
                     <div className="bg-card border border-border rounded-xl p-6 shadow-sm">
-                        <h3 className="text-xl font-bold mb-4 flex items-center gap-2">
-                            <Plus className="w-5 h-5 text-primary" />
-                            新增工時紀錄
-                        </h3>
-                        <form onSubmit={handleSubmit} className="space-y-4">
+	                        <h3 className="text-xl font-bold mb-4 flex items-center gap-2">
+	                            <Plus className="w-5 h-5 text-primary" />
+	                            新增工時紀錄
+	                        </h3>
+	                        <div className="mb-5 rounded-lg border border-border bg-muted/20 p-3">
+	                            <div className="flex items-center justify-between gap-2 mb-3">
+	                                <div>
+	                                    <div className="text-sm font-semibold">當天排程 WBS</div>
+	                                    <div className="text-xs text-muted-foreground">依工作日期自動列出已排程任務</div>
+	                                </div>
+	                                <span className="text-xs font-semibold text-primary bg-primary/10 px-2 py-0.5 rounded-full">{scheduledDayAssignments.length} 項</span>
+	                            </div>
+	                            {scheduledDayAssignments.length === 0 ? (
+	                                <div className="text-xs text-muted-foreground border border-dashed border-border rounded-md p-3 bg-background">此日期沒有已排程 WBS，可改用下方手動選擇。</div>
+	                            ) : (
+	                                <div className="space-y-2 max-h-64 overflow-y-auto pr-1">
+	                                    {scheduledDayAssignments.map((assignment: any) => (
+	                                        <button
+	                                            type="button"
+	                                            key={assignment.calendarTaskId || assignment.id}
+	                                            onClick={() => applyScheduledAssignment(assignment)}
+	                                            className={cn(
+	                                                "w-full text-left rounded-md border p-3 transition-colors bg-background hover:border-primary/50",
+	                                                selectedWbsId === assignment.wbsItemId ? "border-primary bg-primary/5" : "border-border"
+	                                            )}
+	                                        >
+	                                            <div className="flex items-start justify-between gap-3">
+	                                                <div className="min-w-0">
+	                                                    <div className="text-[11px] text-muted-foreground truncate">{assignment.srTitle}</div>
+	                                                    <div className="text-sm font-semibold truncate">{assignment.title}</div>
+	                                                    <div className="mt-1 text-xs text-muted-foreground truncate">{assignment.assigneeName || "未指派"}{assignment.assigneeDepartment ? ` / ${assignment.assigneeDepartment}` : ""}</div>
+	                                                </div>
+	                                                <span className="shrink-0 text-[11px] border border-border rounded-full px-2 py-0.5 text-muted-foreground">{statusLabels[assignment.status || "not_started"]}</span>
+	                                            </div>
+	                                        </button>
+	                                    ))}
+	                                </div>
+	                            )}
+	                        </div>
+	                        <form onSubmit={handleSubmit} className="space-y-4">
                             <div>
                                 <label className="block text-sm font-medium mb-1">對應專案</label>
                                 <select
@@ -154,8 +217,8 @@ export function ProjectTimesheetsPage() {
                                 </select>
                             </div>
 
-                            <div>
-                                <label className="block text-sm font-medium mb-1">對應任務 (WBS)</label>
+	                            <div>
+	                                <label className="block text-sm font-medium mb-1">對應任務 (WBS)</label>
                                 <select
                                     className="w-full border border-border bg-background rounded-md px-3 py-2 text-sm focus:ring-1 focus:ring-primary outline-none"
                                     value={selectedWbsId}
@@ -175,12 +238,17 @@ export function ProjectTimesheetsPage() {
                                         <AlertCircle className="w-3 h-3" /> 找不到指派給您的專案任務
                                     </p>
                                 )}
-                                {selectedProjectId && availableWbsItems.length === 0 && (
-                                    <p className="text-xs text-yellow-600 dark:text-yellow-400 mt-1 flex items-center gap-1">
-                                        <AlertCircle className="w-3 h-3" /> 此專案目前沒有可填報的 WBS 項目
-                                    </p>
-                                )}
-                            </div>
+	                                {selectedProjectId && availableWbsItems.length === 0 && (
+	                                    <p className="text-xs text-yellow-600 dark:text-yellow-400 mt-1 flex items-center gap-1">
+	                                        <AlertCircle className="w-3 h-3" /> 此專案目前沒有可填報的 WBS 項目
+	                                    </p>
+	                                )}
+	                                {selectedWbsItem?.status === "completed" && (
+	                                    <p className="text-xs text-emerald-600 mt-1 flex items-center gap-1">
+	                                        <AlertCircle className="w-3 h-3" /> 此 WBS 已標示完成，請確認是否仍需補填工時
+	                                    </p>
+	                                )}
+	                            </div>
 
 	                            <div>
 	                                <label className="block text-sm font-medium mb-1">Task 狀態</label>

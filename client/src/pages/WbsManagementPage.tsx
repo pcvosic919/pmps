@@ -278,10 +278,30 @@ export function WbsManagementPage() {
     const nextVersionNumber = sr.wbsVersions && sr.wbsVersions.length > 0
         ? Math.max(...sr.wbsVersions.map((v: any) => v.version)) + 1
         : 1;
-    const latestVersion = sr.wbsVersions?.length
-        ? [...sr.wbsVersions].sort((a: any, b: any) => b.version - a.version)[0]
-        : null;
-    const canEditSalesOwner = hasRole("admin") || hasRole("manager") || user?.id === sr.pmId;
+	    const latestVersion = sr.wbsVersions?.length
+	        ? [...sr.wbsVersions].sort((a: any, b: any) => b.version - a.version)[0]
+	        : null;
+	    const latestWbsAnomalies = (() => {
+	        const today = new Date();
+	        today.setHours(0, 0, 0, 0);
+	        const items = latestVersion?.items || [];
+	        const missingAssignee = items.filter((item: any) => !item.assigneeId);
+	        const missingSchedule = items.filter((item: any) => !item.startDate || !item.endDate);
+	        const zeroEstimate = items.filter((item: any) => Number(item.estimatedHours || 0) <= 0);
+	        const overdue = items.filter((item: any) => {
+	            if (!item.endDate || item.status === "completed") return false;
+	            const endDate = new Date(item.endDate);
+	            endDate.setHours(0, 0, 0, 0);
+	            return endDate < today;
+	        });
+	        return [
+	            { key: "missingAssignee", label: "未指派", count: missingAssignee.length, examples: missingAssignee.slice(0, 3).map((item: any) => item.title) },
+	            { key: "missingSchedule", label: "缺起訖日期", count: missingSchedule.length, examples: missingSchedule.slice(0, 3).map((item: any) => item.title) },
+	            { key: "zeroEstimate", label: "預估工時為 0", count: zeroEstimate.length, examples: zeroEstimate.slice(0, 3).map((item: any) => item.title) },
+	            { key: "overdue", label: "逾期未完成", count: overdue.length, examples: overdue.slice(0, 3).map((item: any) => item.title) }
+	        ].filter(item => item.count > 0);
+	    })();
+	    const canEditSalesOwner = hasRole("admin") || hasRole("manager") || user?.id === sr.pmId;
 
     const getStatusColor = (status: string) => {
         switch (status) {
@@ -678,8 +698,8 @@ export function WbsManagementPage() {
                 <div className="md:col-span-2 space-y-4">
                     {!isBuildingVersion ? (
                         <>
-                            <div className="flex justify-between items-center bg-card p-4 rounded-xl shadow-sm border border-border">
-                                <h3 className="font-bold text-lg flex items-center"><FileText className="w-5 h-5 mr-2 text-primary" />WBS 版本歷史</h3>
+	                            <div className="flex justify-between items-center bg-card p-4 rounded-xl shadow-sm border border-border">
+	                                <h3 className="font-bold text-lg flex items-center"><FileText className="w-5 h-5 mr-2 text-primary" />WBS 版本歷史</h3>
                                 <div className="flex items-center gap-3">
 
                                     <button onClick={handleExportXlsx} className="bg-muted text-foreground hover:bg-muted/80 border px-3 py-1.5 rounded-md inline-flex items-center text-sm font-medium transition-colors shadow-sm">
@@ -691,10 +711,35 @@ export function WbsManagementPage() {
                                             <Plus className="w-4 h-4 mr-1.5" />建立 v{nextVersionNumber}
                                         </button>
                                     )}
-                                </div>
-                            </div>
+	                                </div>
+	                            </div>
 
-                            <div className="space-y-3">
+	                            {latestWbsAnomalies.length > 0 && (
+	                                <div className="bg-amber-50 border border-amber-200 rounded-xl p-4">
+	                                    <div className="flex items-start gap-3">
+	                                        <AlertCircle className="w-5 h-5 text-amber-600 mt-0.5 shrink-0" />
+	                                        <div className="min-w-0 flex-1">
+	                                            <div className="font-semibold text-amber-900">WBS 資料異常提示</div>
+	                                            <div className="text-xs text-amber-800 mt-1">以下項目可能影響排程、工時填寫與月結算率。</div>
+	                                            <div className="mt-3 grid sm:grid-cols-2 gap-2">
+	                                                {latestWbsAnomalies.map((item) => (
+	                                                    <div key={item.key} className="bg-background border border-amber-200 rounded-lg px-3 py-2">
+	                                                        <div className="flex justify-between items-center gap-2">
+	                                                            <span className="text-sm font-semibold text-foreground">{item.label}</span>
+	                                                            <span className="text-xs font-bold text-amber-700 bg-amber-100 px-2 py-0.5 rounded-full">{item.count}</span>
+	                                                        </div>
+	                                                        {item.examples.length > 0 && (
+	                                                            <div className="mt-1 text-[11px] text-muted-foreground truncate">{item.examples.join("、")}</div>
+	                                                        )}
+	                                                    </div>
+	                                                ))}
+	                                            </div>
+	                                        </div>
+	                                    </div>
+	                                </div>
+	                            )}
+
+	                            <div className="space-y-3">
                                 {sr.wbsVersions && sr.wbsVersions.length > 0 ? (
                                     sr.wbsVersions.sort((a: any, b: any) => b.version - a.version).map((version: any) => {
                                         const compareWithId = compareTargets[version.id];

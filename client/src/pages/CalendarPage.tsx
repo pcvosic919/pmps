@@ -463,8 +463,8 @@ export function CalendarPage() {
                 const completedCount = dayTasks.filter((task: any) => task.status === "completed").length;
 
                 return (
-                <div className="fixed inset-0 bg-background/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-                    <div className="bg-card w-full max-w-5xl max-h-[90vh] rounded-xl shadow-2xl border border-border overflow-hidden flex flex-col">
+                <div className="fixed inset-0 bg-background/60 backdrop-blur-sm z-50 flex justify-end">
+                    <div className="bg-card w-full max-w-3xl h-full shadow-2xl border-l border-border overflow-hidden flex flex-col">
                         <div className="p-4 border-b border-border flex justify-between items-center bg-primary/5">
                             <h3 className="font-bold flex items-center gap-2">
                                 <CalendarIcon className="w-5 h-5 text-primary" />
@@ -475,7 +475,7 @@ export function CalendarPage() {
                             </button>
                         </div>
 
-                        <div className="p-5 overflow-y-auto space-y-5">
+                        <div className="p-5 overflow-y-auto space-y-5 flex-1">
                             <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
                                 <div className="border border-border rounded-lg p-3 bg-background">
                                     <div className="text-xs text-muted-foreground">安排人數</div>
