@@ -784,7 +784,7 @@ export const projectsRouter = router({
             srId: z.string(),
             versionNumber: z.number(),
             items: z.array(z.object({
-                title: z.string(),
+                title: z.coerce.string().trim().min(1),
                 estimatedHours: z.number(),
                 assigneeId: z.string().optional(),
                 startDate: z.coerce.date().optional(),
@@ -793,9 +793,9 @@ export const projectsRouter = router({
                 status: z.enum(["not_started", "in_progress", "completed"]).optional(),
                 colorCode: z.string().optional(),
                 level: z.number().optional(),
-                description: z.string().optional(),
-                code: z.string().optional(),
-                remarks: z.string().optional()
+                description: z.coerce.string().optional(),
+                code: z.coerce.string().optional(),
+                remarks: z.coerce.string().optional()
             }))
         }))
         .mutation(async ({ ctx, input }) => {

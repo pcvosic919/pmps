@@ -152,6 +152,7 @@ export function WbsManagementPage() {
 
     const normalizeImportDate = (value?: Date) => value ? value.toISOString().slice(0, 10) : "";
     const isHeadingItem = (item: Pick<WbsDraftItem, "level">) => (item.level || 0) === 0;
+    const getImportText = (value: any, fallback = "") => value == null || value === "" ? fallback : String(value).trim();
 
     const handleExcelImport = (e: React.ChangeEvent<HTMLInputElement>) => {
         const file = e.target.files?.[0];
@@ -201,7 +202,7 @@ export function WbsManagementPage() {
                     const rawEstimatedHours = Number(row['工作天數(小計)'] || row['工作天數'] || row['工時(天)'] || row['預估工時'] || row['Hours'] || row['工時'] || 0);
 
                     return {
-                        title: row['工作項目'] || row['項目名稱'] || row['Title'] || row['項目'] || row['專案階段'] || '未命名項目',
+                        title: getImportText(row['工作項目'] || row['項目名稱'] || row['Title'] || row['項目'] || row['專案階段'], '未命名項目'),
                         estimatedHours: level === 0 ? 0 : rawEstimatedHours,
                         actualHours: 0,
                         assigneeId: assignee?.id,
@@ -209,9 +210,9 @@ export function WbsManagementPage() {
                         startDate: parseExcelDate(row['起始時間'] || row['預計執行日']),
                         endDate: parseExcelDate(row['起訖時間'] || row['預計完成日']),
                         completionPercentage: Number(row['完成百分比'] || row['總完成百分比'] || 0),
-                        code: row['工作編號'] || row['編號'] || '',
-                        description: row['工作說明'] || row['說明'] || '',
-                        remarks: row['備註'] || '',
+                        code: getImportText(row['工作編號'] || row['編號']),
+                        description: getImportText(row['工作說明'] || row['說明']),
+                        remarks: getImportText(row['備註']),
                         colorCode: '#E2E8F0'
                     };
                 });
