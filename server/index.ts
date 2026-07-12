@@ -30,7 +30,7 @@ dotenv.config(); // Final fallback
 
 const app = express();
 app.use(cors());
-app.use(express.json());
+app.use(express.json({ limit: "5mb" }));
 
 app.use("/api/v1", copilotApiRouter);
 
@@ -110,6 +110,19 @@ app.get("/api/health", async (_req, res) => {
     } catch (_err) {
         res.status(500).json({ status: "error", message: "Database connection failed" });
     }
+});
+
+app.use("/api", (err: any, _req: express.Request, res: express.Response, next: express.NextFunction) => {
+    if (!err) {
+        next();
+        return;
+    }
+
+    const status = err.status || err.statusCode || (err.type === "entity.too.large" ? 413 : 500);
+    res.status(status).json({
+        error: status === 413 ? "Request payload too large" : "API request failed",
+        message: status === 413 ? "匯入資料量過大，請分批匯入或縮減 Excel 欄位。" : err.message || "伺服器處理失敗"
+    });
 });
 
 const clientDistPath = path.resolve(__dirname, "../../../client/dist");

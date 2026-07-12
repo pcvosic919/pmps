@@ -12,12 +12,21 @@ import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { BusinessUserPicker } from "../components/BusinessUserPicker";
 
+const optionalDate = z.preprocess((value) => value === "" ? undefined : value, z.coerce.date().optional());
+
 const srSchema = z.object({
     title: z.string().min(1, "專案名稱不可為空"),
     customerName: z.string().min(1, "公司名稱不可為空"),
     salesUserId: z.string().optional(),
     salesDepartment: z.string().optional(),
     salesRep: z.string().optional(),
+    externalServiceType: z.string().optional(),
+    plannedStartDate: optionalDate,
+    plannedEndDate: optionalDate,
+    reviewDate: optionalDate,
+    warrantyExpiresAt: optionalDate,
+    billingAllocation: z.string().optional(),
+    recognitionMonth: z.string().optional(),
     srType: z.enum(["project", "maintenance"]).default("project"),
     contractAmount: z.number().min(0, "合約金額不能為負").optional(),
     totalPoints: z.number().min(0).optional(),
@@ -25,6 +34,31 @@ const srSchema = z.object({
     pmId: z.string().min(1, "請指派 PM"),
     joinPmAsMember: z.boolean().default(true)
 });
+
+const serviceTypeOptions = [
+    "專案服務",
+    "維護專案",
+    "協銷-會議",
+    "遠端技術服務",
+    "遠端問題解決",
+    "到場服務",
+    "教育訓練-其他",
+    "活動支援",
+    "技術諮詢",
+    "託管服務",
+    "MCI Activity"
+] as const;
+
+const isPresetServiceType = (value?: string) => serviceTypeOptions.some((option) => option === value);
+
+function FormSectionHeading({ title, description }: { title: string; description: string }) {
+    return (
+        <div className="border-b border-border/60 pb-2 pt-2">
+            <h3 className="text-sm font-semibold text-foreground">{title}</h3>
+            <p className="mt-1 text-xs text-muted-foreground">{description}</p>
+        </div>
+    );
+}
 
 import { useCurrentUser } from "../lib/useCurrentUser";
 
@@ -35,10 +69,12 @@ export function ServiceRequestsPage() {
     const { data: users } = trpc.users.list.useQuery({ limit: 500 });
 
     const [isCreating, setIsCreating] = useState(false);
+    const [useCustomServiceType, setUseCustomServiceType] = useState(false);
 
     const createSR = trpc.projects.createSR.useMutation({
         onSuccess: (result) => {
             setIsCreating(false);
+            setUseCustomServiceType(false);
             refetch();
             form.reset();
             window.location.href = `/service-requests/${result.id}`;
@@ -57,6 +93,8 @@ export function ServiceRequestsPage() {
         defaultValues: { 
             title: "", customerName: "", srType: "project", contractAmount: 0, 
             salesUserId: "", salesDepartment: "", salesRep: "",
+            externalServiceType: "", plannedStartDate: "", plannedEndDate: "", reviewDate: "", warrantyExpiresAt: "",
+            billingAllocation: "", recognitionMonth: "",
             totalPoints: 0, pointValue: 500, 
             pmId: "", joinPmAsMember: true 
         }
@@ -216,8 +254,14 @@ export function ServiceRequestsPage() {
                     </table>
                 </div>
             </div>
-            <Dialog open={isCreating} onOpenChange={setIsCreating}>
-                <DialogContent className="sm:max-w-lg">
+            <Dialog
+                open={isCreating}
+                onOpenChange={(open) => {
+                    setIsCreating(open);
+                    if (!open) setUseCustomServiceType(false);
+                }}
+            >
+                <DialogContent className="sm:max-w-2xl max-h-[85vh] overflow-y-auto">
                     <DialogHeader>
                         <DialogTitle className="flex items-center space-x-2">
                             <FileText className="w-5 h-5 text-primary" />
@@ -225,35 +269,114 @@ export function ServiceRequestsPage() {
                         </DialogTitle>
                     </DialogHeader>
                     <Form {...form}>
-                        <form onSubmit={form.handleSubmit(handleCreate)} className="space-y-4">
-                            <FormField
-                                control={form.control}
-                                name="title"
-                                render={({ field }: any) => (
-                                    <FormItem>
-                                        <FormLabel>專案名稱 *</FormLabel>
-                                        <FormControl>
-                                            <Input placeholder="例：2026年 系統導入案" {...field} />
-                                        </FormControl>
-                                        <FormMessage />
-                                    </FormItem>
-                                )}
-                            />
+                        <form onSubmit={form.handleSubmit(handleCreate)} className="space-y-5">
+                            <FormSectionHeading title="基本資料" description="建立專案或維護案的主要識別資料。" />
+                            <div className="grid gap-4 sm:grid-cols-2">
+                                <FormField
+                                    control={form.control}
+                                    name="title"
+                                    render={({ field }: any) => (
+                                        <FormItem>
+                                            <FormLabel>專案名稱 *</FormLabel>
+                                            <FormControl>
+                                                <Input placeholder="例：2026年 系統導入案" {...field} />
+                                            </FormControl>
+                                            <FormMessage />
+                                        </FormItem>
+                                    )}
+                                />
 
-                            <FormField
-                                control={form.control}
-                                name="customerName"
-                                render={({ field }: any) => (
-                                    <FormItem>
-                                        <FormLabel>公司名稱 *</FormLabel>
-                                        <FormControl>
-                                            <Input placeholder="例：宏碁資訊服務股份有限公司" {...field} />
-                                        </FormControl>
-                                        <FormMessage />
-                                    </FormItem>
-                                )}
-                            />
+                                <FormField
+                                    control={form.control}
+                                    name="customerName"
+                                    render={({ field }: any) => (
+                                        <FormItem>
+                                            <FormLabel>公司名稱 *</FormLabel>
+                                            <FormControl>
+                                                <Input placeholder="例：宏碁資訊服務股份有限公司" {...field} />
+                                            </FormControl>
+                                            <FormMessage />
+                                        </FormItem>
+                                    )}
+                                />
+                            </div>
 
+                            <div className="grid gap-4 sm:grid-cols-2">
+                                <FormField
+                                    control={form.control}
+                                    name="srType"
+                                    render={({ field }: any) => (
+                                        <FormItem>
+                                            <FormLabel>類型 *</FormLabel>
+                                            <Select onValueChange={field.onChange} defaultValue={field.value}>
+                                                <FormControl>
+                                                    <SelectTrigger>
+                                                        <SelectValue placeholder="請選擇類型" />
+                                                    </SelectTrigger>
+                                                </FormControl>
+                                                <SelectContent>
+                                                    <SelectItem value="project">專案 (Project)</SelectItem>
+                                                    <SelectItem value="maintenance">維運 (Maintenance)</SelectItem>
+                                                </SelectContent>
+                                            </Select>
+                                            <FormMessage />
+                                        </FormItem>
+                                    )}
+                                />
+
+                                <FormField
+                                    control={form.control}
+                                    name="externalServiceType"
+                                    render={({ field }: any) => {
+                                        const selectedValue = useCustomServiceType || (field.value && !isPresetServiceType(field.value)) ? "custom" : field.value || "";
+                                        const showCustomInput = useCustomServiceType || selectedValue === "custom";
+
+                                        return (
+                                            <FormItem>
+                                                <FormLabel>服務類型</FormLabel>
+                                                <Select
+                                                    value={selectedValue}
+                                                    onValueChange={(value) => {
+                                                        if (value === "custom") {
+                                                            setUseCustomServiceType(true);
+                                                            field.onChange("");
+                                                            return;
+                                                        }
+                                                        setUseCustomServiceType(false);
+                                                        field.onChange(value);
+                                                    }}
+                                                >
+                                                    <FormControl>
+                                                        <SelectTrigger>
+                                                            <SelectValue placeholder="請選擇服務類型" />
+                                                        </SelectTrigger>
+                                                    </FormControl>
+                                                    <SelectContent>
+                                                        {serviceTypeOptions.map((option) => (
+                                                            <SelectItem key={option} value={option}>
+                                                                {option}
+                                                            </SelectItem>
+                                                        ))}
+                                                        <SelectItem value="custom">自訂服務類型</SelectItem>
+                                                    </SelectContent>
+                                                </Select>
+                                                {showCustomInput && (
+                                                    <FormControl>
+                                                        <Input
+                                                            className="mt-2"
+                                                            placeholder="輸入自訂服務類型"
+                                                            {...field}
+                                                        />
+                                                    </FormControl>
+                                                )}
+                                                <FormMessage />
+                                            </FormItem>
+                                        );
+                                    }}
+                                />
+                            </div>
+
+                            <FormSectionHeading title="業務資訊" description="業務與業務部門會保存在案件上，供後續管理報表統計。" />
                             <div className="space-y-2">
                                 <FormField
                                     control={form.control}
@@ -287,28 +410,89 @@ export function ServiceRequestsPage() {
                                 </p>
                             </div>
 
-                            <FormField
-                                control={form.control}
-                                name="srType"
-                                render={({ field }: any) => (
-                                    <FormItem>
-                                        <FormLabel>類型 *</FormLabel>
-                                        <Select onValueChange={field.onChange} defaultValue={field.value}>
+                            <FormSectionHeading title="排程與認列" description="用於結案清單、年度認列與後續稽核日期追蹤。" />
+                            <div className="grid gap-4 sm:grid-cols-2">
+                                <FormField
+                                    control={form.control}
+                                    name="plannedStartDate"
+                                    render={({ field }: any) => (
+                                        <FormItem>
+                                            <FormLabel>預計開始</FormLabel>
                                             <FormControl>
-                                                <SelectTrigger>
-                                                    <SelectValue placeholder="請選擇類型" />
-                                                </SelectTrigger>
+                                                <Input type="date" {...field} />
                                             </FormControl>
-                                            <SelectContent>
-                                                <SelectItem value="project">專案 (Project)</SelectItem>
-                                                <SelectItem value="maintenance">維運 (Maintenance)</SelectItem>
-                                            </SelectContent>
-                                        </Select>
-                                        <FormMessage />
-                                    </FormItem>
-                                )}
-                            />
+                                            <FormMessage />
+                                        </FormItem>
+                                    )}
+                                />
+                                <FormField
+                                    control={form.control}
+                                    name="plannedEndDate"
+                                    render={({ field }: any) => (
+                                        <FormItem>
+                                            <FormLabel>預計結束</FormLabel>
+                                            <FormControl>
+                                                <Input type="date" {...field} />
+                                            </FormControl>
+                                            <FormMessage />
+                                        </FormItem>
+                                    )}
+                                />
+                                <FormField
+                                    control={form.control}
+                                    name="reviewDate"
+                                    render={({ field }: any) => (
+                                        <FormItem>
+                                            <FormLabel>審核日期</FormLabel>
+                                            <FormControl>
+                                                <Input type="date" {...field} />
+                                            </FormControl>
+                                            <FormMessage />
+                                        </FormItem>
+                                    )}
+                                />
+                                <FormField
+                                    control={form.control}
+                                    name="warrantyExpiresAt"
+                                    render={({ field }: any) => (
+                                        <FormItem>
+                                            <FormLabel>保固到期</FormLabel>
+                                            <FormControl>
+                                                <Input type="date" {...field} />
+                                            </FormControl>
+                                            <FormMessage />
+                                        </FormItem>
+                                    )}
+                                />
+                                <FormField
+                                    control={form.control}
+                                    name="recognitionMonth"
+                                    render={({ field }: any) => (
+                                        <FormItem>
+                                            <FormLabel>認列月份</FormLabel>
+                                            <FormControl>
+                                                <Input type="month" {...field} />
+                                            </FormControl>
+                                            <FormMessage />
+                                        </FormItem>
+                                    )}
+                                />
+                                <FormField
+                                    control={form.control}
+                                    name="billingAllocation"
+                                    render={({ field }: any) => (
+                                        <FormItem>
+                                            <FormLabel>計費分攤</FormLabel>
+                                            <FormControl>
+                                                <Input placeholder="例：部門分攤 / 客戶合約" {...field} />
+                                            </FormControl>
+                                            <FormMessage />
+                                        </FormItem>
+                                    )}
+                                />
+                            </div>
 
+                            <FormSectionHeading title="金額與指派" description="設定合約金額或維護點數，並指定主要 PM。" />
                             {form.watch("srType") === "project" ? (
                                 <FormField
                                     control={form.control}
@@ -328,7 +512,7 @@ export function ServiceRequestsPage() {
                                     )}
                                 />
                             ) : (
-                                <div className="grid grid-cols-2 gap-4">
+                                <div className="grid gap-4 sm:grid-cols-2">
                                     <FormField
                                         control={form.control}
                                         name="totalPoints"
@@ -390,7 +574,6 @@ export function ServiceRequestsPage() {
                                     </FormItem>
                                 )}
                             />
-
 
                             <FormField
                                 control={form.control}

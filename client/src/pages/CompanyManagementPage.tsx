@@ -48,6 +48,7 @@ const formatDateTime = (value?: string | Date) => {
 export function CompanyManagementPage() {
     const [search, setSearch] = useState("");
     const [form, setForm] = useState<CompanyForm>(emptyForm);
+    const [isImporting, setIsImporting] = useState(false);
     const fileInputRef = useRef<HTMLInputElement>(null);
     const { user } = useCurrentUser();
     const canDelete = user?.email?.trim().toLowerCase() === "demo@demo.com";
@@ -72,11 +73,9 @@ export function CompanyManagementPage() {
         }
     });
     const bulkUpsert = trpc.companies.bulkUpsert.useMutation({
-        onSuccess: async (result) => {
-            alert(`匯入完成：新增 ${result.inserted} 筆、更新 ${result.updated} 筆、略過 ${result.skipped} 筆`);
-            await refetch();
-        },
-        onError: (error) => alert(error.message || "公司清單匯入失敗")
+        onSuccess: async () => {
+            await utils.companies.list.invalidate();
+        }
     });
 
     const companies = data?.items || [];
@@ -115,26 +114,43 @@ export function CompanyManagementPage() {
 
     const handleFile = async (file?: File) => {
         if (!file) return;
-        const buffer = await file.arrayBuffer();
-        const workbook = XLSX.read(buffer, { type: "array" });
-        const worksheet = workbook.Sheets[workbook.SheetNames[0]];
-        const rows = XLSX.utils.sheet_to_json<Record<string, unknown>>(worksheet, { defval: "" });
-        const companies = rows.map((row) => ({
-            name: getCell(row, ["公司名稱", "客戶名稱", "客戶", "name", "Name", "companyName", "customerName"]),
-            taxId: getCell(row, ["統編", "統一編號", "taxId", "Tax ID"]),
-            industry: getCell(row, ["產業", "行業", "industry", "Industry"]),
-            contactName: getCell(row, ["聯絡人", "窗口", "contactName", "Contact"]),
-            phone: getCell(row, ["電話", "phone", "Phone", "tel"]),
-            email: getCell(row, ["Email", "email", "電子郵件"]),
-            address: getCell(row, ["地址", "address", "Address"]),
-            notes: getCell(row, ["備註", "notes", "Notes"])
-        })).filter((item) => item.name);
-        if (companies.length === 0) {
-            alert("找不到公司名稱欄位，請確認 Excel 第一列表頭。");
-            return;
+        setIsImporting(true);
+        try {
+            const buffer = await file.arrayBuffer();
+            const workbook = XLSX.read(buffer, { type: "array" });
+            const worksheet = workbook.Sheets[workbook.SheetNames[0]];
+            const rows = XLSX.utils.sheet_to_json<Record<string, unknown>>(worksheet, { defval: "" });
+            const companies = rows.map((row) => ({
+                name: getCell(row, ["公司名稱", "客戶名稱", "客戶", "name", "Name", "companyName", "customerName"]),
+                taxId: getCell(row, ["統編", "統一編號", "taxId", "Tax ID"]),
+                industry: getCell(row, ["產業", "行業", "industry", "Industry"]),
+                contactName: getCell(row, ["聯絡人", "窗口", "contactName", "Contact"]),
+                phone: getCell(row, ["電話", "phone", "Phone", "tel"]),
+                email: getCell(row, ["Email", "email", "電子郵件"]),
+                address: getCell(row, ["地址", "address", "Address"]),
+                notes: getCell(row, ["備註", "notes", "Notes"])
+            })).filter((item) => item.name);
+            if (companies.length === 0) {
+                alert("找不到公司名稱欄位，請確認 Excel 第一列表頭。");
+                return;
+            }
+
+            const chunkSize = 200;
+            const total = { inserted: 0, updated: 0, skipped: 0 };
+            for (let index = 0; index < companies.length; index += chunkSize) {
+                const result = await bulkUpsert.mutateAsync({ companies: companies.slice(index, index + chunkSize) });
+                total.inserted += result.inserted;
+                total.updated += result.updated;
+                total.skipped += result.skipped;
+            }
+            await refetch();
+            alert(`匯入完成：新增 ${total.inserted} 筆、更新 ${total.updated} 筆、略過 ${total.skipped} 筆`);
+        } catch (error: any) {
+            alert(error?.message || "公司清單匯入失敗，請確認 Excel 格式。");
+        } finally {
+            setIsImporting(false);
+            if (fileInputRef.current) fileInputRef.current.value = "";
         }
-        bulkUpsert.mutate({ companies });
-        if (fileInputRef.current) fileInputRef.current.value = "";
     };
 
     const handleExport = () => {
@@ -181,14 +197,15 @@ export function CompanyManagementPage() {
                         <Download className="mr-2 h-4 w-4" />
                         匯出 Excel
                     </button>
-                    <button
-                        type="button"
-                        onClick={() => fileInputRef.current?.click()}
-                        className="inline-flex items-center rounded-lg border border-border px-4 py-2 text-sm font-medium hover:bg-muted"
-                    >
-                        <Upload className="mr-2 h-4 w-4" />
-                        匯入 Excel
-                    </button>
+	                    <button
+	                        type="button"
+	                        onClick={() => fileInputRef.current?.click()}
+	                        disabled={isImporting}
+	                        className="inline-flex items-center rounded-lg border border-border px-4 py-2 text-sm font-medium hover:bg-muted disabled:cursor-not-allowed disabled:opacity-50"
+	                    >
+	                        <Upload className="mr-2 h-4 w-4" />
+	                        {isImporting ? "匯入中..." : "匯入 Excel"}
+	                    </button>
                     <button
                         type="button"
                         onClick={() => setForm(emptyForm)}

@@ -7,6 +7,9 @@ export interface ITimesheet extends Document {
     workDate: Date;
     hours: number;
     description: string;
+    workType?: string;
+    costCategory?: string;
+    externalAssignmentKey?: string;
     costAmount: number;
     settlementId?: mongoose.Types.ObjectId;
     opportunityId?: mongoose.Types.ObjectId;
@@ -21,6 +24,9 @@ const TimesheetSchema = new Schema<ITimesheet>({
     workDate: { type: Date, required: true },
     hours: { type: Number, required: true, default: 0 },
     description: { type: String, required: true },
+    workType: { type: String },
+    costCategory: { type: String },
+    externalAssignmentKey: { type: String },
     costAmount: { type: Number, default: 0 },
     settlementId: { type: Schema.Types.ObjectId },
     opportunityId: { type: Schema.Types.ObjectId, ref: "Opportunity" },

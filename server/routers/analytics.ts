@@ -18,7 +18,7 @@ import { settlementTypes } from "../../shared/types";
 import { canDeleteRecord, getManagedDepartments, hasAnyRole } from "../_core/authorization";
 import { toObjectId } from "../_core/cursor";
 
-const reportTypes = ["utilization", "settlement", "timesheets", "project_profitability", "pm_ranking", "budget_variance", "sla_compliance", "renewal_rate", "open_cases", "kpi_revenue", "project_completion_rate"] as const;
+const reportTypes = ["utilization", "settlement", "timesheets", "project_profitability", "pm_ranking", "budget_variance", "sla_compliance", "renewal_rate", "open_cases", "kpi_revenue", "project_completion_rate", "business_unit_management", "technical_handler_management"] as const;
 
 const defaultKpiSourceDefinitions = [
     { key: "target", label: "年度目標", source: "系統 KPI 目標設定", rule: "部門/個人目標以系統內 KPI 目標設定為準。", isActive: true },
@@ -40,6 +40,8 @@ const defaultPipelineWeights: Record<string, number> = {
 const defaultReportTemplates = [
     { reportType: "open_cases", label: "未結案清單匯出", category: "executive", description: "長官檢視格式，從系統專案、WBS 與排程資料產出。", outputFormat: "xlsx", isExecutiveFormat: true, sortOrder: 10 },
     { reportType: "kpi_revenue", label: "年度目標/認列/Pipeline 報表", category: "executive", description: "長官檢視格式，從系統 KPI 目標、專案認列與商機 Pipeline 彙整。", outputFormat: "xlsx", isExecutiveFormat: true, sortOrder: 20 },
+    { reportType: "business_unit_management", label: "業務單位管理報表", category: "executive", description: "依業務部門與業務代表檢視案件、角色、工時、成本與完成狀況。", outputFormat: "xlsx", isExecutiveFormat: true, sortOrder: 25 },
+    { reportType: "technical_handler_management", label: "技術部門處理人員管理報表", category: "executive", description: "依技術部門、處理人員與角色檢視個人案件狀態、分配工時與執行工時。", outputFormat: "xlsx", isExecutiveFormat: true, sortOrder: 26 },
     { reportType: "settlement", label: "部門利潤結算報表", category: "finance", description: "月結與利潤中心結算用。", outputFormat: "xlsx", isExecutiveFormat: false, sortOrder: 30 },
     { reportType: "timesheets", label: "工時清單報表", category: "people", description: "技術/協銷/專案工時明細。", outputFormat: "xlsx", isExecutiveFormat: false, sortOrder: 40 },
     { reportType: "utilization", label: "人力稼動率報表", category: "people", description: "人力稼動率與工時負載。", outputFormat: "xlsx", isExecutiveFormat: false, sortOrder: 50 },
@@ -155,6 +157,63 @@ const getWbsItemCompletionStatus = (item: any) => {
     if (item?.status) return item.status;
     return Number(item?.completionPercentage || 0) >= 100 ? "completed" : "not_started";
 };
+
+const joinUnique = (values: unknown[]) =>
+    Array.from(new Set(values.map((value) => String(value || "").trim()).filter(Boolean))).join("、");
+
+const getReportPeriodHoursColumn = (start: Date, end: Date) =>
+    `執行工時    ${toDateText(start)} ~ ${toDateText(end)}`;
+
+const plannedEndHistoryText = (sr: any) =>
+    (sr.plannedEndDateHistory || [])
+        .map((item: any) => `${toDateText(item.previousDate) || "空白"}→${toDateText(item.nextDate)}${item.reason ? `(${item.reason})` : ""}`)
+        .filter(Boolean)
+        .join("；");
+
+const warrantyRangeText = (sr: any) => {
+    const start = toDateText(sr.plannedStartDate);
+    const end = toDateText(sr.warrantyExpiresAt || sr.plannedEndDate);
+    if (!start && !end) return "";
+    return `${start || "-"} ~ ${end || "-"}`;
+};
+
+const getSrWbsSummary = (sr: any) => {
+    const version = getLatestWbsVersion(sr);
+    const items = version?.items || [];
+    const totalWorkItems = Number(sr.totalWorkItems || items.length || 0);
+    const completedWorkItems = Number(sr.completedWorkItems || items.filter((item: any) => getWbsItemCompletionStatus(item) === "completed").length || 0);
+    const estimatedHours = items.reduce((sum: number, item: any) => sum + Number(item?.estimatedHours || 0), 0);
+    const actualHours = items.reduce((sum: number, item: any) => sum + Number(item?.actualHours || 0), 0);
+    const completionPercentage = Number(
+        sr.completionPercentage
+        || (totalWorkItems > 0 ? Math.round((completedWorkItems / totalWorkItems) * 100) : 0)
+    );
+    return { version, items, totalWorkItems, completedWorkItems, estimatedHours, actualHours, completionPercentage };
+};
+
+const getRoleNameMap = (sr: any, wbsItems: any[]) => {
+    const roleMap = new Map<string, string[]>();
+    const add = (role: string, names: unknown[]) => {
+        const cleanRole = role.trim();
+        if (!cleanRole) return;
+        if (!roleMap.has(cleanRole)) roleMap.set(cleanRole, []);
+        roleMap.get(cleanRole)!.push(...names.map((name) => String(name || "").trim()).filter(Boolean));
+    };
+    for (const assignment of sr.externalAssignments || []) {
+        add(assignment.roleName || "處理人員", [assignment.handlerDisplayName || assignment.handlerName]);
+    }
+    for (const item of wbsItems) {
+        const assignee = item.assigneeId as any;
+        add("WBS 指派人員", [assignee?.name || assignee?.email]);
+    }
+    return roleMap;
+};
+
+const getRoleNames = (roleMap: Map<string, string[]>, role: string) =>
+    joinUnique(roleMap.get(role) || []);
+
+const getAssignmentKey = (srId: string, userId?: string, handlerName?: string, roleName?: string) =>
+    `${srId}|${userId || handlerName || ""}|${roleName || ""}`;
 
 const parseMonthDate = (month?: string | null) => {
     if (!month || !/^\d{4}-\d{2}$/.test(month)) return null;
@@ -1390,7 +1449,7 @@ export const analyticsRouter = router({
 
     generateReport: roleProcedure(["admin", "manager"])
         .input(z.object({
-            reportType: z.enum(["utilization", "settlement", "timesheets", "project_profitability", "pm_ranking", "budget_variance", "sla_compliance", "renewal_rate", "open_cases", "kpi_revenue", "project_completion_rate"]),
+            reportType: z.enum(["utilization", "settlement", "timesheets", "project_profitability", "pm_ranking", "budget_variance", "sla_compliance", "renewal_rate", "open_cases", "kpi_revenue", "project_completion_rate", "business_unit_management", "technical_handler_management"]),
             startDate: z.string(),
             endDate: z.string(),
             department: z.string().optional(),
@@ -1651,6 +1710,291 @@ export const analyticsRouter = router({
                         "\u5de5\u6642": hours,
                         "\u72c0\u614b": variance >= 0 ? "\u9810\u7b97\u5167" : "\u8d85\u652f"
                     };
+                });
+            } else if (input.reportType === "business_unit_management" || input.reportType === "technical_handler_management") {
+                const allowedDepartments = await buildDepartmentAccessFilter(ctx.user, input.department);
+                if (allowedDepartments !== null && allowedDepartments.length === 0) return [];
+                const scopedUser = input.userId
+                    ? (await getScopedReportUsers(ctx.user, input.department, input.userId))[0]
+                    : null;
+                if (input.userId && !scopedUser) return [];
+
+                const srMatch: any = {};
+                if (allowedDepartments !== null) {
+                    const deptUsers = await UserModel.find({ department: { $in: allowedDepartments } }, { _id: 1 }).lean();
+                    const deptUserIds = deptUsers.map((user: any) => user._id);
+                    srMatch.$or = [
+                        { salesDepartment: { $in: allowedDepartments } },
+                        { createdByDepartment: { $in: allowedDepartments } },
+                        { "externalAssignments.department": { $in: allowedDepartments } },
+                        { "externalAssignments.teamDepartment": { $in: allowedDepartments } },
+                        { pmId: { $in: deptUserIds } },
+                        { "members.userId": { $in: deptUserIds } },
+                        { "wbsVersions.items.assigneeId": { $in: deptUserIds } }
+                    ];
+                }
+                if (scopedUser) {
+                    srMatch.$and = [{
+                        $or: [
+                            { pmId: scopedUser._id },
+                            { createdById: scopedUser._id },
+                            { "members.userId": scopedUser._id },
+                            { "externalAssignments.userId": scopedUser._id },
+                            { "externalAssignments.handlerName": scopedUser.name },
+                            { "externalAssignments.handlerDisplayName": scopedUser.name },
+                            { "wbsVersions.items.assigneeId": scopedUser._id }
+                        ]
+                    }];
+                }
+
+                const srs = await ServiceRequestModel.find(srMatch)
+                    .populate("pmId", "name email department")
+                    .populate("createdById", "name email department")
+                    .populate("wbsVersions.items.assigneeId", "name email department")
+                    .sort({ salesDepartment: 1, plannedStartDate: 1, createdAt: 1 })
+                    .lean();
+
+                const srIds = srs.map((sr: any) => sr._id);
+                const [allAgg, periodAgg] = await Promise.all([
+                    TimesheetModel.aggregate([
+                        { $match: { type: "project", srId: { $in: srIds } } },
+                        { $group: { _id: { srId: "$srId", techId: "$techId" }, totalHours: { $sum: "$hours" }, totalCost: { $sum: "$costAmount" } } }
+                    ]),
+                    TimesheetModel.aggregate([
+                        { $match: { type: "project", srId: { $in: srIds }, workDate: { $gte: start, $lte: end } } },
+                        { $group: { _id: { srId: "$srId", techId: "$techId" }, totalHours: { $sum: "$hours" }, totalCost: { $sum: "$costAmount" } } }
+                    ])
+                ]);
+
+                const allByHandler = new Map<string, { hours: number; cost: number }>();
+                const periodByHandler = new Map<string, { hours: number; cost: number }>();
+                const allBySr = new Map<string, { hours: number; cost: number }>();
+                const periodBySr = new Map<string, { hours: number; cost: number }>();
+                const addAgg = (source: any[], handlerMap: Map<string, { hours: number; cost: number }>, srMap: Map<string, { hours: number; cost: number }>) => {
+                    for (const item of source) {
+                        const srId = item._id?.srId?.toString?.() || "";
+                        const techId = item._id?.techId?.toString?.() || "";
+                        const handlerKey = `${srId}|${techId}`;
+                        const hours = Number(item.totalHours || 0);
+                        const cost = Number(item.totalCost || 0);
+                        handlerMap.set(handlerKey, { hours, cost });
+                        const current = srMap.get(srId) || { hours: 0, cost: 0 };
+                        srMap.set(srId, { hours: current.hours + hours, cost: current.cost + cost });
+                    }
+                };
+                addAgg(allAgg, allByHandler, allBySr);
+                addAgg(periodAgg, periodByHandler, periodBySr);
+
+                const periodColumn = getReportPeriodHoursColumn(start, end);
+                const overlapsReportRange = (sr: any, periodHours: number) => {
+                    if (periodHours > 0) return true;
+                    const dates = [sr.createdAt, sr.reviewDate, sr.actualStartDate, sr.actualEndDate]
+                        .map((value) => value ? new Date(value) : null)
+                        .filter((date): date is Date => !!date && !Number.isNaN(date.getTime()));
+                    if (dates.some((date) => date >= start && date <= end)) return true;
+                    const plannedStart = sr.plannedStartDate ? new Date(sr.plannedStartDate) : null;
+                    const plannedEnd = sr.plannedEndDate ? new Date(sr.plannedEndDate) : null;
+                    if (plannedStart && plannedEnd && !Number.isNaN(plannedStart.getTime()) && !Number.isNaN(plannedEnd.getTime())) {
+                        return plannedStart <= end && plannedEnd >= start;
+                    }
+                    return !sr.plannedStartDate && !sr.plannedEndDate;
+                };
+
+                const getHandlerRows = (sr: any, summary: ReturnType<typeof getSrWbsSummary>) => {
+                    const rows: any[] = [];
+                    for (const assignment of sr.externalAssignments || []) {
+                        const userId = assignment.userId?.toString?.() || "";
+                        const handlerKey = userId ? `${sr._id.toString()}|${userId}` : "";
+                        const all = handlerKey ? allByHandler.get(handlerKey) : undefined;
+                        const period = handlerKey ? periodByHandler.get(handlerKey) : undefined;
+                        const plannedHours = Number(assignment.plannedHours || assignment.assignedHours || 0);
+                        const assignedHours = Number(assignment.assignedHours || plannedHours);
+                        const actualHours = Number(all?.hours ?? assignment.actualHours ?? 0);
+                        rows.push({
+                            key: getAssignmentKey(sr._id.toString(), userId, assignment.handlerName, assignment.roleName),
+                            userId,
+                            department: assignment.department || assignment.teamDepartment || "未指定",
+                            handlerName: assignment.handlerDisplayName || assignment.handlerName || "",
+                            roleName: assignment.roleName || "處理人員",
+                            workType: assignment.workType || "",
+                            personalStatus: assignment.personalStatus || (actualHours >= assignedHours && assignedHours > 0 ? "結案(成功)" : ""),
+                            plannedHours,
+                            assignedHours,
+                            actualHours,
+                            periodHours: Number(period?.hours || 0),
+                            remainingHours: Number(assignment.remainingHours ?? Math.max(0, assignedHours - actualHours)),
+                            isT00: /T00|內部/.test(`${assignment.workType || ""}${assignment.costCategory || ""}${assignment.teamDepartment || ""}${assignment.department || ""}`)
+                        });
+                    }
+
+                    if (rows.length > 0) return rows;
+
+                    const grouped = new Map<string, any>();
+                    for (const item of summary.items) {
+                        const assignee = item.assigneeId as any;
+                        const userId = assignee?._id?.toString?.() || assignee?.toString?.() || "";
+                        const key = userId || `unassigned|${item.title}`;
+                        if (!grouped.has(key)) {
+                            grouped.set(key, {
+                                key: getAssignmentKey(sr._id.toString(), userId, assignee?.name || "未指派", "WBS 指派人員"),
+                                userId,
+                                department: assignee?.department || "未指定",
+                                handlerName: assignee?.name || assignee?.email || "未指派",
+                                roleName: "WBS 指派人員",
+                                workType: sr.srType || "",
+                                personalStatus: "",
+                                plannedHours: 0,
+                                assignedHours: 0,
+                                actualHours: 0,
+                                periodHours: 0,
+                                remainingHours: 0,
+                                isT00: false,
+                                completedItems: 0,
+                                totalItems: 0
+                            });
+                        }
+                        const row = grouped.get(key);
+                        row.plannedHours += Number(item.estimatedHours || 0);
+                        row.assignedHours += Number(item.estimatedHours || 0);
+                        row.actualHours += Number(item.actualHours || 0);
+                        row.completedItems += getWbsItemCompletionStatus(item) === "completed" ? 1 : 0;
+                        row.totalItems += 1;
+                    }
+                    for (const row of grouped.values()) {
+                        const all = row.userId ? allByHandler.get(`${sr._id.toString()}|${row.userId}`) : undefined;
+                        const period = row.userId ? periodByHandler.get(`${sr._id.toString()}|${row.userId}`) : undefined;
+                        row.actualHours = Number(all?.hours ?? row.actualHours);
+                        row.periodHours = Number(period?.hours || 0);
+                        row.remainingHours = Math.max(0, row.assignedHours - row.actualHours);
+                        row.personalStatus = row.totalItems > 0 && row.completedItems === row.totalItems ? "結案(成功)" : row.actualHours > 0 ? "進行中" : "";
+                    }
+                    return Array.from(grouped.values());
+                };
+
+                if (input.reportType === "business_unit_management") {
+                    return srs
+                        .map((sr: any) => {
+                            const summary = getSrWbsSummary(sr);
+                            const srId = sr._id.toString();
+                            const periodHours = periodBySr.get(srId)?.hours || 0;
+                            if (!overlapsReportRange(sr, periodHours)) return null;
+                            const handlerRows = getHandlerRows(sr, summary);
+                            const roleMap = getRoleNameMap(sr, summary.items);
+                            const serviceRows = handlerRows.filter((row) => !row.isT00);
+                            const t00Rows = handlerRows.filter((row) => row.isT00);
+                            const sum = (rows: any[], key: string) => rows.reduce((total, row) => total + Number(row[key] || 0), 0);
+                            const totalPlanned = sum(handlerRows, "plannedHours") || summary.estimatedHours;
+                            const totalActual = (allBySr.get(srId)?.hours || sum(handlerRows, "actualHours") || summary.actualHours);
+                            const totalRemaining = Math.max(0, totalPlanned - totalActual);
+                            return {
+                                "公司名稱": sr.customerName || "",
+                                "案件名稱": sr.title || "",
+                                "專案編號": sr.externalProjectCode || srId,
+                                "服務類型": sr.externalServiceType || sr.srType || "",
+                                "預計開始時間": toDateText(sr.plannedStartDate),
+                                "預計結束時間": toDateText(sr.plannedEndDate),
+                                "預計結束時間-歷程": plannedEndHistoryText(sr),
+                                "全案開始時間": toDateText(sr.actualStartDate),
+                                "全案結束時間": toDateText(sr.actualEndDate),
+                                "業務部門": sr.salesDepartment || "",
+                                "業務代表": sr.salesRep || "",
+                                "全案狀態": srStatusText[sr.status] || sr.externalStatus || sr.status || "",
+                                "建案人員部門": sr.createdByDepartment || sr.createdById?.department || sr.pmId?.department || "",
+                                "建案人員": sr.createdByNameSnapshot || sr.createdById?.name || sr.pmId?.name || "",
+                                "專案主持人": getRoleNames(roleMap, "專案主持人"),
+                                "專案經理": getRoleNames(roleMap, "專案經理") || sr.pmId?.name || "",
+                                "部署者": getRoleNames(roleMap, "部署者"),
+                                "開發者": getRoleNames(roleMap, "開發者"),
+                                "問題追蹤者": getRoleNames(roleMap, "問題追蹤者"),
+                                "協銷人員": getRoleNames(roleMap, "協銷人員"),
+                                "講師": getRoleNames(roleMap, "講師"),
+                                "助教": getRoleNames(roleMap, "助教"),
+                                "學習者": getRoleNames(roleMap, "學習者"),
+                                "架構師": getRoleNames(roleMap, "架構師"),
+                                "專案經理(前)": getRoleNames(roleMap, "專案經理(前)"),
+                                "IE0T00": sum(t00Rows, "plannedHours"),
+                                "總建案工時(主單+附單) (服務+T00內部)": totalPlanned,
+                                "已累計工時 (服務+T00內部)": totalActual,
+                                "剩餘工時 (服務+T00內部)": totalRemaining,
+                                "總建案工時(主單+附單) (服務工時)": sum(serviceRows, "plannedHours") || summary.estimatedHours,
+                                "已累計工時 (服務工時)": sum(serviceRows, "actualHours") || totalActual,
+                                "剩餘工時 (服務工時)": Math.max(0, (sum(serviceRows, "plannedHours") || summary.estimatedHours) - (sum(serviceRows, "actualHours") || totalActual)),
+                                "總建案工時(主單+附單) (T00內部)": sum(t00Rows, "plannedHours"),
+                                "已累計工時 (T00內部)": sum(t00Rows, "actualHours"),
+                                "剩餘工時 (T00內部)": sum(t00Rows, "remainingHours"),
+                                [periodColumn]: periodHours,
+                                "人力服務總成本(主單+附單)": allBySr.get(srId)?.cost || 0,
+                                "人力服務總成本-調整後": Number(sr.adjustedLaborCost ?? allBySr.get(srId)?.cost ?? 0),
+                                "問題代號(客服)": sr.externalIssueCode || "",
+                                "案件編號(保固 / 維護專案)": sr.externalWarrantyProjectCode || "",
+                                "起訖時間(保固 / 維護專案)": warrantyRangeText(sr),
+                                "案件編號(協銷)": sr.externalPresalesCaseCode || "",
+                                "調整後金額備註": sr.adjustedCostNote || "",
+                                "建案日期": toDateText(sr.createdAt),
+                                "更新日期": toDateText(sr.updatedAt),
+                                "保固到期日期": toDateText(sr.warrantyExpiresAt),
+                                "總工作項目": summary.totalWorkItems,
+                                "總完成工作項目": summary.completedWorkItems,
+                                "總完成百分比": summary.completionPercentage
+                            };
+                        })
+                        .filter(Boolean);
+                }
+
+                return srs.flatMap((sr: any) => {
+                    const summary = getSrWbsSummary(sr);
+                    const srId = sr._id.toString();
+                    const periodHours = periodBySr.get(srId)?.hours || 0;
+                    if (!overlapsReportRange(sr, periodHours)) return [];
+                    return getHandlerRows(sr, summary)
+                        .filter((row) => {
+                            if (!scopedUser) return true;
+                            return row.userId === scopedUser._id.toString() || row.handlerName === scopedUser.name;
+                        })
+                        .map((assignment) => ({
+                            "公司名稱": sr.customerName || "",
+                            "案件名稱": sr.title || "",
+                            "專案編號": sr.externalProjectCode || srId,
+                            "服務類型": sr.externalServiceType || sr.srType || "",
+                            "建案日期": toDateText(sr.createdAt),
+                            "審核日期": toDateText(sr.reviewDate),
+                            "預計開始時間": toDateText(sr.plannedStartDate),
+                            "預計結束時間": toDateText(sr.plannedEndDate),
+                            "預計結束時間-歷程": plannedEndHistoryText(sr),
+                            "全案開始時間": toDateText(sr.actualStartDate),
+                            "全案結束時間": toDateText(sr.actualEndDate),
+                            "業務部門": sr.salesDepartment || "",
+                            "業務代表": sr.salesRep || "",
+                            "全案狀態": srStatusText[sr.status] || sr.externalStatus || sr.status || "",
+                            "個人案件狀態": assignment.personalStatus || "",
+                            "技術部門": assignment.department || "",
+                            "處理人員": assignment.handlerName || "",
+                            "角色": assignment.roleName || "",
+                            "工時類別": assignment.workType || "",
+                            "建案工時": assignment.plannedHours,
+                            "分配工時": assignment.assignedHours,
+                            "已累計工時": assignment.actualHours,
+                            [periodColumn]: assignment.periodHours,
+                            "剩餘工時": assignment.remainingHours,
+                            "建案人員部門": sr.createdByDepartment || sr.createdById?.department || sr.pmId?.department || "",
+                            "建案人員": sr.createdByNameSnapshot || sr.createdById?.name || sr.pmId?.name || "",
+                            "問題代號(客服)": sr.externalIssueCode || "",
+                            "案件編號(保固 / 維護專案)": sr.externalWarrantyProjectCode || "",
+                            "起訖時間(保固 / 維護專案)": warrantyRangeText(sr),
+                            "案件編號(協銷)": sr.externalPresalesCaseCode || "",
+                            "更新日期": toDateText(sr.updatedAt),
+                            "保固到期日期": toDateText(sr.warrantyExpiresAt),
+                            "計費分攤": sr.billingAllocation || "",
+                            "認列月份": sr.recognitionMonth || "",
+                            "工作項目": joinUnique(summary.items.filter((item: any) => {
+                                const assignee = item.assigneeId as any;
+                                const assigneeId = assignee?._id?.toString?.() || assignee?.toString?.() || "";
+                                return !assignment.userId || assignment.userId === assigneeId;
+                            }).map((item: any) => item.title)),
+                            "總工作項目": summary.totalWorkItems,
+                            "總完成工作項目": summary.completedWorkItems,
+                            "總完成百分比": summary.completionPercentage
+                        }));
                 });
             } else if (input.reportType === "project_completion_rate") {
                 const allowedDepartments = await buildDepartmentAccessFilter(ctx.user, input.department);

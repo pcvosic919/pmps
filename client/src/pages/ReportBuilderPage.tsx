@@ -16,10 +16,13 @@ type ReportType =
     | "renewal_rate"
     | "open_cases"
     | "kpi_revenue"
-    | "project_completion_rate";
+    | "project_completion_rate"
+    | "business_unit_management"
+    | "technical_handler_management";
 
 export function ReportBuilderPage() {
-    const [reportType, setReportType] = useState<ReportType>("timesheets");
+    const [reportType, setReportType] = useState<ReportType>("business_unit_management");
+    const [activeCategory, setActiveCategory] = useState("executive");
     
     // Default to current month
     const today = new Date();
@@ -38,6 +41,8 @@ export function ReportBuilderPage() {
     const fallbackCatalog = [
         { reportType: "open_cases", label: "未結案清單匯出", category: "executive", description: "長官檢視格式。", isExecutiveFormat: true },
         { reportType: "kpi_revenue", label: "年度目標/認列/Pipeline 報表", category: "executive", description: "長官檢視格式。", isExecutiveFormat: true },
+        { reportType: "business_unit_management", label: "業務單位管理報表", category: "executive", description: "依業務部門與業務代表檢視案件、角色、工時、成本與完成狀況。", isExecutiveFormat: true },
+        { reportType: "technical_handler_management", label: "技術部門處理人員管理報表", category: "executive", description: "依技術部門、處理人員與角色檢視個人案件狀態與工時。", isExecutiveFormat: true },
         { reportType: "settlement", label: "部門利潤結算報表", category: "finance", description: "月結與利潤中心結算用。", isExecutiveFormat: false },
         { reportType: "timesheets", label: "工時清單報表", category: "people", description: "工時明細。", isExecutiveFormat: false },
         { reportType: "utilization", label: "人力稼動率報表", category: "people", description: "人力負載分析。", isExecutiveFormat: false },
@@ -52,28 +57,34 @@ export function ReportBuilderPage() {
     const selectedTemplate = catalog.find((template: any) => template.reportType === reportType);
     const executiveSourceKey = reportType === "open_cases" || reportType === "kpi_revenue" ? reportType : null;
     const selectedSourceStatus = executiveSourceKey ? (dataSourceStatus as any)?.[executiveSourceKey] : null;
-	    const categoryLabels: Record<string, string> = {
-	        executive: "主管檢視報表",
-	        finance: "財務結算報表",
-	        people: "人力資源報表",
-	        project: "專案管理報表",
-	        system: "系統報表"
-	    };
-	    const priorityReportTypes: ReportType[] = ["open_cases", "kpi_revenue", "project_completion_rate", "timesheets"];
-	    const groupedTemplates = catalog.reduce((groups: Record<string, any[]>, template: any) => {
-	        if (!groups[template.category]) groups[template.category] = [];
-	        groups[template.category].push(template);
-	        return groups;
-	    }, {});
-	    const reportCards = [...catalog]
-	        .sort((left: any, right: any) => {
-	            const leftPriority = priorityReportTypes.indexOf(left.reportType);
-	            const rightPriority = priorityReportTypes.indexOf(right.reportType);
-	            if (leftPriority !== -1 || rightPriority !== -1) {
-	                return (leftPriority === -1 ? 99 : leftPriority) - (rightPriority === -1 ? 99 : rightPriority);
-	            }
-	            return String(left.label).localeCompare(String(right.label), "zh-Hant");
-	        });
+    const categoryLabels: Record<string, string> = {
+        executive: "主管檢視報表",
+        finance: "財務結算報表",
+        people: "人力資源報表",
+        project: "專案管理報表",
+        system: "系統報表"
+    };
+    const categoryOrder = ["executive", "project", "people", "finance", "system"];
+    const priorityReportTypes: ReportType[] = ["open_cases", "kpi_revenue", "business_unit_management", "technical_handler_management", "project_completion_rate", "timesheets"];
+    const groupedTemplates = catalog.reduce((groups: Record<string, any[]>, template: any) => {
+        if (!groups[template.category]) groups[template.category] = [];
+        groups[template.category].push(template);
+        return groups;
+    }, {});
+    const availableCategories = [
+        ...categoryOrder.filter((category) => groupedTemplates[category]?.length),
+        ...Object.keys(groupedTemplates).filter((category) => !categoryOrder.includes(category))
+    ];
+    const reportCards = [...catalog]
+        .sort((left: any, right: any) => {
+            const leftPriority = priorityReportTypes.indexOf(left.reportType);
+            const rightPriority = priorityReportTypes.indexOf(right.reportType);
+            if (leftPriority !== -1 || rightPriority !== -1) {
+                return (leftPriority === -1 ? 99 : leftPriority) - (rightPriority === -1 ? 99 : rightPriority);
+            }
+            return String(left.label).localeCompare(String(right.label), "zh-Hant");
+        });
+    const visibleReportCards = reportCards.filter((template: any) => template.category === activeCategory);
 
     const { data: reportData, isLoading } = trpc.analytics.generateReport.useQuery({
         reportType,
@@ -107,22 +118,65 @@ export function ReportBuilderPage() {
         window.print();
     };
 
-	    const getEmptyMessage = () => {
-	        if (!selectedTemplate?.isExecutiveFormat || !selectedSourceStatus) return "符合條件的資料為空。";
-	        if (selectedSourceStatus.dataRows === 0) return "系統內目前沒有符合此主管報表口徑的資料，請確認專案、WBS、金額或年度目標設定。";
-	        return "系統資料已有內容，但目前篩選條件下沒有資料。";
-	    };
-	    const dataQualityHints = (() => {
-	        const rows = (reportData || []) as any[];
-	        const anomalyRows = rows.filter((row) => String(row?.["資料異常備註"] || row?.["備註"] || "").trim());
-	        const zeroAmountRows = rows.filter((row) =>
-	            Object.entries(row || {}).some(([key, value]) => /金額|工時|目標|應完成/.test(key) && Number(value) === 0)
-	        );
-	        return [
-	            anomalyRows.length > 0 ? `${anomalyRows.length} 筆含資料異常備註` : "",
-	            zeroAmountRows.length > 0 ? `${zeroAmountRows.length} 筆金額/工時為 0` : ""
-	        ].filter(Boolean);
-	    })();
+    const handleReportTypeChange = (nextReportType: ReportType) => {
+        setReportType(nextReportType);
+        const nextTemplate = catalog.find((template: any) => template.reportType === nextReportType);
+        if (nextTemplate?.category) setActiveCategory(nextTemplate.category);
+    };
+
+    const handleCategoryChange = (category: string) => {
+        setActiveCategory(category);
+        const firstTemplate = reportCards.find((template: any) => template.category === category);
+        if (firstTemplate && selectedTemplate?.category !== category) {
+            setReportType(firstTemplate.reportType as ReportType);
+        }
+    };
+
+    const reportFieldHints: Partial<Record<ReportType, string[]>> = {
+        business_unit_management: [
+            "資料來源以系統內專案、工時與業務欄位為主，不抓外部 Excel。",
+            "業務部門與業務代表優先使用 SR 建立時保存的業務帳號與部門。",
+            "完成狀態、實際工時與成本會依查詢期間內的系統資料彙整。"
+        ],
+        technical_handler_management: [
+            "資料來源以系統內專案處理人員、工時與 WBS 指派資料為主。",
+            "技術部門優先使用處理人員帳號上的部門資料。",
+            "協銷/專案工時會保留類型，便於後續分開統計。"
+        ],
+        project_completion_rate: [
+            "分母為查詢月份內應完成的 WBS 預估工時。",
+            "分子只計算狀態為完成的 WBS 預估工時。",
+            "未指派人員、無結束日或無預估工時會列為資料異常備註。"
+        ],
+        kpi_revenue: [
+            "年度認列以認列月份落在查詢年度內為準。",
+            "YoY 使用系統前一年實際認列金額比較。",
+            "未填認列金額的已結案專案會標示為資料缺漏，不自動猜金額。"
+        ],
+        open_cases: [
+            "專案編號為主要值，同一專案只顯示一筆。",
+            "資料來源為系統內未結案 SR，不使用外部清單。",
+            "若缺少預計結束或負責人，會在備註欄提示。"
+        ]
+    };
+    const selectedReportHints = reportFieldHints[reportType] || [];
+
+    const getEmptyMessage = () => {
+        if (!selectedTemplate?.isExecutiveFormat || !selectedSourceStatus) return "符合條件的資料為空。";
+        if (selectedSourceStatus.dataRows === 0) return "系統內目前沒有符合此主管報表口徑的資料，請確認專案、WBS、金額或年度目標設定。";
+        return "系統資料已有內容，但目前篩選條件下沒有資料。";
+    };
+    const dataQualityHints = (() => {
+        const rows = (reportData || []) as any[];
+        const anomalyRows = rows.filter((row) => String(row?.["資料異常備註"] || row?.["備註"] || "").trim());
+        const zeroAmountRows = rows.filter((row) =>
+            Object.entries(row || {}).some(([key, value]) => /金額|工時|目標|應完成/.test(key) && Number(value) === 0)
+        );
+        return [
+            anomalyRows.length > 0 ? `${anomalyRows.length} 筆含資料異常備註` : "",
+            zeroAmountRows.length > 0 ? `${zeroAmountRows.length} 筆金額/工時為 0` : ""
+        ].filter(Boolean);
+    })();
 
     return (
         <div className="space-y-6">
@@ -141,27 +195,41 @@ export function ReportBuilderPage() {
 	                </div>
 	            </div>
 
-	            <div className="grid sm:grid-cols-2 xl:grid-cols-4 gap-3 print:hidden">
-	                {reportCards.slice(0, 8).map((template: any) => (
-	                    <button
-	                        key={template.reportType}
-	                        type="button"
-	                        onClick={() => setReportType(template.reportType as ReportType)}
-	                        className={`text-left border rounded-xl p-4 bg-card hover:border-primary/60 hover:shadow-sm transition-all ${reportType === template.reportType ? "border-primary shadow-sm" : "border-border/50"}`}
-	                    >
-	                        <div className="flex items-start justify-between gap-3">
-	                            <div className="min-w-0">
-	                                <div className="text-xs text-muted-foreground">{categoryLabels[template.category] || template.category}</div>
-	                                <div className="font-bold mt-1 truncate">{template.label}</div>
-	                            </div>
-	                            {priorityReportTypes.includes(template.reportType) && (
-	                                <span className="text-[10px] bg-primary/10 text-primary rounded-full px-2 py-0.5 shrink-0">常用</span>
-	                            )}
-	                        </div>
-	                        <div className="mt-2 text-xs text-muted-foreground line-clamp-2">{template.description}</div>
-	                    </button>
-	                ))}
-	            </div>
+            <div className="space-y-3 print:hidden">
+                <div className="flex flex-wrap gap-2 border-b border-border/70">
+                    {availableCategories.map((category) => (
+                        <button
+                            key={category}
+                            type="button"
+                            onClick={() => handleCategoryChange(category)}
+                            className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${activeCategory === category ? "border-primary text-primary" : "border-transparent text-muted-foreground hover:text-foreground"}`}
+                        >
+                            {categoryLabels[category] || category}
+                        </button>
+                    ))}
+                </div>
+                <div className="grid sm:grid-cols-2 xl:grid-cols-4 gap-3">
+                    {visibleReportCards.map((template: any) => (
+                        <button
+                            key={template.reportType}
+                            type="button"
+                            onClick={() => handleReportTypeChange(template.reportType as ReportType)}
+                            className={`text-left border rounded-lg p-4 bg-card hover:border-primary/60 hover:shadow-sm transition-all ${reportType === template.reportType ? "border-primary shadow-sm" : "border-border/50"}`}
+                        >
+                            <div className="flex items-start justify-between gap-3">
+                                <div className="min-w-0">
+                                    <div className="text-xs text-muted-foreground">{categoryLabels[template.category] || template.category}</div>
+                                    <div className="font-bold mt-1 truncate">{template.label}</div>
+                                </div>
+                                {priorityReportTypes.includes(template.reportType) && (
+                                    <span className="text-[10px] bg-primary/10 text-primary rounded-full px-2 py-0.5 shrink-0">常用</span>
+                                )}
+                            </div>
+                            <div className="mt-2 text-xs text-muted-foreground line-clamp-2">{template.description}</div>
+                        </button>
+                    ))}
+                </div>
+            </div>
 
 	            <div className="grid md:grid-cols-4 gap-6 print:hidden">
                 <div className="bg-card border border-border p-5 rounded-xl shadow-sm space-y-4 col-span-1">
@@ -169,17 +237,20 @@ export function ReportBuilderPage() {
                     
                     <div>
                         <label className="block text-sm font-medium mb-1">報表類型</label>
-                        <select className="w-full border border-border rounded-lg p-2 bg-background focus:ring-2 focus:ring-primary/50 outline-none" value={reportType} onChange={e => setReportType(e.target.value as any)}>
-                            {Object.entries(groupedTemplates).map(([category, templates]) => (
-                                <optgroup key={category} label={categoryLabels[category] || category}>
-                                    {(templates as any[]).map((template: any) => (
-                                        <option key={template.reportType} value={template.reportType}>
-                                            {template.label}
-                                        </option>
-                                    ))}
-                                </optgroup>
-                            ))}
-                        </select>
+	                        <select className="w-full border border-border rounded-lg p-2 bg-background focus:ring-2 focus:ring-primary/50 outline-none" value={reportType} onChange={e => handleReportTypeChange(e.target.value as ReportType)}>
+	                            {availableCategories.map((category) => {
+                                    const templates = groupedTemplates[category] || [];
+                                    return (
+	                                <optgroup key={category} label={categoryLabels[category] || category}>
+	                                    {(templates as any[]).map((template: any) => (
+	                                        <option key={template.reportType} value={template.reportType}>
+	                                            {template.label}
+	                                        </option>
+	                                    ))}
+	                                </optgroup>
+                                    );
+                                })}
+	                        </select>
                         {selectedTemplate && (
                             <div className="mt-2 rounded-lg border border-border bg-muted/30 p-2 text-xs text-muted-foreground">
                                 <div className="font-semibold text-foreground">{categoryLabels[selectedTemplate.category] || selectedTemplate.category}</div>
@@ -187,8 +258,8 @@ export function ReportBuilderPage() {
                                 {selectedTemplate.isExecutiveFormat && <div className="mt-1 text-primary font-medium">長官格式：會維持指定 Excel 欄位與工作表。</div>}
                             </div>
                         )}
-                        {selectedSourceStatus && (
-                            <div className="mt-2 rounded-lg border border-emerald-200 bg-emerald-50 p-3 text-xs text-emerald-900">
+	                        {selectedSourceStatus && (
+	                            <div className="mt-2 rounded-lg border border-emerald-200 bg-emerald-50 p-3 text-xs text-emerald-900">
                                 <div className="font-semibold flex items-center gap-1.5">
                                     <Database className="w-3.5 h-3.5" />
                                     系統資料狀態
@@ -200,9 +271,19 @@ export function ReportBuilderPage() {
                                     <div>目前資料列：{selectedSourceStatus.dataRows}</div>
                                     {selectedSourceStatus.detail && <div>{selectedSourceStatus.detail}</div>}
                                 </div>
-                            </div>
-                        )}
-                    </div>
+	                            </div>
+	                        )}
+                            {selectedReportHints.length > 0 && (
+                                <div className="mt-2 rounded-lg border border-sky-200 bg-sky-50 p-3 text-xs text-sky-950">
+                                    <div className="font-semibold">欄位口徑提示</div>
+                                    <ul className="mt-2 space-y-1 list-disc pl-4">
+                                        {selectedReportHints.map((hint) => (
+                                            <li key={hint}>{hint}</li>
+                                        ))}
+                                    </ul>
+                                </div>
+                            )}
+	                    </div>
 
                     <div>
                         <label className="block text-sm font-medium mb-1 flex items-center"><Calendar className="w-3.5 h-3.5 mr-1"/>起始日期</label>

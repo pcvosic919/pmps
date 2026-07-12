@@ -371,6 +371,13 @@ export const projectsRouter = router({
             salesUserId: z.string().optional(),
             salesDepartment: z.string().trim().optional(),
             salesRep: z.string().trim().optional(),
+            externalServiceType: z.string().trim().optional(),
+            plannedStartDate: z.coerce.date().optional(),
+            plannedEndDate: z.coerce.date().optional(),
+            reviewDate: z.coerce.date().optional(),
+            warrantyExpiresAt: z.coerce.date().optional(),
+            billingAllocation: z.string().trim().optional(),
+            recognitionMonth: z.string().trim().optional(),
             joinPmAsMember: z.boolean().default(true),
             opportunityId: z.string().optional()
         }))
@@ -405,11 +412,27 @@ export const projectsRouter = router({
                 salesUserId: salesUserFields?.salesUserId || oppSalesUserId,
                 salesDepartment: salesUserFields?.salesDepartment || input.salesDepartment || oppSalesDepartment,
                 salesRep: salesUserFields?.salesRep || input.salesRep || oppSalesRep,
+                externalServiceType: input.externalServiceType || input.srType,
                 contractAmount: input.contractAmount,
+                recognitionMonth: input.recognitionMonth || undefined,
                 srType: input.srType,
                 totalPoints: input.totalPoints,
                 pointValue: input.pointValue,
                 pmId: toObjectId(input.pmId),
+                createdById: toObjectId(ctx.user.id),
+                createdByNameSnapshot: ctx.user.name || ctx.user.email || "",
+                createdByDepartment: ctx.user.department || "",
+                plannedStartDate: input.plannedStartDate,
+                plannedEndDate: input.plannedEndDate,
+                reviewDate: input.reviewDate,
+                warrantyExpiresAt: input.warrantyExpiresAt,
+                billingAllocation: input.billingAllocation || undefined,
+                plannedEndDateHistory: input.plannedEndDate ? [{
+                    nextDate: input.plannedEndDate,
+                    changedById: toObjectId(ctx.user.id),
+                    changedAt: new Date(),
+                    reason: "建立專案時設定"
+                }] : [],
                 opportunityId: input.opportunityId ? new mongoose.Types.ObjectId(input.opportunityId) : undefined,
                 status: "new",
                 members: buildSrMembers(ctx.user.id, input.pmId, input.joinPmAsMember)
@@ -1325,7 +1348,10 @@ export const projectsRouter = router({
             workDate: z.coerce.date(),
             hours: z.number(),
             description: z.string(),
-            taskStatus: z.enum(["not_started", "in_progress", "completed"]).optional()
+            taskStatus: z.enum(["not_started", "in_progress", "completed"]).optional(),
+            workType: z.string().trim().optional(),
+            costCategory: z.string().trim().optional(),
+            externalAssignmentKey: z.string().trim().optional()
         }))
         .mutation(async ({ ctx, input }) => {
             await assertSettlementUnlocked(getMonthKey(input.workDate), "project");
@@ -1369,6 +1395,9 @@ export const projectsRouter = router({
                 workDate: input.workDate,
                 hours: input.hours,
                 description: input.description,
+                workType: input.workType,
+                costCategory: input.costCategory,
+                externalAssignmentKey: input.externalAssignmentKey,
                 costAmount: costAmount
             });
 

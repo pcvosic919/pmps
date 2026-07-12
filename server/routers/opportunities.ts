@@ -515,9 +515,13 @@ export const opportunitiesRouter = router({
                 salesUserId: salesUserFields?.salesUserId || opportunity.salesUserId,
                 salesDepartment: salesUserFields?.salesDepartment || input.salesDepartment || opportunity.salesDepartment || "",
                 salesRep: salesUserFields?.salesRep || input.salesRep || opportunity.salesRep || "",
+                externalServiceType: "協銷轉專案",
                 contractAmount: input.contractAmount,
                 opportunityId: input.opportunityId,
                 pmId: input.pmId ? toObjectId(input.pmId) : undefined,
+                createdById: toObjectId(ctx.user.id),
+                createdByNameSnapshot: ctx.user.name || ctx.user.email || "",
+                createdByDepartment: ctx.user.department || "",
                 members: buildSrMembers(ctx.user.id, input.pmId, input.techId, opportunity.presalesAssignments),
                 status: "new"
             });
@@ -719,6 +723,9 @@ export const opportunitiesRouter = router({
             workDate: z.coerce.date(),
             hours: z.number(),
             description: z.string(),
+            workType: z.string().trim().optional(),
+            costCategory: z.string().trim().optional(),
+            externalAssignmentKey: z.string().trim().optional(),
         }))
         .mutation(async ({ ctx, input }) => {
             const opportunity = assertFound(
@@ -745,6 +752,9 @@ export const opportunitiesRouter = router({
                 workDate: input.workDate,
                 hours: input.hours,
                 description: input.description,
+                workType: input.workType,
+                costCategory: input.costCategory,
+                externalAssignmentKey: input.externalAssignmentKey,
                 costAmount: 0
             });
             return { success: true };

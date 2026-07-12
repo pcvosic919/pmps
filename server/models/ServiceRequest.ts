@@ -37,11 +37,20 @@ export interface IServiceRequestExternalAssignment {
     teamDepartment?: string;
     roleName?: string;
     workType?: string;
+    costCategory?: string;
     personalStatus?: string;
     plannedHours: number;
     assignedHours: number;
     actualHours: number;
     remainingHours: number;
+}
+
+export interface IServiceRequestPlannedEndDateHistory {
+    previousDate?: Date;
+    nextDate?: Date;
+    changedById?: mongoose.Types.ObjectId;
+    changedAt: Date;
+    reason?: string;
 }
 
 export interface IServiceRequestAttachment extends Omit<ServiceRequestAttachment, "uploadedById"> {
@@ -69,13 +78,19 @@ export interface IServiceRequest extends Document {
     salesUserId?: mongoose.Types.ObjectId;
     salesDepartment?: string;
     salesRep?: string;
+    createdById?: mongoose.Types.ObjectId;
+    createdByNameSnapshot?: string;
+    createdByDepartment?: string;
     plannedStartDate?: Date;
     plannedEndDate?: Date;
+    plannedEndDateHistory?: IServiceRequestPlannedEndDateHistory[];
     actualStartDate?: Date;
     actualEndDate?: Date;
     reviewDate?: Date;
     warrantyExpiresAt?: Date;
     billingAllocation?: string;
+    adjustedLaborCost?: number;
+    adjustedCostNote?: string;
     totalWorkItems?: number;
     completedWorkItems?: number;
     completionPercentage?: number;
@@ -156,11 +171,20 @@ const ExternalAssignmentSchema = new Schema<IServiceRequestExternalAssignment>({
     teamDepartment: { type: String },
     roleName: { type: String },
     workType: { type: String },
+    costCategory: { type: String },
     personalStatus: { type: String },
     plannedHours: { type: Number, default: 0 },
     assignedHours: { type: Number, default: 0 },
     actualHours: { type: Number, default: 0 },
     remainingHours: { type: Number, default: 0 }
+}, { _id: false });
+
+const PlannedEndDateHistorySchema = new Schema<IServiceRequestPlannedEndDateHistory>({
+    previousDate: { type: Date },
+    nextDate: { type: Date },
+    changedById: { type: Schema.Types.ObjectId, ref: "User" },
+    changedAt: { type: Date, default: Date.now },
+    reason: { type: String }
 }, { _id: false });
 
 const ServiceRequestSchema = new Schema<IServiceRequest>({
@@ -184,13 +208,19 @@ const ServiceRequestSchema = new Schema<IServiceRequest>({
     salesUserId: { type: Schema.Types.ObjectId, ref: "User" },
     salesDepartment: { type: String },
     salesRep: { type: String },
+    createdById: { type: Schema.Types.ObjectId, ref: "User" },
+    createdByNameSnapshot: { type: String },
+    createdByDepartment: { type: String },
     plannedStartDate: { type: Date },
     plannedEndDate: { type: Date },
+    plannedEndDateHistory: [PlannedEndDateHistorySchema],
     actualStartDate: { type: Date },
     actualEndDate: { type: Date },
     reviewDate: { type: Date },
     warrantyExpiresAt: { type: Date },
     billingAllocation: { type: String },
+    adjustedLaborCost: { type: Number },
+    adjustedCostNote: { type: String },
     totalWorkItems: { type: Number },
     completedWorkItems: { type: Number },
     completionPercentage: { type: Number, min: 0, max: 100 },
