@@ -3,7 +3,7 @@ import { useRoute, Link } from "wouter";
 import { trpc } from "../lib/trpc";
 import {
     Building2, Calendar, ChevronLeft, Users, Briefcase, Clock,
-    Plus, X, Check, UserPlus, Trash2, FileText, ChevronDown
+    Plus, X, Check, UserPlus, Trash2, FileText, ChevronDown, Upload, Paperclip
 } from "lucide-react";
 import { useCurrentUser } from "../lib/useCurrentUser";
 import { SharePointFilesSection } from "../components/SharePointFilesSection";
@@ -76,6 +76,8 @@ export function OpportunityDetailPage() {
     const [editedSalesUserId, setEditedSalesUserId] = useState("");
     const [editedSalesRep, setEditedSalesRep] = useState("");
     const [editedSalesDepartment, setEditedSalesDepartment] = useState("");
+    const [isDraggingFile, setIsDraggingFile] = useState(false);
+    const [isUploadingFile, setIsUploadingFile] = useState(false);
 
     // ------ Queries ------
     const { data: opp, isLoading: isOppLoading, refetch: refetchOpp } = trpc.opportunities.getById.useQuery({ id }, { enabled: !!id });
@@ -157,6 +159,12 @@ export function OpportunityDetailPage() {
         }
     });
 
+    const uploadAttachmentMutation = trpc.opportunities.uploadAttachment.useMutation({
+        onSuccess: () => {
+            refetchOpp();
+        }
+    });
+
     const createSRMutation = trpc.opportunities.createSR.useMutation({
         onSuccess: (data) => {
             setShowSRModal(false);
@@ -221,6 +229,42 @@ export function OpportunityDetailPage() {
     const handleUpdateSalesOwner = () => {
         if (!editedSalesUserId) return;
         updateSalesOwnerMutation.mutate({ id, salesUserId: editedSalesUserId });
+    };
+
+    const handleFileUpload = async (files: FileList | null) => {
+        if (!files || files.length === 0) return;
+        setIsUploadingFile(true);
+        try {
+            for (let index = 0; index < files.length; index++) {
+                const file = files[index];
+                await uploadAttachmentMutation.mutateAsync({
+                    opportunityId: id,
+                    fileName: file.name,
+                    fileSize: file.size,
+                    mimeType: file.type || "application/octet-stream"
+                });
+            }
+            alert("商機附件上傳成功");
+        } catch (error: any) {
+            alert(error?.message || "商機附件上傳失敗");
+        } finally {
+            setIsUploadingFile(false);
+            const input = document.getElementById("opportunity-file-input") as HTMLInputElement | null;
+            if (input) input.value = "";
+        }
+    };
+
+    const handleFileDrop = (event: React.DragEvent) => {
+        event.preventDefault();
+        setIsDraggingFile(false);
+        void handleFileUpload(event.dataTransfer.files);
+    };
+
+    const formatSize = (bytes?: number) => {
+        const value = Number(bytes || 0);
+        if (value < 1024) return `${value} B`;
+        if (value < 1024 * 1024) return `${(value / 1024).toFixed(1)} KB`;
+        return `${(value / (1024 * 1024)).toFixed(1)} MB`;
     };
 
     if (isOppLoading || isMembersLoading || isAssignmentsLoading || isTimesheetsLoading) {
@@ -673,6 +717,44 @@ export function OpportunityDetailPage() {
 
             <div className="grid grid-cols-1 lg:grid-cols-1 gap-6 mb-8">
                 <div className="bg-card border border-border/50 rounded-xl shadow-sm overflow-hidden p-6">
+                    <div className="mb-5">
+                        <h3 className="mb-3 flex items-center text-base font-semibold">
+                            <Paperclip className="mr-2 h-4 w-4 text-primary" />
+                            商機附件
+                        </h3>
+                        <div
+                            onDragOver={(event) => { event.preventDefault(); setIsDraggingFile(true); }}
+                            onDragLeave={() => setIsDraggingFile(false)}
+                            onDrop={handleFileDrop}
+                            onClick={() => !isUploadingFile && document.getElementById("opportunity-file-input")?.click()}
+                            className={`cursor-pointer rounded-lg border-2 border-dashed p-4 text-center transition-colors ${isDraggingFile ? "border-primary bg-primary/5" : "border-border hover:border-primary/50 hover:bg-muted/30"} ${isUploadingFile ? "cursor-not-allowed opacity-50" : ""}`}
+                        >
+                            <Upload className={`mx-auto mb-2 h-7 w-7 ${isDraggingFile ? "text-primary" : "text-muted-foreground/50"}`} />
+                            <p className="text-xs text-muted-foreground">{isUploadingFile ? "上傳中..." : "拖曳或點擊上傳商機附件"}</p>
+                            <input
+                                id="opportunity-file-input"
+                                type="file"
+                                multiple
+                                className="hidden"
+                                accept=".pdf,.doc,.docx,.xls,.xlsx,.png,.jpg,.jpeg,.zip,.ppt,.pptx"
+                                disabled={isUploadingFile}
+                                onChange={(event) => void handleFileUpload(event.target.files)}
+                            />
+                        </div>
+                        {opp.attachments && opp.attachments.length > 0 && (
+                            <div className="mt-3 space-y-2">
+                                {[...(opp.attachments || [])].sort((left: any, right: any) => new Date(right.uploadedAt).getTime() - new Date(left.uploadedAt).getTime()).map((attachment: any, index: number) => (
+                                    <div key={attachment._id ? String(attachment._id) : `${attachment.fileName}-${index}`} className="flex items-center gap-2 rounded-lg bg-muted/40 p-2 text-xs">
+                                        <FileText className="h-3.5 w-3.5 flex-shrink-0 text-primary" />
+                                        <a href={attachment.fileUrl} target="_blank" rel="noopener noreferrer" className="flex-1 truncate font-medium hover:text-primary" title={attachment.fileName}>
+                                            {attachment.fileName}
+                                        </a>
+                                        <span className="whitespace-nowrap text-muted-foreground">{formatSize(attachment.fileSize)}</span>
+                                    </div>
+                                ))}
+                            </div>
+                        )}
+                    </div>
                     {opp.localFolderPath ? (
                         <div className="space-y-2">
                             <div className="flex items-center gap-2 font-semibold">

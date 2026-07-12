@@ -29,7 +29,7 @@ export interface IOpportunity extends Document {
     members: IOpportunityMember[];
     presalesAssignments: IPresalesAssignment[];
     customFields?: IOpportunityCustomField[];
-    attachments: { fileName: string; fileUrl: string; sharePointDriveId?: string; sharePointItemId?: string; uploadedById: mongoose.Types.ObjectId; uploadedAt: Date }[];
+    attachments: { fileName: string; fileUrl: string; fileSize?: number; mimeType?: string; sharePointDriveId?: string; sharePointItemId?: string; uploadedById: mongoose.Types.ObjectId; uploadedAt: Date }[];
     approvedM365?: boolean;
     approvedAzure?: boolean;
     approvedSecurity?: boolean;
@@ -71,6 +71,8 @@ const OpportunitySchema = new Schema<IOpportunity>({
     attachments: [{
         fileName: { type: String, required: true },
         fileUrl: { type: String, required: true },
+        fileSize: { type: Number },
+        mimeType: { type: String },
         sharePointDriveId: { type: String },
         sharePointItemId: { type: String },
         uploadedById: { type: Schema.Types.ObjectId, ref: "User", required: true },

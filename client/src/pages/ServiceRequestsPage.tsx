@@ -11,6 +11,8 @@ import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { BusinessUserPicker } from "../components/BusinessUserPicker";
+import { CompanySearchPicker } from "../components/CompanySearchPicker";
+import { useDebounce } from "../lib/useDebounce";
 
 const optionalDate = z.preprocess((value) => value === "" ? undefined : value, z.coerce.date().optional());
 
@@ -70,15 +72,29 @@ export function ServiceRequestsPage() {
 
     const [isCreating, setIsCreating] = useState(false);
     const [useCustomServiceType, setUseCustomServiceType] = useState(false);
+    const [companySearch, setCompanySearch] = useState("");
+    const debouncedCompanySearch = useDebounce(companySearch, 300);
+    const utils = trpc.useUtils();
+    const { data: companiesData } = trpc.companies.list.useQuery({ search: debouncedCompanySearch, limit: 20 });
+    const companies = companiesData?.items || [];
 
     const createSR = trpc.projects.createSR.useMutation({
         onSuccess: (result) => {
             setIsCreating(false);
             setUseCustomServiceType(false);
+            setCompanySearch("");
             refetch();
             form.reset();
             window.location.href = `/service-requests/${result.id}`;
         }
+    });
+    const createCompany = trpc.companies.create.useMutation({
+        onSuccess: async (result) => {
+            form.setValue("customerName", result.item.name, { shouldValidate: true });
+            setCompanySearch(result.item.name);
+            await utils.companies.list.invalidate();
+        },
+        onError: (err) => alert(err.message || "新增公司失敗")
     });
 
     const deleteSr = trpc.projects.delete.useMutation({ 
@@ -258,7 +274,10 @@ export function ServiceRequestsPage() {
                 open={isCreating}
                 onOpenChange={(open) => {
                     setIsCreating(open);
-                    if (!open) setUseCustomServiceType(false);
+                    if (!open) {
+                        setUseCustomServiceType(false);
+                        setCompanySearch("");
+                    }
                 }}
             >
                 <DialogContent className="sm:max-w-2xl max-h-[85vh] overflow-y-auto">
@@ -293,7 +312,15 @@ export function ServiceRequestsPage() {
                                         <FormItem>
                                             <FormLabel>公司名稱 *</FormLabel>
                                             <FormControl>
-                                                <Input placeholder="例：宏碁資訊服務股份有限公司" {...field} />
+                                                <CompanySearchPicker
+                                                    value={field.value}
+                                                    search={companySearch}
+                                                    companies={companies}
+                                                    isCreating={createCompany.isPending}
+                                                    onSearchChange={setCompanySearch}
+                                                    onValueChange={field.onChange}
+                                                    onCreateCompany={(name) => createCompany.mutate({ name })}
+                                                />
                                             </FormControl>
                                             <FormMessage />
                                         </FormItem>

@@ -812,6 +812,8 @@ export const opportunitiesRouter = router({
                         attachments: {
                             fileName: input.fileName,
                             fileUrl: spResult.fileUrl,
+                            fileSize: input.fileSize,
+                            mimeType: input.mimeType,
                             sharePointDriveId: spResult.driveId,
                             sharePointItemId: spResult.itemId,
                             uploadedById: toObjectId(ctx.user.id),

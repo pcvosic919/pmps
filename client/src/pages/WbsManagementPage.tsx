@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { trpc } from "../lib/trpc";
 import { useRoute } from "wouter";
-import { ArrowLeft, Plus, FileText, Clock, Trash2, Save, X, CheckCircle2, XCircle, Upload, Paperclip, AlertCircle, Receipt } from "lucide-react";
+import { ArrowLeft, Plus, FileText, Clock, Trash2, Save, X, CheckCircle2, XCircle, Upload, Paperclip, AlertCircle, Receipt, Download } from "lucide-react";
 import { Link } from "wouter";
 import toast from "react-hot-toast";
 import { useCurrentUser } from "../lib/useCurrentUser";
@@ -42,7 +42,6 @@ export function WbsManagementPage() {
     const srId = params?.id || "";
     const utils = trpc.useContext();
     const { hasRole, user } = useCurrentUser();
-    const canDelete = user?.email?.trim().toLowerCase() === "demo@demo.com";
 
     const [isBuildingVersion, setIsBuildingVersion] = useState(false);
     const [draftItems, setDraftItems] = useState<WbsDraftItem[]>([]);
@@ -445,6 +444,106 @@ export function WbsManagementPage() {
         }));
         exportRowsToXlsx(rows, makeXlsxFileName("議題追蹤", sr?.title, formatExportDate()), "Issues");
         toast.success("議題追蹤已匯出 Excel");
+    };
+
+    const handleDownloadWbsImportTemplate = () => {
+        const templateRows = [
+            {
+                "SR ID": sr?.id || "",
+                "WBS 版本": nextVersionNumber,
+                "工作項次": "1",
+                "階層": 0,
+                "工作編號": "INIT",
+                "工作項目": "專案啟動會議",
+                "工作說明": "確認專案範圍、角色分工、時程與交付項目",
+                "工作天數(小計)": 1,
+                "指派人員帳號": "",
+                "起始時間": "",
+                "起訖時間": "",
+                "完成百分比": 0,
+                "備註": "可將指派人員帳號填入系統帳號 Email"
+            },
+            {
+                "SR ID": sr?.id || "",
+                "WBS 版本": nextVersionNumber,
+                "工作項次": "2",
+                "階層": 0,
+                "工作編號": "PLAN",
+                "工作項目": "需求訪談與規劃",
+                "工作說明": "盤點需求、限制條件、風險與導入規劃",
+                "工作天數(小計)": 2,
+                "指派人員帳號": "",
+                "起始時間": "",
+                "起訖時間": "",
+                "完成百分比": 0,
+                "備註": ""
+            },
+            {
+                "SR ID": sr?.id || "",
+                "WBS 版本": nextVersionNumber,
+                "工作項次": "3",
+                "階層": 0,
+                "工作編號": "IMPLEMENT",
+                "工作項目": "建置與設定",
+                "工作說明": "依規劃進行環境建置、系統設定與功能驗證",
+                "工作天數(小計)": 3,
+                "指派人員帳號": "",
+                "起始時間": "",
+                "起訖時間": "",
+                "完成百分比": 0,
+                "備註": ""
+            },
+            {
+                "SR ID": sr?.id || "",
+                "WBS 版本": nextVersionNumber,
+                "工作項次": "4",
+                "階層": 0,
+                "工作編號": "TEST",
+                "工作項目": "測試與問題修正",
+                "工作說明": "執行測試、追蹤問題並完成修正確認",
+                "工作天數(小計)": 2,
+                "指派人員帳號": "",
+                "起始時間": "",
+                "起訖時間": "",
+                "完成百分比": 0,
+                "備註": ""
+            },
+            {
+                "SR ID": sr?.id || "",
+                "WBS 版本": nextVersionNumber,
+                "工作項次": "5",
+                "階層": 0,
+                "工作編號": "CLOSE",
+                "工作項目": "文件交付與結案",
+                "工作說明": "整理交付文件、完成驗收與結案確認",
+                "工作天數(小計)": 1,
+                "指派人員帳號": "",
+                "起始時間": "",
+                "起訖時間": "",
+                "完成百分比": 0,
+                "備註": ""
+            }
+        ];
+        const workbook = XLSX.utils.book_new();
+        const worksheet = XLSX.utils.json_to_sheet(templateRows);
+        worksheet["!cols"] = [
+            { wch: 28 },
+            { wch: 10 },
+            { wch: 10 },
+            { wch: 8 },
+            { wch: 14 },
+            { wch: 24 },
+            { wch: 42 },
+            { wch: 14 },
+            { wch: 28 },
+            { wch: 14 },
+            { wch: 14 },
+            { wch: 12 },
+            { wch: 32 }
+        ];
+        XLSX.utils.book_append_sheet(workbook, worksheet, "WBS匯入範本");
+        XLSX.writeFile(workbook, makeXlsxFileName("WBS匯入範本", sr?.title || "通用", formatExportDate()));
+        toast.success("WBS 匯入範本已下載");
     };
 
     const handleExportXlsx = () => {
@@ -969,11 +1068,19 @@ export function WbsManagementPage() {
                         // WBS Builder Mode
                         <div className="bg-card border border-primary/20 rounded-xl shadow-lg ring-1 ring-primary/20 flex flex-col">
                             <div className="p-4 border-b border-border bg-muted/30 flex justify-between items-center rounded-t-xl">
-                                <h3 className="font-bold text-lg flex items-center"><Plus className="w-5 h-5 mr-2 text-primary" />草稿：建立版本 v{nextVersionNumber}</h3>
-                                <div className="flex items-center gap-2">
+	                                <h3 className="font-bold text-lg flex items-center"><Plus className="w-5 h-5 mr-2 text-primary" />草稿：建立版本 v{nextVersionNumber}</h3>
+	                                <div className="flex items-center gap-2">
                                     <button
-                                        onClick={() => document.getElementById('wbs-excel-import')?.click()}
-                                        className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-xs font-semibold transition-all shadow-sm hover:shadow-md"
+                                        onClick={handleDownloadWbsImportTemplate}
+                                        className="inline-flex items-center gap-1.5 px-3 py-1.5 border border-border bg-background hover:bg-muted text-foreground rounded-lg text-xs font-semibold transition-all"
+                                        title="下載可直接匯入的 WBS 範本"
+                                    >
+                                        <Download className="w-3.5 h-3.5" />
+                                        下載範本
+                                    </button>
+	                                    <button
+	                                        onClick={() => document.getElementById('wbs-excel-import')?.click()}
+	                                        className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-xs font-semibold transition-all shadow-sm hover:shadow-md"
                                         title="從 Excel/CSV 匯入 WBS 項目"
                                     >
                                         <Upload className="w-3.5 h-3.5" />
@@ -1158,12 +1265,10 @@ export function WbsManagementPage() {
 	                                                        className="p-1.5 text-muted-foreground hover:text-primary hover:bg-primary/10 rounded" title="新增子任務">
                                                         <Plus className="w-4 h-4" />
                                                     </button>
-                                                    {canDelete && (
-                                                        <button onClick={() => handleRemoveDraftItem(idx)}
-                                                            className="p-1.5 text-muted-foreground hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-950/30 rounded" title="移除此項">
-                                                            <Trash2 className="w-4 h-4" />
-                                                        </button>
-                                                    )}
+                                                    <button onClick={() => handleRemoveDraftItem(idx)}
+                                                        className="p-1.5 text-muted-foreground hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-950/30 rounded" title="移除此項">
+                                                        <Trash2 className="w-4 h-4" />
+                                                    </button>
                                                 </div>
                                             </div>
                                         ))}
