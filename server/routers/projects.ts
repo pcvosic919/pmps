@@ -815,9 +815,9 @@ export const projectsRouter = router({
                 versionNumber: input.versionNumber,
                 status: "submitted" as const,
                 submittedBy: toObjectId(ctx.user.id),
-                items: input.items.map(item => ({
-                    title: item.title,
-                    estimatedHours: item.estimatedHours,
+	                items: input.items.map(item => ({
+	                    title: item.title,
+	                    estimatedHours: (item.level || 0) === 0 ? 0 : item.estimatedHours,
                     assigneeId: item.assigneeId ? new mongoose.Types.ObjectId(item.assigneeId) : undefined,
                     startDate: item.startDate,
                     endDate: item.endDate,

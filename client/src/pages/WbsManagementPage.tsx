@@ -151,6 +151,7 @@ export function WbsManagementPage() {
     const itemImportKey = (item: WbsDraftItem) => String(item.code || item.title || "").trim().toLowerCase();
 
     const normalizeImportDate = (value?: Date) => value ? value.toISOString().slice(0, 10) : "";
+    const isHeadingItem = (item: Pick<WbsDraftItem, "level">) => (item.level || 0) === 0;
 
     const handleExcelImport = (e: React.ChangeEvent<HTMLInputElement>) => {
         const file = e.target.files?.[0];
@@ -197,9 +198,11 @@ export function WbsManagementPage() {
                         level = parts.length > 1 ? parts.length - 1 : 0;
                     }
 
+                    const rawEstimatedHours = Number(row['工作天數(小計)'] || row['工作天數'] || row['工時(天)'] || row['預估工時'] || row['Hours'] || row['工時'] || 0);
+
                     return {
                         title: row['工作項目'] || row['項目名稱'] || row['Title'] || row['項目'] || row['專案階段'] || '未命名項目',
-                        estimatedHours: Number(row['工作天數(小計)'] || row['工作天數'] || row['工時(天)'] || row['預估工時'] || row['Hours'] || row['工時'] || 0),
+                        estimatedHours: level === 0 ? 0 : rawEstimatedHours,
                         actualHours: 0,
                         assigneeId: assignee?.id,
                         level: level,
@@ -287,7 +290,7 @@ export function WbsManagementPage() {
 	        const items = latestVersion?.items || [];
 	        const missingAssignee = items.filter((item: any) => !item.assigneeId);
 	        const missingSchedule = items.filter((item: any) => !item.startDate || !item.endDate);
-	        const zeroEstimate = items.filter((item: any) => Number(item.estimatedHours || 0) <= 0);
+		        const zeroEstimate = items.filter((item: any) => (item.level || 0) > 0 && Number(item.estimatedHours || 0) <= 0);
 	        const overdue = items.filter((item: any) => {
 	            if (!item.endDate || item.status === "completed") return false;
 	            const endDate = new Date(item.endDate);
@@ -346,7 +349,7 @@ export function WbsManagementPage() {
         });
     };
 
-    const handleAddDraftItem = () => setDraftItems([...draftItems, { title: "", estimatedHours: 4, assigneeId: undefined, level: 0, code: "", remarks: "", status: "not_started", completionPercentage: 0 }]);
+    const handleAddDraftItem = () => setDraftItems([...draftItems, { title: "", estimatedHours: 0, assigneeId: undefined, level: 0, code: "", remarks: "", status: "not_started", completionPercentage: 0 }]);
     const handleAddSubTask = (parentIndex: number) => {
         const parentLevel = draftItems[parentIndex].level || 0;
         const newItems = [...draftItems];
@@ -371,7 +374,13 @@ export function WbsManagementPage() {
         const currentLevel = draftItems[index].level || 0;
         const maxLevel = index > 0 ? (draftItems[index - 1].level || 0) + 1 : 0;
         const nextLevel = Math.max(0, Math.min(maxLevel, currentLevel + delta));
-        handleUpdateDraftItem(index, "level", nextLevel);
+        const newItems = [...draftItems];
+        newItems[index] = {
+            ...newItems[index],
+            level: nextLevel,
+            estimatedHours: nextLevel === 0 ? 0 : Number(newItems[index].estimatedHours || 0) > 0 ? newItems[index].estimatedHours : 4
+        };
+        setDraftItems(newItems);
     };
     const handleStartBuild = () => {
         if (latestVersion?.items?.length) {
@@ -418,8 +427,12 @@ export function WbsManagementPage() {
 
     const handleSaveVersion = () => {
         if (draftItems.length === 0) { toast.error("請至少新增一項任務"); return; }
-        if (draftItems.some(i => !i.title || i.estimatedHours <= 0)) { toast.error("請確實填寫項目名稱與工時"); return; }
-        submitVersion.mutate({ srId: sr.id, versionNumber: nextVersionNumber, items: draftItems });
+        if (draftItems.some(i => !i.title || (!isHeadingItem(i) && i.estimatedHours <= 0))) { toast.error("請確實填寫項目名稱；階層 1 以上才需要工作天數"); return; }
+        const normalizedItems = draftItems.map(item => ({
+            ...item,
+            estimatedHours: isHeadingItem(item) ? 0 : item.estimatedHours
+        }));
+        submitVersion.mutate({ srId: sr.id, versionNumber: nextVersionNumber, items: normalizedItems });
     };
 
     const handleUpdateSalesOwner = () => {
@@ -453,7 +466,22 @@ export function WbsManagementPage() {
                 "WBS 版本": nextVersionNumber,
                 "工作項次": "1",
                 "階層": 0,
-                "工作編號": "INIT",
+                "工作編號": "PHASE-INIT",
+                "工作項目": "啟動與規劃",
+                "工作說明": "階層 0 為標題/說明列，不需填工作天數",
+                "工作天數(小計)": "",
+                "指派人員帳號": "",
+                "起始時間": "",
+                "起訖時間": "",
+                "完成百分比": 0,
+                "備註": "階層 1 以上才填工作天數；指派人員帳號可填系統 Email"
+            },
+            {
+                "SR ID": sr?.id || "",
+                "WBS 版本": nextVersionNumber,
+                "工作項次": "1.1",
+                "階層": 1,
+                "工作編號": "INIT-01",
                 "工作項目": "專案啟動會議",
                 "工作說明": "確認專案範圍、角色分工、時程與交付項目",
                 "工作天數(小計)": 1,
@@ -461,14 +489,14 @@ export function WbsManagementPage() {
                 "起始時間": "",
                 "起訖時間": "",
                 "完成百分比": 0,
-                "備註": "可將指派人員帳號填入系統帳號 Email"
+                "備註": ""
             },
             {
                 "SR ID": sr?.id || "",
                 "WBS 版本": nextVersionNumber,
-                "工作項次": "2",
-                "階層": 0,
-                "工作編號": "PLAN",
+                "工作項次": "1.2",
+                "階層": 1,
+                "工作編號": "PLAN-01",
                 "工作項目": "需求訪談與規劃",
                 "工作說明": "盤點需求、限制條件、風險與導入規劃",
                 "工作天數(小計)": 2,
@@ -481,9 +509,24 @@ export function WbsManagementPage() {
             {
                 "SR ID": sr?.id || "",
                 "WBS 版本": nextVersionNumber,
-                "工作項次": "3",
+                "工作項次": "2",
                 "階層": 0,
-                "工作編號": "IMPLEMENT",
+                "工作編號": "PHASE-IMPLEMENT",
+                "工作項目": "建置與驗證",
+                "工作說明": "階層 0 為標題/說明列，不需填工作天數",
+                "工作天數(小計)": "",
+                "指派人員帳號": "",
+                "起始時間": "",
+                "起訖時間": "",
+                "完成百分比": 0,
+                "備註": ""
+            },
+            {
+                "SR ID": sr?.id || "",
+                "WBS 版本": nextVersionNumber,
+                "工作項次": "2.1",
+                "階層": 1,
+                "工作編號": "IMPLEMENT-01",
                 "工作項目": "建置與設定",
                 "工作說明": "依規劃進行環境建置、系統設定與功能驗證",
                 "工作天數(小計)": 3,
@@ -496,9 +539,9 @@ export function WbsManagementPage() {
             {
                 "SR ID": sr?.id || "",
                 "WBS 版本": nextVersionNumber,
-                "工作項次": "4",
-                "階層": 0,
-                "工作編號": "TEST",
+                "工作項次": "2.2",
+                "階層": 1,
+                "工作編號": "TEST-01",
                 "工作項目": "測試與問題修正",
                 "工作說明": "執行測試、追蹤問題並完成修正確認",
                 "工作天數(小計)": 2,
@@ -511,9 +554,24 @@ export function WbsManagementPage() {
             {
                 "SR ID": sr?.id || "",
                 "WBS 版本": nextVersionNumber,
-                "工作項次": "5",
+                "工作項次": "3",
                 "階層": 0,
-                "工作編號": "CLOSE",
+                "工作編號": "PHASE-CLOSE",
+                "工作項目": "交付與結案",
+                "工作說明": "階層 0 為標題/說明列，不需填工作天數",
+                "工作天數(小計)": "",
+                "指派人員帳號": "",
+                "起始時間": "",
+                "起訖時間": "",
+                "完成百分比": 0,
+                "備註": ""
+            },
+            {
+                "SR ID": sr?.id || "",
+                "WBS 版本": nextVersionNumber,
+                "工作項次": "3.1",
+                "階層": 1,
+                "工作編號": "CLOSE-01",
                 "工作項目": "文件交付與結案",
                 "工作說明": "整理交付文件、完成驗收與結案確認",
                 "工作天數(小計)": 1,
@@ -1177,13 +1235,15 @@ export function WbsManagementPage() {
                                                                     className="px-2 py-1.5 bg-muted rounded border border-transparent focus:bg-background focus:border-primary outline-none"
                                                                 />
                                                             </div>
-                                                            <div className="flex flex-col gap-1 text-xs text-muted-foreground">
-                                                                <label>工作天數(小計):</label>
-                                                                <input type="number" min="0.5" step="0.5" value={item.estimatedHours}
-                                                                    onChange={(e) => handleUpdateDraftItem(idx, 'estimatedHours', Number(e.target.value))}
-                                                                    className="px-2 py-1.5 bg-muted rounded border border-transparent focus:bg-background focus:border-primary outline-none"
-                                                                />
-                                                            </div>
+	                                                            <div className="flex flex-col gap-1 text-xs text-muted-foreground">
+	                                                                <label>工作天數(小計):</label>
+	                                                                <input type="number" min="0.5" step="0.5" value={isHeadingItem(item) ? "" : item.estimatedHours}
+	                                                                    onChange={(e) => handleUpdateDraftItem(idx, 'estimatedHours', Number(e.target.value))}
+	                                                                    disabled={isHeadingItem(item)}
+	                                                                    placeholder={isHeadingItem(item) ? "標題列不需填" : "0"}
+	                                                                    className="px-2 py-1.5 bg-muted rounded border border-transparent focus:bg-background focus:border-primary outline-none disabled:cursor-not-allowed disabled:opacity-70"
+	                                                                />
+	                                                            </div>
                                                         </div>
 
                                                         <div className="flex flex-col gap-1 text-xs text-muted-foreground">
