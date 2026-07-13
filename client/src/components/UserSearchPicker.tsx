@@ -115,10 +115,15 @@ export function UserSearchPicker({
         [filterUser, mergedUsers]
     );
     const selectedUser = activeUsers.find((user) => user.id === selectedUserId);
+    const selectedLabel = useMemo(
+        () => buildUserLabel(selectedUser, legacyName || ""),
+        [legacyName, selectedUser?.email, selectedUser?.id, selectedUser?.name]
+    );
 
     useEffect(() => {
-        setSearchTerm(buildUserLabel(selectedUser, legacyName || ""));
-    }, [legacyName, selectedUser]);
+        if (isOpen) return;
+        setSearchTerm(selectedLabel);
+    }, [isOpen, selectedLabel]);
 
     const filteredUsers = activeUsers
         .map((user) => ({ user, score: getFuzzyScore(user, searchTerm) }))
