@@ -30,7 +30,7 @@ dotenv.config(); // Final fallback
 
 const app = express();
 app.use(cors());
-app.use(express.json({ limit: "5mb" }));
+app.use(express.json({ limit: process.env.REQUEST_BODY_LIMIT || "50mb" }));
 
 app.use("/api/v1", copilotApiRouter);
 

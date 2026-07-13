@@ -27,6 +27,7 @@ import { createNotification, createNotifications } from "../_core/notifications"
 import { getAccessibleOpportunityQuery } from "./opportunities.listing";
 import { toObjectId } from "../_core/cursor";
 import { ensureCompanyByName } from "../_core/companies";
+import { writeLocalAttachment } from "../_core/attachments";
 
 const getMonthKey = (value: Date) => value.toISOString().slice(0, 7);
 
@@ -651,12 +652,13 @@ export const projectsRouter = router({
             fileName: z.string(),
             fileSize: z.number(),
             mimeType: z.string(),
-            fileUrl: z.string()
+            fileUrl: z.string().optional(),
+            fileDataBase64: z.string().optional()
         }))
         .mutation(async ({ ctx, input }) => {
             const sr = assertFound(
                 await ServiceRequestModel.findById(input.srId)
-                    .select("pmId members wbsVersions.items.assigneeId changeRequests opportunityId")
+                    .select("pmId members wbsVersions.items.assigneeId changeRequests opportunityId localFolderPath")
                     .lean(),
                 "找不到該服務請求"
             );
@@ -667,27 +669,31 @@ export const projectsRouter = router({
                 : null;
             assertAuthorized(canAccessServiceRequest(ctx.user, sr, opportunity), "您沒有權限上傳附件");
 
-            const spResult = await sharePointService.uploadFile(
-                `SR-${input.srId}`, 
-                input.fileName, 
-                { size: input.fileSize }, 
-                input.mimeType
-            );
+            const localAttachment = sr.localFolderPath && input.fileDataBase64
+                ? await writeLocalAttachment(sr.localFolderPath, input.fileName, input.fileDataBase64)
+                : null;
+            const spResult = localAttachment
+                ? null
+                : await sharePointService.uploadFile(
+                    `SR-${input.srId}`,
+                    input.fileName,
+                    { size: input.fileSize },
+                    input.mimeType
+                );
 
-            // Generating dummy fileKey for mongo structure consistency
-            const fileKey = `uploads/${input.srId}/${Date.now()}-${input.fileName}`;
+            const fileKey = localAttachment?.fileKey || `uploads/${input.srId}/${Date.now()}-${input.fileName}`;
 
             await ServiceRequestModel.updateOne(
                 { _id: input.srId },
                 {
                     $push: {
                         attachments: {
-                            fileName: input.fileName,
+                            fileName: localAttachment?.fileName || input.fileName,
                             fileSize: input.fileSize,
                             mimeType: input.mimeType,
-                            fileUrl: spResult.fileUrl,
-                            sharePointDriveId: spResult.driveId,
-                            sharePointItemId: spResult.itemId,
+                            fileUrl: localAttachment?.fileUrl || spResult?.fileUrl || input.fileUrl || "",
+                            sharePointDriveId: spResult?.driveId,
+                            sharePointItemId: spResult?.itemId,
                             fileKey: fileKey,
                             uploadedById: toObjectId(ctx.user.id)
                         }

@@ -9,6 +9,7 @@ import { useCurrentUser } from "../lib/useCurrentUser";
 import { SharePointFilesSection } from "../components/SharePointFilesSection";
 import { BusinessUserPicker } from "../components/BusinessUserPicker";
 import { UserSearchPicker } from "../components/UserSearchPicker";
+import { fileToBase64 } from "../lib/files";
 
 
 const OPP_STATUSES = [
@@ -237,11 +238,13 @@ export function OpportunityDetailPage() {
         try {
             for (let index = 0; index < files.length; index++) {
                 const file = files[index];
+                const fileDataBase64 = await fileToBase64(file);
                 await uploadAttachmentMutation.mutateAsync({
                     opportunityId: id,
                     fileName: file.name,
                     fileSize: file.size,
-                    mimeType: file.type || "application/octet-stream"
+                    mimeType: file.type || "application/octet-stream",
+                    fileDataBase64
                 });
             }
             alert("商機附件上傳成功");

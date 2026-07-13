@@ -23,6 +23,7 @@ import {
 import { decodeCursor, encodeCursor, toObjectId } from "../_core/cursor";
 import { createNotification } from "../_core/notifications";
 import { ensureCompanyByName } from "../_core/companies";
+import { writeLocalAttachment } from "../_core/attachments";
 import {
     buildOpportunityListQuery,
     opportunitySortFields,
@@ -787,35 +788,41 @@ export const opportunitiesRouter = router({
             opportunityId: z.string(),
             fileName: z.string(),
             fileSize: z.number(),
-            mimeType: z.string()
+            mimeType: z.string(),
+            fileDataBase64: z.string().optional()
         }))
         .mutation(async ({ ctx, input }) => {
             const opp = assertFound(
                 await OpportunityModel.findById(input.opportunityId)
-                    .select("ownerId members presalesAssignments status")
+                    .select("ownerId members presalesAssignments status localFolderPath")
                     .lean(),
                 "找不到該商機"
             );
             assertAuthorized(canManageOpportunity(ctx.user, opp) || hasAnyRole(ctx.user, ["admin", "manager"]), "您沒有權限上傳附件");
             
-            const spResult = await sharePointService.uploadFile(
-                `OPP-${input.opportunityId}`, 
-                input.fileName, 
-                { size: input.fileSize }, 
-                input.mimeType
-            );
+            const localAttachment = opp.localFolderPath && input.fileDataBase64
+                ? await writeLocalAttachment(opp.localFolderPath, input.fileName, input.fileDataBase64)
+                : null;
+            const spResult = localAttachment
+                ? null
+                : await sharePointService.uploadFile(
+                    `OPP-${input.opportunityId}`,
+                    input.fileName,
+                    { size: input.fileSize },
+                    input.mimeType
+                );
 
             await OpportunityModel.updateOne(
                 { _id: input.opportunityId },
                 {
                     $push: {
                         attachments: {
-                            fileName: input.fileName,
-                            fileUrl: spResult.fileUrl,
+                            fileName: localAttachment?.fileName || input.fileName,
+                            fileUrl: localAttachment?.fileUrl || spResult?.fileUrl || "",
                             fileSize: input.fileSize,
                             mimeType: input.mimeType,
-                            sharePointDriveId: spResult.driveId,
-                            sharePointItemId: spResult.itemId,
+                            sharePointDriveId: spResult?.driveId,
+                            sharePointItemId: spResult?.itemId,
                             uploadedById: toObjectId(ctx.user.id),
                             uploadedAt: new Date()
                         }

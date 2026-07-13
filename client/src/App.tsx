@@ -13,6 +13,8 @@ import { AuthProvider, useAuth } from "./lib/auth";
 import { encryptPayload, decryptPayload } from "../../shared/crypto";
 import { ErrorBoundary } from "./components/ErrorBoundary";
 
+const ENTRA_CONFIG_CACHE_KEY = "pmp_entra_runtime_config";
+
 const LoginPage = lazy(() => import("./pages/LoginPage").then((module) => ({ default: module.LoginPage })));
 const UserManagementPage = lazy(() => import("./pages/UserManagementPage").then((module) => ({ default: module.UserManagementPage })));
 const CostRatesPage = lazy(() => import("./pages/CostRatesPage").then((module) => ({ default: module.CostRatesPage })));
@@ -139,12 +141,25 @@ function RuntimeMsalProvider({ children }: { children: ReactNode }) {
   const { data, isLoading } = trpc.auth.entraConfig.useQuery(undefined, {
     staleTime: 5 * 60_000,
     retry: false,
+    initialData: () => {
+      try {
+        const cached = localStorage.getItem(ENTRA_CONFIG_CACHE_KEY);
+        return cached ? JSON.parse(cached) : undefined;
+      } catch {
+        return undefined;
+      }
+    },
   });
 
   // Create the MSAL instance only once, after entraConfig has loaded.
   // Using useRef ensures we never recreate the instance (which would discard
   // any in-flight redirect auth code from Microsoft).
   const instanceRef = useRef<ReturnType<typeof createMsalInstance> | null>(null);
+
+  useEffect(() => {
+    if (!data?.clientId || !data?.tenantId) return;
+    localStorage.setItem(ENTRA_CONFIG_CACHE_KEY, JSON.stringify(data));
+  }, [data]);
 
   if (!instanceRef.current && !isLoading) {
     instanceRef.current = createMsalInstance({

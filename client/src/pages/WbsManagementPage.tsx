@@ -10,6 +10,7 @@ import { SharePointFilesSection } from "../components/SharePointFilesSection";
 import { exportRowsToXlsx, exportWbsCostWorkbook, exportWbsQuoteWorkbook, formatExportDate, makeXlsxFileName } from "../lib/exportXlsx";
 import { BusinessUserPicker } from "../components/BusinessUserPicker";
 import { UserSearchPicker } from "../components/UserSearchPicker";
+import { fileToBase64 } from "../lib/files";
 
 type WbsDraftItem = {
     title: string;
@@ -651,14 +652,13 @@ export function WbsManagementPage() {
         try {
             for (let i = 0; i < files.length; i++) {
                 const file = files[i];
-                // Mock: Generate a local URL and call the backend mutation
-                const mockUrl = URL.createObjectURL(file);
+                const fileDataBase64 = await fileToBase64(file);
                 await uploadMutation.mutateAsync({
                     srId,
                     fileName: file.name,
                     fileSize: file.size,
-                    mimeType: file.type,
-                    fileUrl: mockUrl
+                    mimeType: file.type || "application/octet-stream",
+                    fileDataBase64
                 });
             }
         } catch (error) {
