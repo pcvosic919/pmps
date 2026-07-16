@@ -10,10 +10,10 @@ import { zodResolver } from "@hookform/resolvers/zod";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "@/components/ui/form";
 import { Input } from "@/components/ui/input";
-import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { BusinessUserPicker } from "../components/BusinessUserPicker";
 import { CompanySearchPicker } from "../components/CompanySearchPicker";
+import { FormSection, FormSummaryPanel, StickyFormActions } from "../components/FormLayout";
 
 const oppSchema = z.object({
     title: z.string().min(1, "商機名稱不可為空"),
@@ -185,6 +185,12 @@ export function OpportunitiesPage() {
         return labels[status] || status;
     };
 
+    const watchedOppType = form.watch("opportunityType");
+    const watchedEstimatedValue = Number(form.watch("estimatedValue") || 0);
+    const watchedProducts = form.watch("productNames") || [];
+    const selectedSalesRep = form.watch("salesRep");
+    const selectedSalesDepartment = form.watch("salesDepartment");
+
     return (
         <div className="space-y-6">
             <div className="flex justify-between items-center bg-card p-6 rounded-xl shadow-sm border border-border/50">
@@ -324,7 +330,7 @@ export function OpportunitiesPage() {
 
             {/* Create Modal */}
             <Dialog open={isCreating} onOpenChange={setIsCreating}>
-                <DialogContent className="sm:max-w-lg">
+                <DialogContent className="max-h-[88vh] overflow-y-auto sm:max-w-5xl">
                     <DialogHeader>
                         <DialogTitle className="flex items-center space-x-2">
                             <Briefcase className="w-5 h-5 text-primary" />
@@ -333,267 +339,243 @@ export function OpportunitiesPage() {
                     </DialogHeader>
                     <Form {...form}>
                         <form onSubmit={form.handleSubmit(handleCreate)} className="space-y-4">
-                            <FormField
-                                control={form.control}
-                                name="title"
-                                render={({ field }: any) => (
-                                    <FormItem>
-                                        <FormLabel>商機名稱 (Title) *</FormLabel>
-                                        <FormControl>
-                                            <Input {...field} />
-                                        </FormControl>
-                                        <FormMessage />
-                                    </FormItem>
-                                )}
-                            />
-                            <FormField
-                                control={form.control}
-                                name="customerName"
-                                render={({ field }: any) => (
-                                    <FormItem>
-                                        <FormLabel>客戶名稱 (Customer Name) *</FormLabel>
-                                            <FormControl>
-                                                <CompanySearchPicker
-                                                    value={field.value}
-                                                    search={companySearch}
-                                                    companies={companies}
-                                                    isCreating={createCompany.isPending}
-                                                    onSearchChange={setCompanySearch}
-                                                    onValueChange={field.onChange}
-                                                    onCreateCompany={(name) => createCompany.mutate({ name })}
-                                                />
-                                            </FormControl>
-                                        <FormMessage />
-                                    </FormItem>
-                                )}
-                            />
-                            <div className="space-y-2">
-                                <FormField
-                                    control={form.control}
-                                    name="salesUserId"
-                                    render={({ field }: any) => (
-                                        <FormItem>
-                                            <FormLabel>業務</FormLabel>
-                                            <FormControl>
-                                                <BusinessUserPicker
-                                                    users={businessUsers}
-                                                    selectedUserId={field.value}
-                                                    legacyName={form.watch("salesRep")}
-                                                    onSelect={(selectedUser) => {
-                                                        field.onChange(selectedUser.id);
-                                                        form.setValue("salesRep", selectedUser.name);
-                                                        form.setValue("salesDepartment", selectedUser.department || "");
-                                                    }}
-                                                    onClear={() => {
-                                                        field.onChange("");
-                                                        form.setValue("salesRep", "");
-                                                        form.setValue("salesDepartment", "");
-                                                    }}
-                                                />
-                                            </FormControl>
-                                            <FormMessage />
-                                        </FormItem>
-                                    )}
-                                />
-                                <p className="text-xs text-muted-foreground">
-                                    業務部門：{form.watch("salesDepartment") || "選擇業務帳號後自動帶入"}
-                                </p>
-                            </div>
-                            <FormField
-                                control={form.control}
-                                name="estimatedValue"
-                                render={({ field }: any) => (
-                                    <FormItem>
-                                        <FormLabel>預估金額 (Estimated Value)</FormLabel>
-                                        <FormControl>
-                                            <Input
-                                                type="number"
-                                                {...field}
-                                                onChange={(e: React.ChangeEvent<HTMLInputElement>) => field.onChange(Number(e.target.value))}
-                                            />
-                                        </FormControl>
-                                        <FormMessage />
-                                    </FormItem>
-                                )}
-                            />
-                            <FormField
-                                control={form.control}
-                                name="opportunityType"
-                                render={({ field }: any) => (
-                                    <FormItem>
-                                        <FormLabel>商機類型</FormLabel>
-                                        <Select value={field.value} onValueChange={field.onChange}>
-                                            <FormControl>
-                                                <SelectTrigger>
-                                                    <SelectValue placeholder="選擇商機類型" />
-                                                </SelectTrigger>
-                                            </FormControl>
-                                            <SelectContent>
-                                                <SelectItem value="revenue">營收型商機</SelectItem>
-                                                <SelectItem value="presales">協銷</SelectItem>
-                                            </SelectContent>
-                                        </Select>
-                                        <p className="text-xs text-muted-foreground">營收型商機進 Pipeline；協銷以工時 × 單價計入個人 Summary。</p>
-                                        <FormMessage />
-                                    </FormItem>
-                                )}
-                            />
-                            <FormField
-                                control={form.control}
-                                name="status"
-                                render={({ field: _field }: any) => (
-                                    <FormItem>
-                                        <FormLabel>狀態 (Status)</FormLabel>
-                                        <FormMessage />
-                                    </FormItem>
-                                )}
-                            />
-
-                            <FormField
-                                control={form.control}
-                                name="productNames"
-                                render={({ field }: any) => (
-                                    <FormItem>
-                                        <FormLabel>產品名稱 (可複選)</FormLabel>
-                                        <div className="grid grid-cols-2 gap-2 mt-2 p-3 border rounded-lg bg-muted/20">
-                                            {availableProducts.map((p: string) => (
-                                                <label key={p} className="flex items-center space-x-2 text-sm cursor-pointer hover:bg-muted/50 p-1 rounded transition-colors">
-                                                    <input
-                                                        type="checkbox"
-                                                        value={p}
-                                                        checked={field.value?.includes(p)}
-                                                        onChange={(e) => {
-                                                            const val = e.target.checked
-                                                                ? [...(field.value || []), p]
-                                                                : field.value?.filter((v: string) => v !== p);
-                                                            field.onChange(val);
-                                                        }}
-                                                        className="w-4 h-4 rounded border-gray-300 text-primary focus:ring-primary"
-                                                    />
-                                                    <span>{p}</span>
-                                                </label>
-                                            ))}
-                                            {availableProducts.length === 0 && (
-                                                <span className="col-span-2 text-xs text-muted-foreground italic">請至「系統設定」維護產品清單</span>
+                            <div className="grid gap-4 lg:grid-cols-[1fr_280px]">
+                                <div className="space-y-4">
+                                    <FormSection title="基本與業務" description="先填客戶、業務與商機金額，方便後續報表歸屬。">
+                                        <FormField
+                                            control={form.control}
+                                            name="title"
+                                            render={({ field }: any) => (
+                                                <FormItem className="md:col-span-2">
+                                                    <FormLabel>商機名稱 *</FormLabel>
+                                                    <FormControl>
+                                                        <Input placeholder="例：M365 導入協銷" {...field} />
+                                                    </FormControl>
+                                                    <FormMessage />
+                                                </FormItem>
                                             )}
-                                        </div>
-                                        <FormMessage />
-                                    </FormItem>
-                                )}
-                            />
+                                        />
+                                        <FormField
+                                            control={form.control}
+                                            name="customerName"
+                                            render={({ field }: any) => (
+                                                <FormItem>
+                                                    <FormLabel>客戶名稱 *</FormLabel>
+                                                    <FormControl>
+                                                        <CompanySearchPicker
+                                                            value={field.value}
+                                                            search={companySearch}
+                                                            companies={companies}
+                                                            isCreating={createCompany.isPending}
+                                                            onSearchChange={setCompanySearch}
+                                                            onValueChange={field.onChange}
+                                                            onCreateCompany={(name) => createCompany.mutate({ name })}
+                                                        />
+                                                    </FormControl>
+                                                    <FormMessage />
+                                                </FormItem>
+                                            )}
+                                        />
+                                        <FormField
+                                            control={form.control}
+                                            name="salesUserId"
+                                            render={({ field }: any) => (
+                                                <FormItem>
+                                                    <FormLabel>業務</FormLabel>
+                                                    <FormControl>
+                                                        <BusinessUserPicker
+                                                            users={businessUsers}
+                                                            selectedUserId={field.value}
+                                                            legacyName={form.watch("salesRep")}
+                                                            onSelect={(selectedUser) => {
+                                                                field.onChange(selectedUser.id);
+                                                                form.setValue("salesRep", selectedUser.name);
+                                                                form.setValue("salesDepartment", selectedUser.department || "");
+                                                            }}
+                                                            onClear={() => {
+                                                                field.onChange("");
+                                                                form.setValue("salesRep", "");
+                                                                form.setValue("salesDepartment", "");
+                                                            }}
+                                                        />
+                                                    </FormControl>
+                                                    <p className="text-xs text-muted-foreground">業務部門：{selectedSalesDepartment || "選擇業務帳號後自動帶入"}</p>
+                                                    <FormMessage />
+                                                </FormItem>
+                                            )}
+                                        />
+                                        <FormField
+                                            control={form.control}
+                                            name="opportunityType"
+                                            render={({ field }: any) => (
+                                                <FormItem>
+                                                    <FormLabel>商機類型</FormLabel>
+                                                    <Select value={field.value} onValueChange={field.onChange}>
+                                                        <FormControl>
+                                                            <SelectTrigger>
+                                                                <SelectValue placeholder="選擇商機類型" />
+                                                            </SelectTrigger>
+                                                        </FormControl>
+                                                        <SelectContent>
+                                                            <SelectItem value="revenue">營收型商機</SelectItem>
+                                                            <SelectItem value="presales">協銷</SelectItem>
+                                                        </SelectContent>
+                                                    </Select>
+                                                    <FormMessage />
+                                                </FormItem>
+                                            )}
+                                        />
+                                        <FormField
+                                            control={form.control}
+                                            name="estimatedValue"
+                                            render={({ field }: any) => (
+                                                <FormItem>
+                                                    <FormLabel>預估金額 (NT$)</FormLabel>
+                                                    <FormControl>
+                                                        <Input
+                                                            type="number"
+                                                            {...field}
+                                                            onChange={(e: React.ChangeEvent<HTMLInputElement>) => field.onChange(Number(e.target.value))}
+                                                        />
+                                                    </FormControl>
+                                                    <FormMessage />
+                                                </FormItem>
+                                            )}
+                                        />
+                                    </FormSection>
 
-                            <FormField
-                                control={form.control}
-                                name="approvedM365"
-                                render={({ field }: any) => (
-                                    <FormItem className="flex items-center gap-3">
-                                        <FormControl>
-                                            <input
-                                                type="checkbox"
-                                                checked={field.value}
-                                                onChange={(e) => field.onChange(e.target.checked)}
-                                                className="h-4 w-4 rounded border-gray-300 text-primary focus:ring-primary"
+                                    <FormSection title="產品與核准項目" description="勾選相關產品與核准範圍，作為協銷與後續分析依據。">
+                                        <FormField
+                                            control={form.control}
+                                            name="productNames"
+                                            render={({ field }: any) => (
+                                                <FormItem className="md:col-span-2">
+                                                    <FormLabel>產品名稱</FormLabel>
+                                                    <div className="grid grid-cols-2 gap-2 rounded-lg border bg-muted/20 p-3 sm:grid-cols-3">
+                                                        {availableProducts.map((p: string) => (
+                                                            <label key={p} className="flex cursor-pointer items-center space-x-2 rounded p-1 text-sm transition-colors hover:bg-muted/50">
+                                                                <input
+                                                                    type="checkbox"
+                                                                    value={p}
+                                                                    checked={field.value?.includes(p)}
+                                                                    onChange={(e) => {
+                                                                        const val = e.target.checked
+                                                                            ? [...(field.value || []), p]
+                                                                            : field.value?.filter((v: string) => v !== p);
+                                                                        field.onChange(val);
+                                                                    }}
+                                                                    className="h-4 w-4 rounded border-gray-300 text-primary focus:ring-primary"
+                                                                />
+                                                                <span>{p}</span>
+                                                            </label>
+                                                        ))}
+                                                        {availableProducts.length === 0 && (
+                                                            <span className="col-span-full text-xs italic text-muted-foreground">請至「系統設定」維護產品清單</span>
+                                                        )}
+                                                    </div>
+                                                    <FormMessage />
+                                                </FormItem>
+                                            )}
+                                        />
+                                        {[
+                                            ["approvedM365", "M365"],
+                                            ["approvedAzure", "Azure"],
+                                            ["approvedSecurity", "資安"]
+                                        ].map(([name, label]) => (
+                                            <FormField
+                                                key={name}
+                                                control={form.control}
+                                                name={name}
+                                                render={({ field }: any) => (
+                                                    <FormItem className="flex items-center gap-3 rounded-lg border border-border bg-background p-3">
+                                                        <FormControl>
+                                                            <input
+                                                                type="checkbox"
+                                                                checked={field.value}
+                                                                onChange={(e) => field.onChange(e.target.checked)}
+                                                                className="h-4 w-4 rounded border-gray-300 text-primary focus:ring-primary"
+                                                            />
+                                                        </FormControl>
+                                                        <FormLabel className="mb-0">{label}</FormLabel>
+                                                    </FormItem>
+                                                )}
                                             />
-                                        </FormControl>
-                                        <FormLabel className="mb-0">M365</FormLabel>
-                                    </FormItem>
-                                )}
-                            />
-                            <FormField
-                                control={form.control}
-                                name="approvedAzure"
-                                render={({ field }: any) => (
-                                    <FormItem className="flex items-center gap-3">
-                                        <FormControl>
-                                            <input
-                                                type="checkbox"
-                                                checked={field.value}
-                                                onChange={(e) => field.onChange(e.target.checked)}
-                                                className="h-4 w-4 rounded border-gray-300 text-primary focus:ring-primary"
-                                            />
-                                        </FormControl>
-                                        <FormLabel className="mb-0">Azure</FormLabel>
-                                    </FormItem>
-                                )}
-                            />
-                            <FormField
-                                control={form.control}
-                                name="approvedSecurity"
-                                render={({ field }: any) => (
-                                    <FormItem className="flex items-center gap-3">
-                                        <FormControl>
-                                            <input
-                                                type="checkbox"
-                                                checked={field.value}
-                                                onChange={(e) => field.onChange(e.target.checked)}
-                                                className="h-4 w-4 rounded border-gray-300 text-primary focus:ring-primary"
-                                            />
-                                        </FormControl>
-                                        <FormLabel className="mb-0">資安</FormLabel>
-                                    </FormItem>
-                                )}
-                            />
-                            <FormField
-                                control={form.control}
-                                name="description"
-                                render={({ field }: any) => (
-                                    <FormItem>
-                                        <FormLabel>商機描述 (Remark)</FormLabel>
-                                        <FormControl>
-                                            <textarea
-                                                {...field}
-                                                className="w-full min-h-[100px] p-2.5 rounded-lg border border-input bg-background/50 focus:bg-background transition-colors text-sm"
-                                                placeholder="請輸入更多詳細資訊..."
-                                            />
-                                        </FormControl>
-                                        <FormMessage />
-                                    </FormItem>
-                                )}
-                            />
+                                        ))}
+                                    </FormSection>
 
-                            {oppFields.map((f: any) => (
-                                <FormItem key={f.id}>
-                                    <FormLabel className="text-sm font-medium">自訂：{f.name} {f.isRequired && <span className="text-destructive">*</span>}</FormLabel>
-                                    <FormControl>
-                                        {f.fieldType === "select" ? (
-                                            <Select onValueChange={(val) => setCustomFieldsValues(p => ({ ...p, [f.id]: val }))}>
-                                                <SelectTrigger>
-                                                    <SelectValue placeholder={`選擇 ${f.name}`} />
-                                                </SelectTrigger>
-                                                <SelectContent>
-                                                    {f.options?.map((opt: string) => (
-                                                        <SelectItem key={opt} value={opt}>{opt}</SelectItem>
-                                                    ))}
-                                                </SelectContent>
-                                            </Select>
-                                        ) : f.fieldType === "switch" ? (
-                                            <div className="flex items-center space-x-2 pt-1">
-                                                <input 
-                                                    type="checkbox" 
-                                                    className="w-4 h-4 rounded border-gray-300 text-primary focus:ring-primary" 
-                                                    onChange={(e) => setCustomFieldsValues(p => ({ ...p, [f.id]: e.target.checked ? "true" : "false" }))} 
-                                                />
-                                                <span className="text-xs text-muted-foreground">啟用 / 開啟</span>
-                                            </div>
-                                        ) : (
-                                            <Input 
-                                                type={f.fieldType === "number" ? "number" : "text"} 
-                                                placeholder={`請輸入 ${f.name}`} 
-                                                onChange={(e) => setCustomFieldsValues(p => ({ ...p, [f.id]: e.target.value }))} 
-                                            />
-                                        )}
-                                    </FormControl>
-                                </FormItem>
-                            ))}
-
-                            <div className="mt-6 flex justify-end space-x-3">
-                                <Button type="button" variant="outline" onClick={() => setIsCreating(false)}>
-                                    取消
-                                </Button>
-                                <Button type="submit" disabled={createOpp.isPending}>
-                                    {createOpp.isPending ? "建立中..." : "建立商機"}
-                                </Button>
+                                    <FormSection title="備註與自訂欄位" description="補充商機背景與組織自訂欄位。" columns={1}>
+                                        <FormField
+                                            control={form.control}
+                                            name="description"
+                                            render={({ field }: any) => (
+                                                <FormItem>
+                                                    <FormLabel>商機描述</FormLabel>
+                                                    <FormControl>
+                                                        <textarea
+                                                            {...field}
+                                                            className="min-h-[100px] w-full rounded-lg border border-input bg-background/50 p-2.5 text-sm transition-colors focus:bg-background"
+                                                            placeholder="請輸入更多詳細資訊..."
+                                                        />
+                                                    </FormControl>
+                                                    <FormMessage />
+                                                </FormItem>
+                                            )}
+                                        />
+                                        {oppFields.map((f: any) => (
+                                            <FormItem key={f.id}>
+                                                <FormLabel className="text-sm font-medium">自訂：{f.name} {f.isRequired && <span className="text-destructive">*</span>}</FormLabel>
+                                                <FormControl>
+                                                    {f.fieldType === "select" ? (
+                                                        <Select onValueChange={(val) => setCustomFieldsValues(p => ({ ...p, [f.id]: val }))}>
+                                                            <SelectTrigger>
+                                                                <SelectValue placeholder={`選擇 ${f.name}`} />
+                                                            </SelectTrigger>
+                                                            <SelectContent>
+                                                                {f.options?.map((opt: string) => (
+                                                                    <SelectItem key={opt} value={opt}>{opt}</SelectItem>
+                                                                ))}
+                                                            </SelectContent>
+                                                        </Select>
+                                                    ) : f.fieldType === "switch" ? (
+                                                        <div className="flex items-center space-x-2 pt-1">
+                                                            <input
+                                                                type="checkbox"
+                                                                className="h-4 w-4 rounded border-gray-300 text-primary focus:ring-primary"
+                                                                onChange={(e) => setCustomFieldsValues(p => ({ ...p, [f.id]: e.target.checked ? "true" : "false" }))}
+                                                            />
+                                                            <span className="text-xs text-muted-foreground">啟用 / 開啟</span>
+                                                        </div>
+                                                    ) : (
+                                                        <Input
+                                                            type={f.fieldType === "number" ? "number" : "text"}
+                                                            placeholder={`請輸入 ${f.name}`}
+                                                            onChange={(e) => setCustomFieldsValues(p => ({ ...p, [f.id]: e.target.value }))}
+                                                        />
+                                                    )}
+                                                </FormControl>
+                                            </FormItem>
+                                        ))}
+                                    </FormSection>
+                                </div>
+                                <div className="space-y-4 lg:sticky lg:top-0 lg:self-start">
+                                    <FormSummaryPanel
+                                        items={[
+                                            { label: "客戶", value: form.watch("customerName") },
+                                            { label: "業務", value: selectedSalesRep },
+                                            { label: "業務部門", value: selectedSalesDepartment },
+                                            { label: "類型", value: opportunityTypeLabels[watchedOppType] },
+                                            { label: "預估金額", value: `NT$ ${watchedEstimatedValue.toLocaleString()}` },
+                                            { label: "產品", value: watchedProducts.length ? watchedProducts.join("、") : "" }
+                                        ]}
+                                    />
+                                </div>
                             </div>
+                            <StickyFormActions
+                                submitLabel="建立商機"
+                                submittingLabel="建立中..."
+                                isSubmitting={createOpp.isPending}
+                                onCancel={() => setIsCreating(false)}
+                            />
                         </form>
                     </Form>
                 </DialogContent>

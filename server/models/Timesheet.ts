@@ -15,6 +15,7 @@ export interface ITimesheet extends Document {
     opportunityId?: mongoose.Types.ObjectId;
     srId?: mongoose.Types.ObjectId;
     wbsItemId?: mongoose.Types.ObjectId;
+    isBillable: boolean;
     createdAt: Date;
 }
 
@@ -31,7 +32,8 @@ const TimesheetSchema = new Schema<ITimesheet>({
     settlementId: { type: Schema.Types.ObjectId },
     opportunityId: { type: Schema.Types.ObjectId, ref: "Opportunity" },
     srId: { type: Schema.Types.ObjectId, ref: "ServiceRequest" },
-    wbsItemId: { type: Schema.Types.ObjectId }
+    wbsItemId: { type: Schema.Types.ObjectId },
+    isBillable: { type: Boolean, default: true, required: true }
 }, { timestamps: true });
 
 TimesheetSchema.index({ type: 1, workDate: 1 });

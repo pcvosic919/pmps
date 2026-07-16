@@ -23,7 +23,7 @@ export function ProjectTimesheetsPage() {
     const [viewMode, setViewMode] = useState<"list" | "week" | "month">("list");
 
     // Fetches
-    const { data: assignments } = trpc.projects.getMyProjectAssignments.useQuery();
+    const { data: assignments } = trpc.projects.getMyProjectAssignments.useQuery({ scope: "mine" });
     const { data: timesheets, isLoading: loadingTimesheets } = trpc.projects.getMyProjectTimesheets.useQuery();
 
     const statusLabels: Record<string, string> = {
@@ -54,12 +54,14 @@ export function ProjectTimesheetsPage() {
 
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
-        if (!selectedProjectId || !selectedWbsId || !hours || !workDate || !description) return;
+        const selectedActivity = (assignments || []).find((assignment: any) => assignment.srId === selectedProjectId);
+        const canSubmitWithoutWbs = selectedActivity?.srType === "other_activity" || selectedActivity?.memberRole === "watcher";
+        if (!selectedProjectId || (!selectedWbsId && !canSubmitWithoutWbs) || !hours || !workDate || !description) return;
 
         setIsSubmitting(true);
         try {
             await logTime.mutateAsync({
-                wbsItemId: selectedWbsId,
+                wbsItemId: selectedWbsId || undefined,
                 srId: selectedProjectId,
                 workDate: new Date(workDate),
                 hours: Number(hours),
@@ -74,13 +76,14 @@ export function ProjectTimesheetsPage() {
     // Derived unique projects from assignments for the filter dropdown
     const assignedProjects = useMemo(() => {
         if (!assignments) return [];
-        const unique = new Map<string, { id: string; title: string; items: any[] }>();
+        const unique = new Map<string, { id: string; title: string; srType?: string; isObserver?: boolean; items: any[] }>();
         assignments.forEach((a: any) => {
-            if (!a.srId || !a.wbsItemId) return;
+            if (!a.srId) return;
             if (!unique.has(a.srId)) {
-                unique.set(a.srId, { id: a.srId, title: a.srTitle, items: [] });
+                unique.set(a.srId, { id: a.srId, title: a.srTitle, srType: a.srType, isObserver: a.memberRole === "watcher", items: [] });
             }
             const project = unique.get(a.srId);
+            if (project && a.memberRole === "watcher") project.isObserver = true;
             if (project && a.wbsItemId && !project.items.some(item => item.wbsItemId === a.wbsItemId)) {
                 project.items.push(a);
             }
@@ -91,6 +94,7 @@ export function ProjectTimesheetsPage() {
     const selectedProject = assignedProjects.find((project) => project.id === selectedProjectId);
     const availableWbsItems = selectedProject?.items || [];
     const selectedWbsItem = availableWbsItems.find((item: any) => (item.wbsItemId || item.id) === selectedWbsId);
+    const canSubmitWithoutWbs = selectedProject?.srType === "other_activity" || selectedProject?.isObserver;
     const scheduledDayAssignments = useMemo(() => {
         if (!assignments || !workDate) return [];
         const selectedDay = new Date(workDate).setHours(0, 0, 0, 0);
@@ -226,8 +230,8 @@ export function ProjectTimesheetsPage() {
                                     className="w-full border border-border bg-background rounded-md px-3 py-2 text-sm focus:ring-1 focus:ring-primary outline-none"
                                     value={selectedWbsId}
                                     onChange={(e) => setSelectedWbsId(e.target.value)}
-                                    required
-                                    disabled={!selectedProjectId}
+	                                    required={!canSubmitWithoutWbs}
+	                                    disabled={!selectedProjectId}
                                 >
                                     <option value="">-- 再選擇該專案下的 WBS --</option>
                                     {availableWbsItems.map((a: any) => (
@@ -241,11 +245,16 @@ export function ProjectTimesheetsPage() {
                                         <AlertCircle className="w-3 h-3" /> 找不到指派給您的專案任務
                                     </p>
                                 )}
-	                                {selectedProjectId && availableWbsItems.length === 0 && (
-	                                    <p className="text-xs text-yellow-600 dark:text-yellow-400 mt-1 flex items-center gap-1">
-	                                        <AlertCircle className="w-3 h-3" /> 此專案目前沒有可填報的 WBS 項目
-	                                    </p>
-	                                )}
+		                                {selectedProjectId && availableWbsItems.length === 0 && !canSubmitWithoutWbs && (
+		                                    <p className="text-xs text-yellow-600 dark:text-yellow-400 mt-1 flex items-center gap-1">
+		                                        <AlertCircle className="w-3 h-3" /> 此專案目前沒有可填報的 WBS 項目
+		                                    </p>
+		                                )}
+                                        {canSubmitWithoutWbs && (
+                                            <p className="text-xs text-muted-foreground mt-1 flex items-center gap-1">
+                                                <AlertCircle className="w-3 h-3" /> 其他活動或觀察者工時可不選 WBS；觀察者工時不納入計費。
+                                            </p>
+                                        )}
 	                                {selectedWbsItem?.status === "completed" && (
 	                                    <p className="text-xs text-emerald-600 mt-1 flex items-center gap-1">
 	                                        <AlertCircle className="w-3 h-3" /> 此 WBS 已標示完成，請確認是否仍需補填工時
@@ -305,7 +314,7 @@ export function ProjectTimesheetsPage() {
 
                             <button
                                 type="submit"
-                                disabled={isSubmitting || !selectedProjectId || !selectedWbsId}
+	                                disabled={isSubmitting || !selectedProjectId || (!selectedWbsId && !canSubmitWithoutWbs)}
                                 className="w-full bg-primary text-primary-foreground py-2 rounded-md font-medium hover:bg-primary/90 transition-colors disabled:opacity-50"
                             >
                                 {isSubmitting ? "送出中..." : "儲存工時"}
@@ -403,7 +412,7 @@ export function ProjectTimesheetsPage() {
                                                     <div className="flex items-center gap-4 mt-2 text-xs text-muted-foreground">
                                                         <span className="flex items-center gap-1"><CalendarDays className="w-3 h-3" /> {t.hours} 小時</span>
                                                         <span className="flex items-center gap-1">{new Date(t.workDate).toISOString().split('T')[0].replace(/-/g, '/')}</span>
-                                                        <span>約 NT$ {t.costAmount?.toLocaleString()}</span>
+                                                        <span>{t.isBillable === false ? "非計費" : `約 NT$ ${t.costAmount?.toLocaleString()}`}</span>
                                                     </div>
                                                 </div>
                                                 {canDelete && (
@@ -435,7 +444,7 @@ export function ProjectTimesheetsPage() {
                                                             <div className="flex-1">
                                                                 <div className="flex items-center gap-2 mb-0.5">
                                                                     <span className="font-semibold">{t.srTitle}</span>
-                                                                    <span className="text-xs bg-muted px-1.5 py-0.5 rounded text-muted-foreground">{t.wbsItemTitle}</span>
+	                                                                    <span className="text-xs bg-muted px-1.5 py-0.5 rounded text-muted-foreground">{t.type === "other_activity" ? "其他活動" : t.wbsItemTitle}</span>
                                                                 </div>
                                                                 <p className="text-muted-foreground text-xs">{t.description}</p>
                                                             </div>

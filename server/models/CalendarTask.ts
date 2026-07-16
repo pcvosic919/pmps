@@ -6,7 +6,7 @@ export interface ICalendarTask extends Document {
     assigneeId: mongoose.Types.ObjectId;
     startDate?: Date;
     endDate?: Date;
-    sourceType: "manual" | "presales" | "wbs";
+    sourceType: "manual" | "presales" | "wbs" | "other_activity";
     opportunityId?: mongoose.Types.ObjectId;
     srId?: mongoose.Types.ObjectId;
     wbsItemId?: mongoose.Types.ObjectId;
@@ -21,7 +21,7 @@ const CalendarTaskSchema = new Schema<ICalendarTask>({
     assigneeId: { type: Schema.Types.ObjectId, ref: "User", required: true },
     startDate: { type: Date },
     endDate: { type: Date },
-    sourceType: { type: String, enum: ["manual", "presales", "wbs"], default: "manual", required: true },
+    sourceType: { type: String, enum: ["manual", "presales", "wbs", "other_activity"], default: "manual", required: true },
     opportunityId: { type: Schema.Types.ObjectId, ref: "Opportunity" },
     srId: { type: Schema.Types.ObjectId, ref: "ServiceRequest" },
     wbsItemId: { type: Schema.Types.ObjectId },

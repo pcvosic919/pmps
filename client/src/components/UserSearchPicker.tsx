@@ -28,8 +28,8 @@ type UserSearchPickerProps = {
 
 const buildUserLabel = (user?: PickerUser, fallback = "") => {
     if (!user) return fallback;
-    const email = user.email ? ` (${user.email})` : "";
-    return `${user.name}${email}`;
+    const emailPrefix = user.email?.split("@")[0];
+    return [user.name, emailPrefix, user.department].filter(Boolean).join(" / ");
 };
 
 const normalizeSearchText = (value: string) =>
@@ -95,6 +95,7 @@ export function UserSearchPicker({
 }: UserSearchPickerProps) {
     const [searchTerm, setSearchTerm] = useState("");
     const [isOpen, setIsOpen] = useState(false);
+    const [hasInteracted, setHasInteracted] = useState(false);
     const debouncedSearchTerm = useDebounce(searchTerm, 250);
     const shouldSearchServer = normalizeSearchText(debouncedSearchTerm).length >= 2;
 
@@ -117,13 +118,21 @@ export function UserSearchPicker({
     const selectedUser = activeUsers.find((user) => user.id === selectedUserId);
     const selectedLabel = useMemo(
         () => buildUserLabel(selectedUser, legacyName || ""),
-        [legacyName, selectedUser?.email, selectedUser?.id, selectedUser?.name]
+        [legacyName, selectedUser?.department, selectedUser?.email, selectedUser?.id, selectedUser?.name]
     );
 
     useEffect(() => {
-        if (isOpen) return;
+        if (isOpen || hasInteracted) return;
         setSearchTerm(selectedLabel);
-    }, [isOpen, selectedLabel]);
+    }, [hasInteracted, isOpen, selectedLabel]);
+
+    useEffect(() => {
+        if (selectedUserId) return;
+        if (!legacyName && !isOpen) {
+            setSearchTerm("");
+            setHasInteracted(false);
+        }
+    }, [isOpen, legacyName, selectedUserId]);
 
     const filteredUsers = activeUsers
         .map((user) => ({ user, score: getFuzzyScore(user, searchTerm) }))
@@ -140,8 +149,12 @@ export function UserSearchPicker({
                 value={searchTerm}
                 disabled={disabled}
                 placeholder={placeholder}
-                onFocus={() => setIsOpen(true)}
+                onFocus={() => {
+                    setHasInteracted(true);
+                    setIsOpen(true);
+                }}
                 onChange={(event) => {
+                    setHasInteracted(true);
                     setSearchTerm(event.target.value);
                     setIsOpen(true);
                     if (!event.target.value && onClear) onClear();
@@ -153,6 +166,7 @@ export function UserSearchPicker({
                     type="button"
                     onClick={() => {
                         setSearchTerm("");
+                        setHasInteracted(false);
                         setIsOpen(false);
                         onClear();
                     }}
@@ -177,6 +191,7 @@ export function UserSearchPicker({
                                 onClick={() => {
                                     onSelect(user);
                                     setSearchTerm(buildUserLabel(user));
+                                    setHasInteracted(false);
                                     setIsOpen(false);
                                 }}
                                 className={`w-full text-left px-3 py-2 text-sm hover:bg-muted transition-colors ${selectedUserId === user.id ? "bg-primary/10 text-primary font-medium" : ""}`}
@@ -191,7 +206,14 @@ export function UserSearchPicker({
                 </div>
             )}
             {isOpen && !disabled && (
-                <div className="fixed inset-0 z-40" onClick={() => setIsOpen(false)} />
+                <div
+                    className="fixed inset-0 z-40"
+                    onClick={() => {
+                        setIsOpen(false);
+                        setHasInteracted(false);
+                        if (selectedUserId) setSearchTerm(selectedLabel);
+                    }}
+                />
             )}
         </div>
     );

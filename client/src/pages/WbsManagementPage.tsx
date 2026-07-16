@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { trpc } from "../lib/trpc";
 import { useRoute } from "wouter";
-import { ArrowLeft, Plus, FileText, Clock, Trash2, Save, X, CheckCircle2, XCircle, Upload, Paperclip, AlertCircle, Receipt, Download } from "lucide-react";
+import { ArrowLeft, Plus, FileText, Clock, Trash2, Save, X, CheckCircle2, XCircle, Upload, Paperclip, AlertCircle, Receipt, Download, ChevronDown, ChevronRight } from "lucide-react";
 import { Link } from "wouter";
 import toast from "react-hot-toast";
 import { useCurrentUser } from "../lib/useCurrentUser";
@@ -46,6 +46,7 @@ export function WbsManagementPage() {
 
     const [isBuildingVersion, setIsBuildingVersion] = useState(false);
     const [draftItems, setDraftItems] = useState<WbsDraftItem[]>([]);
+    const [expandedDraftItems, setExpandedDraftItems] = useState<Record<number, boolean>>({});
     const [pendingImport, setPendingImport] = useState<WbsImportPreview | null>(null);
 
     // View settings
@@ -137,6 +138,14 @@ export function WbsManagementPage() {
             toast.success("業務欄位已更新");
         },
         onError: (err) => toast.error(err.message || "更新業務欄位失敗")
+    });
+
+    const updateFinalPriceMutation = trpc.projects.updateFinalPrice.useMutation({
+        onSuccess: () => {
+            utils.projects.srById.invalidate({ id: srId });
+            toast.success("最終價格已更新");
+        },
+        onError: (err) => toast.error(err.message || "更新最終價格失敗")
     });
 
     const parseExcelDate = (value: any) => {
@@ -364,6 +373,9 @@ export function WbsManagementPage() {
         setDraftItems(newItems);
     };
     const handleRemoveDraftItem = (index: number) => setDraftItems(draftItems.filter((_, i) => i !== index));
+    const toggleDraftItemExpanded = (index: number) => {
+        setExpandedDraftItems((current) => ({ ...current, [index]: !current[index] }));
+    };
     const handleMoveDraftItem = (index: number, direction: -1 | 1) => {
         const nextIndex = index + direction;
         if (nextIndex < 0 || nextIndex >= draftItems.length) return;
@@ -645,7 +657,7 @@ export function WbsManagementPage() {
     };
 
     // File upload (Mock implementation)
-    const handleFileUpload = async (files: FileList | null) => {
+    const handleFileUpload = async (files: FileList | null, category: "general" | "business_approval_email" | "service_content_email" = "general") => {
         if (!files || files.length === 0) return;
 
         setIsUploading(true);
@@ -658,6 +670,7 @@ export function WbsManagementPage() {
                     fileName: file.name,
                     fileSize: file.size,
                     mimeType: file.type || "application/octet-stream",
+                    category,
                     fileDataBase64
                 });
             }
@@ -667,6 +680,17 @@ export function WbsManagementPage() {
         } finally {
             setIsUploading(false);
         }
+    };
+
+    const handleUpdateFinalPrice = () => {
+        const value = window.prompt("請輸入與業務敲定的最終價格 (NT$)", String(sr?.finalPrice ?? sr?.contractAmount ?? 0));
+        if (value === null) return;
+        const finalPrice = Number(value);
+        if (Number.isNaN(finalPrice) || finalPrice < 0) {
+            toast.error("請輸入有效的最終價格");
+            return;
+        }
+        updateFinalPriceMutation.mutate({ id: sr.id, finalPrice });
     };
 
     const handleExportQuote = async () => {
@@ -755,13 +779,42 @@ export function WbsManagementPage() {
                             )}
                             {!hasRole("tech") && (
                                 <>
-                                    <div className="flex justify-between">
-                                        <span className="text-muted-foreground">合約金額</span>
-                                        <span className="font-bold">NT$ {sr.contractAmount?.toLocaleString() || 0}</span>
-                                    </div>
-                                    <div className="flex justify-between items-center">
-                                        <span className="text-muted-foreground">預估毛利</span>
-                                        <span className={`font-bold ${sr.marginWarning ? 'text-destructive' : 'text-green-600'}`}>{sr.marginEstimate}%</span>
+	                                    <div className="flex justify-between">
+	                                        <span className="text-muted-foreground">合約金額</span>
+	                                        <span className="font-bold">NT$ {sr.contractAmount?.toLocaleString() || 0}</span>
+	                                    </div>
+                                        <div className="flex justify-between">
+                                            <span className="text-muted-foreground">最終價格</span>
+                                            <span className="font-bold">NT$ {(sr.finalPrice ?? 0).toLocaleString()}</span>
+                                        </div>
+                                        {canEditSalesOwner && (
+                                            <button
+                                                onClick={handleUpdateFinalPrice}
+                                                className="w-full mt-2 px-3 py-2 rounded-lg border border-emerald-200 bg-emerald-50 text-emerald-700 text-sm font-semibold hover:bg-emerald-100 transition-colors"
+                                            >
+                                                更新最終價格
+                                            </button>
+                                        )}
+                                        <div>
+                                            <input
+                                                id="business-approval-file-input"
+                                                type="file"
+                                                multiple
+                                                style={{ display: "none" }}
+                                                accept=".eml,.msg,.pdf,.doc,.docx,.png,.jpg,.jpeg"
+                                                onChange={e => handleFileUpload(e.target.files, "business_approval_email")}
+                                                disabled={isUploading}
+                                            />
+                                            <button
+                                                onClick={() => !isUploading && document.getElementById("business-approval-file-input")?.click()}
+                                                className="w-full mt-2 px-3 py-2 rounded-lg border border-border bg-background text-sm font-semibold hover:bg-muted transition-colors"
+                                            >
+                                                上傳業務同意郵件
+                                            </button>
+                                        </div>
+	                                    <div className="flex justify-between items-center">
+	                                        <span className="text-muted-foreground">預估毛利</span>
+	                                        <span className={`font-bold ${sr.marginWarning ? 'text-destructive' : 'text-green-600'}`}>{sr.marginEstimate}%</span>
                                     </div>
                                 </>
                             )}
@@ -780,23 +833,47 @@ export function WbsManagementPage() {
                         >
                             <Upload className={`w-7 h-7 mx-auto mb-2 ${isDragging ? 'text-primary' : 'text-muted-foreground/50'}`} />
                             <p className="text-xs text-muted-foreground">{isUploading ? "上傳中..." : "拖曳或點擊上傳檔案"}</p>
-                            <input
-                                id="file-input" type="file" multiple style={{ display: 'none' }}
-                                accept=".pdf,.doc,.docx,.xls,.xlsx,.png,.jpg,.jpeg,.zip"
-                                onChange={e => handleFileUpload(e.target.files)}
-                                disabled={isUploading}
-                            />
-                        </div>
+	                            <input
+	                                id="file-input" type="file" multiple style={{ display: 'none' }}
+	                                accept=".pdf,.doc,.docx,.xls,.xlsx,.png,.jpg,.jpeg,.zip"
+	                                onChange={e => handleFileUpload(e.target.files)}
+	                                disabled={isUploading}
+	                            />
+	                        </div>
+                            {sr.srType === "other_activity" && (
+                                <div className="mt-2">
+                                    <input
+                                        id="service-content-file-input"
+                                        type="file"
+                                        multiple
+                                        style={{ display: "none" }}
+                                        accept=".eml,.msg,.pdf,.doc,.docx,.png,.jpg,.jpeg"
+                                        onChange={e => handleFileUpload(e.target.files, "service_content_email")}
+                                        disabled={isUploading}
+                                    />
+                                    <button
+                                        onClick={() => !isUploading && document.getElementById("service-content-file-input")?.click()}
+                                        className="w-full px-3 py-2 rounded-lg border border-border bg-background text-xs font-semibold hover:bg-muted transition-colors"
+                                    >
+                                        上傳服務內容郵件
+                                    </button>
+                                </div>
+                            )}
                         {attachments && attachments.length > 0 && (
                             <div className="mt-3 space-y-2">
                                 {attachments.map((a: any) => (
                                     <div key={a.id} className="flex items-center gap-2 p-2 bg-muted/40 rounded-lg text-xs group">
                                         <FileText className="w-3.5 h-3.5 text-primary flex-shrink-0" />
-                                        <a href={a.fileUrl} target="_blank" rel="noopener noreferrer" className="flex-1 truncate font-medium hover:text-primary transition-colors" title={a.fileName}>
-                                            {a.fileName}
-                                        </a>
-                                        <span className="text-muted-foreground whitespace-nowrap">{formatSize(a.fileSize)}</span>
-                                    </div>
+	                                        <a href={a.fileUrl} target="_blank" rel="noopener noreferrer" className="flex-1 truncate font-medium hover:text-primary transition-colors" title={a.fileName}>
+	                                            {a.fileName}
+	                                        </a>
+                                            {a.category && a.category !== "general" && (
+                                                <span className="rounded-full border border-border bg-background px-2 py-0.5 text-[10px] text-muted-foreground whitespace-nowrap">
+                                                    {a.category === "business_approval_email" ? "業務同意" : "服務內容"}
+                                                </span>
+                                            )}
+	                                        <span className="text-muted-foreground whitespace-nowrap">{formatSize(a.fileSize)}</span>
+	                                    </div>
                                 ))}
                             </div>
                         )}
@@ -1217,122 +1294,162 @@ export function WbsManagementPage() {
                                     </div>
                                 ) : (
                                     <div className="space-y-3">
-                                        {draftItems.map((item, idx) => (
-                                            <div key={idx} className="flex gap-2 items-start bg-background p-3 rounded-lg border border-border group hover:border-primary/40 transition-colors" style={{ marginLeft: `${(item.level || 0) * 1.5}rem` }}>
-                                                <div className="flex-1 space-y-2">
-                                                    <div className="flex items-center gap-2">
-                                                        <span className="font-mono text-xs font-bold text-primary bg-primary/10 px-1.5 py-0.5 rounded">{computeItemNumbers(draftItems)[idx]}</span>
-                                                        <input type="text" placeholder="任務標題 (必填)" value={item.title}
-                                                            onChange={(e) => handleUpdateDraftItem(idx, 'title', e.target.value)}
-                                                            className="flex-1 text-sm font-medium bg-transparent border-0 border-b border-transparent hover:border-border focus:border-primary focus:ring-0 px-1 py-1 transition-colors outline-none"
-                                                        />
-                                                    </div>
-                                                    <div className="flex flex-col gap-3 lg:pl-8">
-                                                        <div className="grid grid-cols-2 gap-3">
-                                                            <div className="flex flex-col gap-1 text-xs text-muted-foreground">
-                                                                <label>工作編號:</label>
-                                                                <input type="text" placeholder="選填" value={item.code || ""}
-                                                                    onChange={(e) => handleUpdateDraftItem(idx, 'code', e.target.value)}
-                                                                    className="px-2 py-1.5 bg-muted rounded border border-transparent focus:bg-background focus:border-primary outline-none"
-                                                                />
-                                                            </div>
-	                                                            <div className="flex flex-col gap-1 text-xs text-muted-foreground">
-	                                                                <label>工作天數(小計):</label>
-	                                                                <input type="number" min="0.5" step="0.5" value={isHeadingItem(item) ? "" : item.estimatedHours}
-	                                                                    onChange={(e) => handleUpdateDraftItem(idx, 'estimatedHours', Number(e.target.value))}
-	                                                                    disabled={isHeadingItem(item)}
-	                                                                    placeholder={isHeadingItem(item) ? "標題列不需填" : "0"}
-	                                                                    className="px-2 py-1.5 bg-muted rounded border border-transparent focus:bg-background focus:border-primary outline-none disabled:cursor-not-allowed disabled:opacity-70"
-	                                                                />
-	                                                            </div>
-                                                        </div>
+                                        {draftItems.map((item, idx) => {
+                                            const isExpanded = !!expandedDraftItems[idx];
+                                            const isHeading = isHeadingItem(item);
+                                            const startDateValue = item.startDate ? typeof item.startDate === "string" ? item.startDate : new Date(item.startDate).toISOString().slice(0, 10) : "";
+                                            const endDateValue = item.endDate ? typeof item.endDate === "string" ? item.endDate : new Date(item.endDate).toISOString().slice(0, 10) : "";
 
-                                                        <div className="flex flex-col gap-1 text-xs text-muted-foreground">
-                                                            <label>工作說明:</label>
-                                                            <textarea placeholder="選填" value={item.description || ""} rows={2}
-                                                                onChange={(e) => handleUpdateDraftItem(idx, 'description', e.target.value)}
-                                                                className="px-2 py-1.5 bg-muted rounded border border-transparent focus:bg-background focus:border-primary outline-none resize-y"
-                                                            />
-                                                        </div>
+                                            return (
+                                                <div key={idx} className="bg-background rounded-lg border border-border group hover:border-primary/40 transition-colors" style={{ marginLeft: `${(item.level || 0) * 1.5}rem` }}>
+                                                    <div className="flex gap-2 p-3">
+                                                        <div className="flex-1 min-w-0 space-y-3">
+                                                            <div className="flex flex-wrap items-center gap-2">
+                                                                <span className="font-mono text-xs font-bold text-primary bg-primary/10 px-1.5 py-0.5 rounded">{computeItemNumbers(draftItems)[idx]}</span>
+                                                                {isHeading && <span className="rounded bg-slate-100 px-1.5 py-0.5 text-[10px] font-semibold text-slate-700">標題/說明</span>}
+                                                                <input
+                                                                    type="text"
+                                                                    placeholder="任務標題 (必填)"
+                                                                    value={item.title}
+                                                                    onChange={(e) => handleUpdateDraftItem(idx, "title", e.target.value)}
+                                                                    className="min-w-[220px] flex-1 bg-transparent px-1 py-1 text-sm font-medium outline-none border-0 border-b border-transparent transition-colors hover:border-border focus:border-primary focus:ring-0"
+                                                                />
+                                                                <button
+                                                                    type="button"
+                                                                    onClick={() => toggleDraftItemExpanded(idx)}
+                                                                    className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium text-muted-foreground hover:bg-muted hover:text-foreground"
+                                                                >
+                                                                    {isExpanded ? <ChevronDown className="w-3.5 h-3.5" /> : <ChevronRight className="w-3.5 h-3.5" />}
+                                                                    更多設定
+                                                                </button>
+                                                            </div>
 
-	                                                        <div className="grid grid-cols-2 gap-3">
-	                                                            <div className="flex flex-col gap-1 text-xs text-muted-foreground">
-	                                                                <label>指派給 (人員):</label>
-	                                                                <UserSearchPicker
-	                                                                    users={techs || []}
-	                                                                    selectedUserId={item.assigneeId}
-	                                                                    placeholder="搜尋姓名或 Email..."
-	                                                                    onSelect={(selectedUser) => handleUpdateDraftItem(idx, "assigneeId", selectedUser.id)}
-	                                                                    onClear={() => handleUpdateDraftItem(idx, "assigneeId", undefined)}
-	                                                                />
-	                                                            </div>
-	                                                            <div className="flex flex-col gap-1 text-xs text-muted-foreground">
-	                                                                <label>狀態:</label>
-	                                                                <select
-	                                                                    value={item.status || "not_started"}
-	                                                                    onChange={(e) => {
-	                                                                        const status = e.target.value as WbsDraftItem["status"];
-	                                                                        handleUpdateDraftItem(idx, "status", status);
-	                                                                        handleUpdateDraftItem(idx, "completionPercentage", status === "completed" ? 100 : status === "not_started" ? 0 : Math.max(item.completionPercentage || 0, 50));
-	                                                                    }}
-	                                                                    className="px-2 py-1.5 bg-muted rounded border border-transparent focus:bg-background focus:border-primary outline-none"
-	                                                                >
-	                                                                    <option value="not_started">尚未開始</option>
-	                                                                    <option value="in_progress">進行中</option>
-	                                                                    <option value="completed">完成</option>
-	                                                                </select>
-	                                                            </div>
-	                                                        </div>
-	                                                        <div className="flex flex-col gap-1 text-xs text-muted-foreground">
-	                                                            <label>備註:</label>
-	                                                            <input type="text" placeholder="選填" value={item.remarks || ""}
-	                                                                onChange={(e) => handleUpdateDraftItem(idx, 'remarks', e.target.value)}
-	                                                                className="px-2 py-1.5 bg-muted rounded border border-transparent focus:bg-background focus:border-primary outline-none"
-	                                                            />
-	                                                        </div>
-                                                        <div className="flex gap-4 items-center flex-wrap pt-2 border-t border-border/50">
-                                                            <div className="flex items-center text-xs text-muted-foreground">
-                                                                <span className="mr-2">色標:</span>
-                                                                <input type="color" value={item.colorCode || "#E2E8F0"}
-                                                                    onChange={(e) => handleUpdateDraftItem(idx, 'colorCode', e.target.value)}
-                                                                    className="w-12 h-6 p-0 border-0 rounded cursor-pointer ring-1 ring-border"
-                                                                />
+                                                            <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+                                                                <div className="flex flex-col gap-1 text-xs text-muted-foreground">
+                                                                    <label>指派給 (人員)</label>
+                                                                    <UserSearchPicker
+                                                                        users={techs || []}
+                                                                        selectedUserId={item.assigneeId}
+                                                                        placeholder="搜尋姓名或 Email..."
+                                                                        onSelect={(selectedUser) => handleUpdateDraftItem(idx, "assigneeId", selectedUser.id)}
+                                                                        onClear={() => handleUpdateDraftItem(idx, "assigneeId", undefined)}
+                                                                    />
+                                                                </div>
+                                                                <div className="flex flex-col gap-1 text-xs text-muted-foreground">
+                                                                    <label>起訖日期</label>
+                                                                    <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-1">
+                                                                        <input
+                                                                            type="date"
+                                                                            value={startDateValue}
+                                                                            onChange={(e) => handleUpdateDraftItem(idx, "startDate", e.target.value)}
+                                                                            className="min-w-0 rounded border border-transparent bg-muted px-2 py-2 text-[11px] outline-none focus:border-primary focus:bg-background"
+                                                                        />
+                                                                        <span>~</span>
+                                                                        <input
+                                                                            type="date"
+                                                                            value={endDateValue}
+                                                                            onChange={(e) => handleUpdateDraftItem(idx, "endDate", e.target.value)}
+                                                                            className="min-w-0 rounded border border-transparent bg-muted px-2 py-2 text-[11px] outline-none focus:border-primary focus:bg-background"
+                                                                        />
+                                                                    </div>
+                                                                </div>
+                                                                <div className="flex flex-col gap-1 text-xs text-muted-foreground">
+                                                                    <label>工作天數(小計)</label>
+                                                                    <input
+                                                                        type="number"
+                                                                        min="0.5"
+                                                                        step="0.5"
+                                                                        value={isHeading ? "" : item.estimatedHours}
+                                                                        onChange={(e) => handleUpdateDraftItem(idx, "estimatedHours", Number(e.target.value))}
+                                                                        disabled={isHeading}
+                                                                        placeholder={isHeading ? "標題列不需填" : "0"}
+                                                                        className="rounded border border-transparent bg-muted px-2 py-2 outline-none focus:border-primary focus:bg-background disabled:cursor-not-allowed disabled:opacity-70"
+                                                                    />
+                                                                </div>
+                                                                <div className="flex flex-col gap-1 text-xs text-muted-foreground">
+                                                                    <label>狀態</label>
+                                                                    <select
+                                                                        value={item.status || "not_started"}
+                                                                        onChange={(e) => {
+                                                                            const status = e.target.value as WbsDraftItem["status"];
+                                                                            handleUpdateDraftItem(idx, "status", status);
+                                                                            handleUpdateDraftItem(idx, "completionPercentage", status === "completed" ? 100 : status === "not_started" ? 0 : Math.max(item.completionPercentage || 0, 50));
+                                                                        }}
+                                                                        className="rounded border border-transparent bg-muted px-2 py-2 outline-none focus:border-primary focus:bg-background"
+                                                                    >
+                                                                        <option value="not_started">尚未開始</option>
+                                                                        <option value="in_progress">進行中</option>
+                                                                        <option value="completed">完成</option>
+                                                                    </select>
+                                                                </div>
                                                             </div>
-                                                            <div className="flex items-center text-xs text-muted-foreground">
-                                                                <span className="mr-1">排程:</span>
-                                                                <input type="date" value={item.startDate ? typeof item.startDate === "string" ? item.startDate : new Date(item.startDate).toISOString().slice(0, 10) : ""}
-                                                                    onChange={(e) => handleUpdateDraftItem(idx, 'startDate', e.target.value)}
-                                                                    className="w-28 text-[10px] px-1 py-1 bg-muted rounded border border-transparent focus:bg-background focus:border-primary outline-none"
-                                                                />
-                                                                <span className="mx-1">-</span>
-                                                                <input type="date" value={item.endDate ? typeof item.endDate === "string" ? item.endDate : new Date(item.endDate).toISOString().slice(0, 10) : ""}
-                                                                    onChange={(e) => handleUpdateDraftItem(idx, 'endDate', e.target.value)}
-                                                                    className="w-28 text-[10px] px-1 py-1 bg-muted rounded border border-transparent focus:bg-background focus:border-primary outline-none"
-                                                                />
-                                                            </div>
+
+                                                            {isExpanded && (
+                                                                <div className="grid gap-3 border-t border-border/50 pt-3 md:grid-cols-2">
+                                                                    <div className="flex flex-col gap-1 text-xs text-muted-foreground">
+                                                                        <label>工作編號</label>
+                                                                        <input
+                                                                            type="text"
+                                                                            placeholder="選填"
+                                                                            value={item.code || ""}
+                                                                            onChange={(e) => handleUpdateDraftItem(idx, "code", e.target.value)}
+                                                                            className="rounded border border-transparent bg-muted px-2 py-1.5 outline-none focus:border-primary focus:bg-background"
+                                                                        />
+                                                                    </div>
+                                                                    <div className="flex flex-col gap-1 text-xs text-muted-foreground">
+                                                                        <label>備註</label>
+                                                                        <input
+                                                                            type="text"
+                                                                            placeholder="選填"
+                                                                            value={item.remarks || ""}
+                                                                            onChange={(e) => handleUpdateDraftItem(idx, "remarks", e.target.value)}
+                                                                            className="rounded border border-transparent bg-muted px-2 py-1.5 outline-none focus:border-primary focus:bg-background"
+                                                                        />
+                                                                    </div>
+                                                                    <div className="flex flex-col gap-1 text-xs text-muted-foreground md:col-span-2">
+                                                                        <label>工作說明</label>
+                                                                        <textarea
+                                                                            placeholder="選填"
+                                                                            value={item.description || ""}
+                                                                            rows={2}
+                                                                            onChange={(e) => handleUpdateDraftItem(idx, "description", e.target.value)}
+                                                                            className="resize-y rounded border border-transparent bg-muted px-2 py-1.5 outline-none focus:border-primary focus:bg-background"
+                                                                        />
+                                                                    </div>
+                                                                    <div className="flex items-center text-xs text-muted-foreground">
+                                                                        <span className="mr-2">色標</span>
+                                                                        <input
+                                                                            type="color"
+                                                                            value={item.colorCode || "#E2E8F0"}
+                                                                            onChange={(e) => handleUpdateDraftItem(idx, "colorCode", e.target.value)}
+                                                                            className="h-7 w-12 cursor-pointer rounded border-0 p-0 ring-1 ring-border"
+                                                                        />
+                                                                    </div>
+                                                                </div>
+                                                            )}
+                                                        </div>
+                                                        <div className="flex flex-col gap-1">
+                                                            <button onClick={() => handleMoveDraftItem(idx, -1)} disabled={idx === 0}
+                                                                className="p-1.5 text-muted-foreground hover:text-primary hover:bg-primary/10 rounded disabled:opacity-30" title="上移">↑</button>
+                                                            <button onClick={() => handleMoveDraftItem(idx, 1)} disabled={idx === draftItems.length - 1}
+                                                                className="p-1.5 text-muted-foreground hover:text-primary hover:bg-primary/10 rounded disabled:opacity-30" title="下移">↓</button>
+                                                            <button onClick={() => handleShiftDraftLevel(idx, -1)} disabled={(item.level || 0) === 0}
+                                                                className="p-1.5 text-muted-foreground hover:text-primary hover:bg-primary/10 rounded disabled:opacity-30" title="升層">←</button>
+                                                            <button onClick={() => handleShiftDraftLevel(idx, 1)} disabled={idx === 0}
+                                                                className="p-1.5 text-muted-foreground hover:text-primary hover:bg-primary/10 rounded disabled:opacity-30" title="降層">→</button>
+                                                            <button onClick={() => handleAddSubTask(idx)}
+                                                                className="p-1.5 text-muted-foreground hover:text-primary hover:bg-primary/10 rounded" title="新增子任務">
+                                                                <Plus className="w-4 h-4" />
+                                                            </button>
+                                                            <button onClick={() => handleRemoveDraftItem(idx)}
+                                                                className="p-1.5 text-muted-foreground hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-950/30 rounded" title="移除此項">
+                                                                <Trash2 className="w-4 h-4" />
+                                                            </button>
                                                         </div>
                                                     </div>
-	                                                </div>
-	                                                <div className="flex flex-col gap-1">
-	                                                    <button onClick={() => handleMoveDraftItem(idx, -1)} disabled={idx === 0}
-	                                                        className="p-1.5 text-muted-foreground hover:text-primary hover:bg-primary/10 rounded disabled:opacity-30" title="上移">↑</button>
-	                                                    <button onClick={() => handleMoveDraftItem(idx, 1)} disabled={idx === draftItems.length - 1}
-	                                                        className="p-1.5 text-muted-foreground hover:text-primary hover:bg-primary/10 rounded disabled:opacity-30" title="下移">↓</button>
-	                                                    <button onClick={() => handleShiftDraftLevel(idx, -1)} disabled={(item.level || 0) === 0}
-	                                                        className="p-1.5 text-muted-foreground hover:text-primary hover:bg-primary/10 rounded disabled:opacity-30" title="升層">←</button>
-	                                                    <button onClick={() => handleShiftDraftLevel(idx, 1)} disabled={idx === 0}
-	                                                        className="p-1.5 text-muted-foreground hover:text-primary hover:bg-primary/10 rounded disabled:opacity-30" title="降層">→</button>
-	                                                    <button onClick={() => handleAddSubTask(idx)}
-	                                                        className="p-1.5 text-muted-foreground hover:text-primary hover:bg-primary/10 rounded" title="新增子任務">
-                                                        <Plus className="w-4 h-4" />
-                                                    </button>
-                                                    <button onClick={() => handleRemoveDraftItem(idx)}
-                                                        className="p-1.5 text-muted-foreground hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-950/30 rounded" title="移除此項">
-                                                        <Trash2 className="w-4 h-4" />
-                                                    </button>
                                                 </div>
-                                            </div>
-                                        ))}
+                                            );
+                                        })}
                                         <button onClick={handleAddDraftItem}
                                             className="w-full py-2 border border-dashed border-primary/40 text-primary rounded-lg text-sm font-medium hover:bg-primary/5 transition-colors flex items-center justify-center gap-1">
                                             <Plus className="w-4 h-4" /> 新增工作項目

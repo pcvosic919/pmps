@@ -3,7 +3,7 @@ import { trpc } from "../lib/trpc";
 import { Database, Download, FileText, Printer, Calendar, BarChart2 } from "lucide-react";
 import toast from "react-hot-toast";
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from "recharts";
-import { exportKpiRevenueWorkbook, exportOpenCasesWorkbook, exportRowsToXlsx, formatExportDate, makeXlsxFileName } from "../lib/exportXlsx";
+import { exportBusinessDepartmentActivityWorkbook, exportKpiRevenueWorkbook, exportOpenCasesWorkbook, exportRowsToXlsx, formatExportDate, makeXlsxFileName } from "../lib/exportXlsx";
 
 type ReportType =
     | "timesheets"
@@ -17,6 +17,7 @@ type ReportType =
     | "open_cases"
     | "kpi_revenue"
     | "project_completion_rate"
+    | "business_department_activity"
     | "business_unit_management"
     | "technical_handler_management";
 
@@ -42,6 +43,7 @@ export function ReportBuilderPage() {
         { reportType: "open_cases", label: "未結案清單匯出", category: "executive", description: "長官檢視格式。", isExecutiveFormat: true },
         { reportType: "kpi_revenue", label: "年度目標/認列/Pipeline 報表", category: "executive", description: "長官檢視格式。", isExecutiveFormat: true },
         { reportType: "business_unit_management", label: "業務單位管理報表", category: "executive", description: "依業務部門與業務代表檢視案件、角色、工時、成本與完成狀況。", isExecutiveFormat: true },
+        { reportType: "business_department_activity", label: "業務部門活動統計", category: "executive", description: "依業務部門代碼彙整協銷與專案活動。", isExecutiveFormat: true },
         { reportType: "technical_handler_management", label: "技術部門處理人員管理報表", category: "executive", description: "依技術部門、處理人員與角色檢視個人案件狀態與工時。", isExecutiveFormat: true },
         { reportType: "settlement", label: "部門利潤結算報表", category: "finance", description: "月結與利潤中心結算用。", isExecutiveFormat: false },
         { reportType: "timesheets", label: "工時清單報表", category: "people", description: "工時明細。", isExecutiveFormat: false },
@@ -65,7 +67,7 @@ export function ReportBuilderPage() {
         system: "系統報表"
     };
     const categoryOrder = ["executive", "project", "people", "finance", "system"];
-    const priorityReportTypes: ReportType[] = ["open_cases", "kpi_revenue", "business_unit_management", "technical_handler_management", "project_completion_rate", "timesheets"];
+    const priorityReportTypes: ReportType[] = ["open_cases", "kpi_revenue", "business_department_activity", "business_unit_management", "technical_handler_management", "project_completion_rate", "timesheets"];
     const groupedTemplates = catalog.reduce((groups: Record<string, any[]>, template: any) => {
         if (!groups[template.category]) groups[template.category] = [];
         groups[template.category].push(template);
@@ -97,7 +99,10 @@ export function ReportBuilderPage() {
     });
 
     const exportXlsx = () => {
-        if (!reportData || (reportData as any[]).length === 0) {
+        const previewRows = reportType === "business_department_activity"
+            ? ((reportData as any)?.summary || [])
+            : (reportData as any[]);
+        if (!reportData || previewRows.length === 0) {
             toast.error("無資料可供匯出");
             return;
         }
@@ -108,6 +113,8 @@ export function ReportBuilderPage() {
             exportOpenCasesWorkbook(reportData as any[], makeXlsxFileName("未結案清單匯出", exportDate));
         } else if (reportType === "kpi_revenue") {
             exportKpiRevenueWorkbook(reportData as any[], makeXlsxFileName("年度目標認列報表", exportDate));
+        } else if (reportType === "business_department_activity") {
+            exportBusinessDepartmentActivityWorkbook(reportData as any, makeXlsxFileName("業務部門活動統計", exportDate));
         } else {
             exportRowsToXlsx(reportData as any[], makeXlsxFileName(reportLabel, exportDate), reportType);
         }
@@ -138,6 +145,11 @@ export function ReportBuilderPage() {
             "業務部門與業務代表優先使用 SR 建立時保存的業務帳號與部門。",
             "完成狀態、實際工時與成本會依查詢期間內的系統資料彙整。"
         ],
+        business_department_activity: [
+            "業務部門代碼沿用帳號與案件上的業務部門欄位。",
+            "專案統計金額優先使用最終價格，未填則使用合約金額。",
+            "Excel 會匯出 Summary_業務部門、協銷明細、專案明細三個頁籤。"
+        ],
         technical_handler_management: [
             "資料來源以系統內專案處理人員、工時與 WBS 指派資料為主。",
             "技術部門優先使用處理人員帳號上的部門資料。",
@@ -160,6 +172,9 @@ export function ReportBuilderPage() {
         ]
     };
     const selectedReportHints = reportFieldHints[reportType] || [];
+    const previewRows = reportType === "business_department_activity"
+        ? (((reportData as any)?.summary || []) as any[])
+        : ((reportData || []) as any[]);
 
     const getEmptyMessage = () => {
         if (!selectedTemplate?.isExecutiveFormat || !selectedSourceStatus) return "符合條件的資料為空。";
@@ -167,7 +182,9 @@ export function ReportBuilderPage() {
         return "系統資料已有內容，但目前篩選條件下沒有資料。";
     };
     const dataQualityHints = (() => {
-        const rows = (reportData || []) as any[];
+        const rows = reportType === "business_department_activity"
+            ? (((reportData as any)?.summary || []) as any[])
+            : ((reportData || []) as any[]);
         const anomalyRows = rows.filter((row) => String(row?.["資料異常備註"] || row?.["備註"] || "").trim());
         const zeroAmountRows = rows.filter((row) =>
             Object.entries(row || {}).some(([key, value]) => /金額|工時|目標|應完成/.test(key) && Number(value) === 0)
@@ -189,7 +206,7 @@ export function ReportBuilderPage() {
                     <button onClick={handlePrint} className="px-4 py-2 border border-border text-foreground hover:bg-muted rounded-lg flex items-center transition-colors">
                         <Printer className="w-4 h-4 mr-2" /> 列印 / PDF
                     </button>
-                    <button onClick={exportXlsx} disabled={!reportData || reportData.length === 0} className="px-4 py-2 bg-primary text-primary-foreground hover:bg-primary/90 rounded-lg flex items-center transition-colors disabled:opacity-50">
+                    <button onClick={exportXlsx} disabled={!reportData || previewRows.length === 0} className="px-4 py-2 bg-primary text-primary-foreground hover:bg-primary/90 rounded-lg flex items-center transition-colors disabled:opacity-50">
                         <Download className="w-4 h-4 mr-2" /> 匯出 Excel
                     </button>
 	                </div>
@@ -325,7 +342,7 @@ export function ReportBuilderPage() {
                             <span className="w-6 h-6 border-2 border-primary border-t-transparent rounded-full animate-spin mb-3" />
                             產生中...
                         </div>
-                    ) : (!reportData || reportData.length === 0) ? (
+                    ) : (!reportData || previewRows.length === 0) ? (
                         <div className="p-12 text-center text-muted-foreground">{getEmptyMessage()}</div>
                     ) : (
                         <div className="space-y-6">
@@ -364,17 +381,17 @@ export function ReportBuilderPage() {
                             )}
 
                             <div className="overflow-x-auto print:overflow-visible">
-                                {reportData && (reportData as any[]).length > 0 && typeof (reportData as any[])[0] === 'object' ? (
-                                    <table className="w-full min-w-max text-sm text-left print:text-xs">
-                                        <thead className="text-xs text-muted-foreground uppercase bg-muted/50 border-y border-border">
-                                        <tr>
-                                            {Object.keys((reportData as any[])[0] || {}).map(key => (
-                                                <th key={key} className="px-4 py-3">{key}</th>
-                                            ))}
-                                        </tr>
-                                    </thead>
-                                    <tbody>
-                                        {(reportData as any[]).map((row: any, i: number) => (
+                                {previewRows.length > 0 && typeof previewRows[0] === 'object' ? (
+	                                    <table className="w-full min-w-max text-sm text-left print:text-xs">
+	                                        <thead className="text-xs text-muted-foreground uppercase bg-muted/50 border-y border-border">
+	                                        <tr>
+	                                            {Object.keys(previewRows[0] || {}).map(key => (
+	                                                <th key={key} className="px-4 py-3">{key}</th>
+	                                            ))}
+	                                        </tr>
+	                                    </thead>
+	                                    <tbody>
+	                                        {previewRows.map((row: any, i: number) => (
                                             <tr key={i} className="border-b border-border/50 hover:bg-muted/20">
                                                 {Object.values(row || {}).map((val: any, j: number) => (
                                                     <td key={j} className="px-4 py-3">{val}</td>

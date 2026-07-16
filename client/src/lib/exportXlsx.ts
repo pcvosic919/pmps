@@ -364,6 +364,23 @@ export function exportRowsToXlsx(rows: Row[], fileName: string, sheetName = "Rep
     writeWorkbook(workbook, fileName);
 }
 
+export function exportBusinessDepartmentActivityWorkbook(
+    report: { summary?: Row[]; presales?: Row[]; projects?: Row[] },
+    fileName: string
+) {
+    const workbook = XLSX.utils.book_new();
+    workbook.Props = {
+        Title: "業務部門活動統計",
+        Subject: "業務部門協銷與專案活動統計",
+        Author: "PMP System",
+        CreatedDate: new Date(),
+    };
+    appendJsonSheet(workbook, "Summary_業務部門", report.summary || []);
+    appendJsonSheet(workbook, "協銷明細", report.presales || []);
+    appendJsonSheet(workbook, "專案明細", report.projects || []);
+    writeWorkbook(workbook, fileName);
+}
+
 export function exportWbsQuoteWorkbook(input: WbsQuoteWorkbookInput): WbsWorkbookExportResult {
     const workbook = XLSX.utils.book_new();
     workbook.Props = {

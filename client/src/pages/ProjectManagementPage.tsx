@@ -41,6 +41,7 @@ export function ProjectManagementPage() {
     const { data: openCasesDashboard } = trpc.analytics.getOpenCasesDashboard.useQuery();
     const { data: pendingWbs } = trpc.projects.getWbsPendingReview.useQuery(undefined, { enabled: isManager });
     const updateStatus = trpc.projects.updateSRStatus.useMutation({ onSuccess: () => refetch() });
+    const updateFinalPrice = trpc.projects.updateFinalPrice.useMutation({ onSuccess: () => refetch() });
     const deleteSr = trpc.projects.delete.useMutation({ 
         onSuccess: () => refetch(),
         onError: (err) => alert(err.message || "刪除失敗")
@@ -57,6 +58,17 @@ export function ProjectManagementPage() {
             case "cancelled": return <XCircle className="w-3.5 h-3.5" />;
             default: return null;
         }
+    };
+
+    const handleUpdateFinalPrice = (sr: any) => {
+        const value = window.prompt("請輸入最終價格 (NT$)", String(sr.finalPrice ?? sr.contractAmount ?? 0));
+        if (value === null) return;
+        const finalPrice = Number(value);
+        if (Number.isNaN(finalPrice) || finalPrice < 0) {
+            alert("請輸入有效的最終價格");
+            return;
+        }
+        updateFinalPrice.mutate({ id: sr.id, finalPrice });
     };
 
 	    const summary = useMemo(() => ({
@@ -186,7 +198,8 @@ export function ProjectManagementPage() {
 	                                    <div className="flex items-center gap-6 text-sm text-muted-foreground flex-wrap">
                                         {sr.customerName && <span>客戶: <span className="font-semibold text-foreground">{sr.customerName}</span></span>}
                                         {sr.externalServiceType && <span>服務類型: <span className="font-semibold text-foreground">{sr.externalServiceType}</span></span>}
-                                        {!hasRole("tech") && <span>合約金額: <span className="font-semibold text-foreground">NT$ {sr.contractAmount?.toLocaleString()}</span></span>}
+	                                        {!hasRole("tech") && <span>合約金額: <span className="font-semibold text-foreground">NT$ {sr.contractAmount?.toLocaleString()}</span></span>}
+                                            {!hasRole("tech") && <span>最終價格: <span className="font-semibold text-foreground">NT$ {(sr.finalPrice ?? 0).toLocaleString()}</span></span>}
                                         {sr.externalAssignments?.length > 0 && (
                                             <span>匯入工時: <span className="font-semibold text-foreground">
                                                 {sr.externalAssignments.reduce((sum: number, a: any) => sum + (a.actualHours || 0), 0).toLocaleString()}
@@ -269,7 +282,7 @@ export function ProjectManagementPage() {
                                             管理 WBS <ChevronRight className="w-3.5 h-3.5" />
                                         </a>
                                     </Link>
-                                    {canDelete && (
+	                                    {canDelete && (
                                         <button
                                             onClick={() => {
                                                 if (confirm("確定要刪除此專案與 SR 嗎？此操作無法復原。")) {
@@ -280,7 +293,18 @@ export function ProjectManagementPage() {
                                         >
                                             刪除專案
                                         </button>
-                                    )}
+	                                    )}
+                                        {(isManager || hasRole("admin") || user?.id === sr.pmId) && !hasRole("tech") && (
+                                            <button
+                                                onClick={(event) => {
+                                                    event.stopPropagation();
+                                                    handleUpdateFinalPrice(sr);
+                                                }}
+                                                className="px-3 py-1.5 text-xs border border-border rounded-lg hover:bg-muted transition-colors text-muted-foreground whitespace-nowrap"
+                                            >
+                                                更新最終價格
+                                            </button>
+                                        )}
                                 </div>
                             </div>
 	                        </div>

@@ -18,7 +18,7 @@ import { settlementTypes } from "../../shared/types";
 import { canDeleteRecord, getManagedDepartments, hasAnyRole } from "../_core/authorization";
 import { toObjectId } from "../_core/cursor";
 
-const reportTypes = ["utilization", "settlement", "timesheets", "project_profitability", "pm_ranking", "budget_variance", "sla_compliance", "renewal_rate", "open_cases", "kpi_revenue", "project_completion_rate", "business_unit_management", "technical_handler_management"] as const;
+const reportTypes = ["utilization", "settlement", "timesheets", "project_profitability", "pm_ranking", "budget_variance", "sla_compliance", "renewal_rate", "open_cases", "kpi_revenue", "project_completion_rate", "business_department_activity", "business_unit_management", "technical_handler_management"] as const;
 
 const defaultKpiSourceDefinitions = [
     { key: "target", label: "年度目標", source: "系統 KPI 目標設定", rule: "部門/個人目標以系統內 KPI 目標設定為準。", isActive: true },
@@ -41,6 +41,7 @@ const defaultReportTemplates = [
     { reportType: "open_cases", label: "未結案清單匯出", category: "executive", description: "長官檢視格式，從系統專案、WBS 與排程資料產出。", outputFormat: "xlsx", isExecutiveFormat: true, sortOrder: 10 },
     { reportType: "kpi_revenue", label: "年度目標/認列/Pipeline 報表", category: "executive", description: "長官檢視格式，從系統 KPI 目標、專案認列與商機 Pipeline 彙整。", outputFormat: "xlsx", isExecutiveFormat: true, sortOrder: 20 },
     { reportType: "business_unit_management", label: "業務單位管理報表", category: "executive", description: "依業務部門與業務代表檢視案件、角色、工時、成本與完成狀況。", outputFormat: "xlsx", isExecutiveFormat: true, sortOrder: 25 },
+    { reportType: "business_department_activity", label: "業務部門活動統計", category: "executive", description: "依業務部門代碼彙整協銷、專案與其他活動數量、名稱與金額。", outputFormat: "xlsx", isExecutiveFormat: true, sortOrder: 25 },
     { reportType: "technical_handler_management", label: "技術部門處理人員管理報表", category: "executive", description: "依技術部門、處理人員與角色檢視個人案件狀態、分配工時與執行工時。", outputFormat: "xlsx", isExecutiveFormat: true, sortOrder: 26 },
     { reportType: "settlement", label: "部門利潤結算報表", category: "finance", description: "月結與利潤中心結算用。", outputFormat: "xlsx", isExecutiveFormat: false, sortOrder: 30 },
     { reportType: "timesheets", label: "工時清單報表", category: "people", description: "技術/協銷/專案工時明細。", outputFormat: "xlsx", isExecutiveFormat: false, sortOrder: 40 },
@@ -1449,7 +1450,7 @@ export const analyticsRouter = router({
 
     generateReport: roleProcedure(["admin", "manager"])
         .input(z.object({
-            reportType: z.enum(["utilization", "settlement", "timesheets", "project_profitability", "pm_ranking", "budget_variance", "sla_compliance", "renewal_rate", "open_cases", "kpi_revenue", "project_completion_rate", "business_unit_management", "technical_handler_management"]),
+            reportType: z.enum(reportTypes),
             startDate: z.string(),
             endDate: z.string(),
             department: z.string().optional(),
@@ -1561,7 +1562,7 @@ export const analyticsRouter = router({
                 ]);
 
                 // Query timesheets spanning the selected period mapped to projects/opportunities
-                const tsMatchProject: any = { type: "project", workDate: { $gte: start, $lte: end } };
+                const tsMatchProject: any = { type: "project", isBillable: { $ne: false }, workDate: { $gte: start, $lte: end } };
                 const tsMatchPresales: any = { type: "presales", workDate: { $gte: start, $lte: end } };
                 await applyScopedUserFilter(ctx.user, tsMatchProject, "techId", input.department, input.userId);
                 await applyScopedUserFilter(ctx.user, tsMatchPresales, "techId", input.department, input.userId);
@@ -1609,6 +1610,126 @@ export const analyticsRouter = router({
                 });
 
                 return [...projectRows, ...oppRows];
+            } else if (input.reportType === "business_department_activity") {
+                const allowedDepartments = await buildDepartmentAccessFilter(ctx.user, input.department);
+                if (allowedDepartments !== null && allowedDepartments.length === 0) {
+                    return { summary: [], presales: [], projects: [] };
+                }
+
+                const departmentMatch = (field = "salesDepartment") => {
+                    if (allowedDepartments === null) return {};
+                    return { [field]: { $in: allowedDepartments } };
+                };
+
+                const projectDateMatch = {
+                    $or: [
+                        { createdAt: { $gte: start, $lte: end } },
+                        { plannedStartDate: { $lte: end }, plannedEndDate: { $gte: start } },
+                        { actualStartDate: { $lte: end }, actualEndDate: { $gte: start } }
+                    ]
+                };
+                const presalesDateMatch = {
+                    $or: [
+                        { createdAt: { $gte: start, $lte: end } },
+                        { expectedCloseDate: { $gte: start, $lte: end } }
+                    ]
+                };
+
+                const [srs, opportunities] = await Promise.all([
+                    ServiceRequestModel.find({
+                        ...departmentMatch(),
+                        status: { $ne: "cancelled" },
+                        ...projectDateMatch
+                    })
+                        .populate("pmId", "name department")
+                        .lean(),
+                    OpportunityModel.find({
+                        ...departmentMatch(),
+                        opportunityType: "presales",
+                        ...presalesDateMatch
+                    })
+                        .populate("ownerId", "name department")
+                        .lean()
+                ]);
+
+                const departments = new Map<string, {
+                    department: string;
+                    presalesNames: string[];
+                    presalesAmount: number;
+                    projectNames: string[];
+                    projectAmount: number;
+                }>();
+                const ensureDepartment = (department?: string) => {
+                    const key = department || "未指定";
+                    if (!departments.has(key)) {
+                        departments.set(key, {
+                            department: key,
+                            presalesNames: [],
+                            presalesAmount: 0,
+                            projectNames: [],
+                            projectAmount: 0
+                        });
+                    }
+                    return departments.get(key)!;
+                };
+
+                const presales = opportunities.map((opp: any) => {
+                    const department = opp.salesDepartment || "未指定";
+                    const row = ensureDepartment(department);
+                    row.presalesNames.push(opp.title || "");
+                    row.presalesAmount += Number(opp.estimatedValue || 0);
+                    return {
+                        "業務部門代碼": department,
+                        "業務代表": opp.salesRep || "",
+                        "商機名稱": opp.title || "",
+                        "客戶名稱": opp.customerName || "",
+                        "狀態": opp.status || "",
+                        "預計結案日": toDateText(opp.expectedCloseDate),
+                        "協銷金額": Number(opp.estimatedValue || 0),
+                        "商機建立人": opp.ownerId?.name || "",
+                        "建立日期": toDateText(opp.createdAt)
+                    };
+                });
+
+                const projects = srs.map((sr: any) => {
+                    const department = sr.salesDepartment || "未指定";
+                    const finalPrice = sr.finalPrice == null ? null : Number(sr.finalPrice || 0);
+                    const contractAmount = Number(sr.contractAmount || 0);
+                    const statisticAmount = finalPrice ?? contractAmount;
+                    const row = ensureDepartment(department);
+                    row.projectNames.push(sr.title || "");
+                    row.projectAmount += statisticAmount;
+                    return {
+                        "業務部門代碼": department,
+                        "業務代表": sr.salesRep || "",
+                        "活動類型": sr.srType === "other_activity" ? "其他活動" : sr.srType === "maintenance" ? "維運" : "專案",
+                        "專案/活動名稱": sr.title || "",
+                        "客戶名稱": sr.customerName || "",
+                        "狀態": sr.status || "",
+                        "合約金額": contractAmount,
+                        "最終價格": finalPrice ?? "",
+                        "統計金額": statisticAmount,
+                        "PM": sr.pmId?.name || "",
+                        "預計開始": toDateText(sr.plannedStartDate),
+                        "預計結束": toDateText(sr.plannedEndDate),
+                        "建立日期": toDateText(sr.createdAt)
+                    };
+                });
+
+                const summary = Array.from(departments.values())
+                    .map((item) => ({
+                        "業務部門代碼": item.department,
+                        "協銷數量": item.presalesNames.length,
+                        "協銷名稱": joinUnique(item.presalesNames),
+                        "協銷金額": item.presalesAmount,
+                        "專案/其他活動數量": item.projectNames.length,
+                        "專案/其他活動名稱": joinUnique(item.projectNames),
+                        "專案/其他活動金額": item.projectAmount,
+                        "合計金額": item.presalesAmount + item.projectAmount
+                    }))
+                    .sort((left, right) => String(left["業務部門代碼"]).localeCompare(String(right["業務部門代碼"]), "zh-Hant"));
+
+                return { summary, presales, projects };
             } else if (input.reportType === "project_profitability") {
                 // Client/Project Profitability with Overhead
                 const settingsRecords = await SystemSettingModel.find({ key: { $in: ["pcOverheadRate", "pcTargetMargin"] } }).lean();
@@ -1621,7 +1742,7 @@ export const analyticsRouter = router({
 
                 const srs = await ServiceRequestModel.find(srMatch).populate("pmId", "name department").populate("opportunityId", "title customerName").lean();
                 const costAgg = await TimesheetModel.aggregate([
-                    { $match: { type: "project", workDate: { $gte: start, $lte: end } } },
+                    { $match: { type: "project", isBillable: { $ne: false }, workDate: { $gte: start, $lte: end } } },
                     { $group: { _id: "$srId", totalCost: { $sum: "$costAmount" } } }
                 ]);
                 const costMap = new Map(costAgg.map(i => [i._id?.toString(), i.totalCost]));
@@ -1660,7 +1781,7 @@ export const analyticsRouter = router({
                         { $group: { _id: "$pmId", totalRevenue: { $sum: "$contractAmount" }, count: { $sum: 1 } } }
                     ]),
                     TimesheetModel.aggregate([
-                        { $match: { type: "project", workDate: { $gte: start, $lte: end } } },
+                        { $match: { type: "project", isBillable: { $ne: false }, workDate: { $gte: start, $lte: end } } },
                         { $group: { _id: "$techId", totalCost: { $sum: "$costAmount" } } }
                     ])
                 ]);
@@ -1689,7 +1810,7 @@ export const analyticsRouter = router({
                 await applyScopedUserFilter(ctx.user, srMatch, "pmId", input.department, input.userId);
                 const srs = await ServiceRequestModel.find(srMatch).populate("pmId", "name").lean();
                 const costAgg = await TimesheetModel.aggregate([
-                    { $match: { type: "project", workDate: { $gte: start, $lte: end } } },
+                    { $match: { type: "project", isBillable: { $ne: false }, workDate: { $gte: start, $lte: end } } },
                     { $group: { _id: "$srId", totalCost: { $sum: "$costAmount" }, totalHours: { $sum: "$hours" } } }
                 ]);
                 const costMap = new Map(costAgg.map(i => [i._id?.toString(), { cost: i.totalCost, hours: i.totalHours }]));

@@ -1,5 +1,5 @@
 import mongoose, { Schema, Document } from "mongoose";
-import { changeRequestStatuses, memberRoles, srStatuses, srTypes, wbsItemStatuses, wbsVersionStatuses, type ChangeRequestInput, type ChangeRequestStatus, type CustomFieldValue, type DepartmentApproval, type MemberRole, type ServiceRequestAttachment, type SrStatus, type SrType, type WbsItemInput, type WbsVersionInput, type WbsVersionStatus } from "../../shared/types";
+import { attachmentCategories, changeRequestStatuses, memberRoles, srStatuses, srTypes, wbsItemStatuses, wbsVersionStatuses, type ChangeRequestInput, type ChangeRequestStatus, type CustomFieldValue, type DepartmentApproval, type MemberRole, type ServiceRequestAttachment, type SrStatus, type SrType, type WbsItemInput, type WbsVersionInput, type WbsVersionStatus } from "../../shared/types";
 
 export interface IWbsItem extends Omit<WbsItemInput, "assigneeId"> {
     id: mongoose.Types.ObjectId;
@@ -68,6 +68,9 @@ export interface IServiceRequest extends Document {
     title: string;
     customerName?: string;
     contractAmount: number;
+    finalPrice?: number;
+    finalPriceUpdatedAt?: Date;
+    finalPriceUpdatedById?: mongoose.Types.ObjectId;
     recognizedRevenueAmount?: number;
     recognitionMonth?: string;
     srType: SrType;
@@ -198,6 +201,9 @@ const ServiceRequestSchema = new Schema<IServiceRequest>({
     title: { type: String, required: true },
     customerName: { type: String },
     contractAmount: { type: Number, required: true, default: 0 },
+    finalPrice: { type: Number },
+    finalPriceUpdatedAt: { type: Date },
+    finalPriceUpdatedById: { type: Schema.Types.ObjectId, ref: "User" },
     recognizedRevenueAmount: { type: Number },
     recognitionMonth: { type: String },
     srType: { type: String, enum: srTypes, default: "project", required: true },
@@ -237,6 +243,7 @@ const ServiceRequestSchema = new Schema<IServiceRequest>({
         fileUrl: { type: String, required: true },
         fileSize: { type: Number, required: true },
         mimeType: { type: String, required: true },
+        category: { type: String, enum: attachmentCategories, default: "general" },
         sharePointDriveId: { type: String },
         sharePointItemId: { type: String },
         uploadedById: { type: Schema.Types.ObjectId, ref: "User", required: true },

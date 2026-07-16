@@ -27,7 +27,7 @@ export type SkillLevel = typeof skillLevels[number];
 export const memberRoles = ["owner", "assignee", "watcher"] as const;
 export type MemberRole = typeof memberRoles[number];
 
-export const timesheetTypes = ["presales", "project"] as const;
+export const timesheetTypes = ["presales", "project", "other_activity"] as const;
 export type TimesheetType = typeof timesheetTypes[number];
 
 export const settlementTypes = ["project", "presales"] as const;
@@ -88,8 +88,11 @@ export const srStatuses = [
 
 export type SrStatus = typeof srStatuses[number];
 
-export const srTypes = ["project", "maintenance"] as const;
+export const srTypes = ["project", "maintenance", "other_activity"] as const;
 export type SrType = typeof srTypes[number];
+
+export const attachmentCategories = ["general", "business_approval_email", "service_content_email"] as const;
+export type AttachmentCategory = typeof attachmentCategories[number];
 
 export const wbsVersionStatuses = [
     "draft",
@@ -168,6 +171,7 @@ export interface ServiceRequestAttachment {
     fileUrl: string;
     fileSize: number;
     mimeType: string;
+    category?: AttachmentCategory;
     sharePointDriveId?: string;
     sharePointItemId?: string;
     uploadedById: string;

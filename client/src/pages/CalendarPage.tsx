@@ -3,10 +3,13 @@ import { trpc } from "../lib/trpc";
 import { format, startOfWeek, addDays, startOfMonth, isSameMonth, isSameDay } from "date-fns";
 import { ChevronLeft, ChevronRight, Calendar as CalendarIcon, Clock, X, AlertCircle, Plus, Search, Users } from "lucide-react";
 import toast from "react-hot-toast";
+import { useCurrentUser } from "../lib/useCurrentUser";
 
 export function CalendarPage() {
     const utils = trpc.useContext();
+    const { hasRole } = useCurrentUser();
     const [currentDate, setCurrentDate] = useState(new Date());
+    const [calendarScope, setCalendarScope] = useState<"mine" | "managed" | "all">("mine");
     
     // Edit state
     const [editingEvent, setEditingEvent] = useState<any>(null);
@@ -24,7 +27,7 @@ export function CalendarPage() {
     const [dayStatusFilter, setDayStatusFilter] = useState("");
 
     // Fetch WBS items assigned to current user
-    const { data: assignments, isLoading } = trpc.projects.getMyProjectAssignments.useQuery();
+    const { data: assignments, isLoading } = trpc.projects.getMyProjectAssignments.useQuery({ scope: calendarScope });
 
     const createCalendarTaskMutation = trpc.projects.createCalendarTask.useMutation({
         onSuccess: () => {
@@ -271,7 +274,8 @@ export function CalendarPage() {
                                     <div className="text-[10px] text-muted-foreground truncate mt-1">{event.assigneeName || "未指派"}</div>
                                     <div className="text-[10px] text-muted-foreground mt-1 flex items-center gap-1.5">
                                         <Clock className="w-3 h-3" />
-                                        <span>{event.estimatedHours} 天</span>
+                            <span>{event.estimatedHours} 天</span>
+                            {event.isBillable === false && <span className="text-[10px] text-amber-600">非計費</span>}
                                     </div>
                                 </div>
                             ))}
@@ -320,6 +324,18 @@ export function CalendarPage() {
                 <div className="flex gap-2 flex-1">
                     <input value={newTaskTitle} onChange={(e) => setNewTaskTitle(e.target.value)} placeholder="自行新增排程任務" className="flex-1 text-sm rounded-lg border border-border bg-background px-3 py-2" />
                     <button onClick={() => newTaskTitle.trim() && createCalendarTaskMutation.mutate({ title: newTaskTitle.trim() })} className="px-3 py-2 bg-primary text-primary-foreground rounded-lg text-sm font-semibold inline-flex items-center gap-1"><Plus className="w-4 h-4" />新增</button>
+                </div>
+                <div>
+                    <label className="block text-xs font-semibold text-muted-foreground mb-1">檢視範圍</label>
+                    <div className="flex rounded-lg border border-border bg-muted/30 p-1 text-xs">
+                        <button type="button" onClick={() => setCalendarScope("mine")} className={`px-3 py-1.5 rounded-md font-semibold ${calendarScope === "mine" ? "bg-background shadow-sm" : "text-muted-foreground"}`}>我的</button>
+                        {(hasRole("manager") || hasRole("admin")) && (
+                            <button type="button" onClick={() => setCalendarScope("managed")} className={`px-3 py-1.5 rounded-md font-semibold ${calendarScope === "managed" ? "bg-background shadow-sm" : "text-muted-foreground"}`}>管理部門</button>
+                        )}
+                        {hasRole("admin") && (
+                            <button type="button" onClick={() => setCalendarScope("all")} className={`px-3 py-1.5 rounded-md font-semibold ${calendarScope === "all" ? "bg-background shadow-sm" : "text-muted-foreground"}`}>全部</button>
+                        )}
+                    </div>
                 </div>
             </div>
 
@@ -561,6 +577,7 @@ export function CalendarPage() {
                                                                         <span className="border border-border rounded px-1.5 py-0.5">{new Date(task.startDate).toISOString().slice(0, 10)} ~ {new Date(task.endDate).toISOString().slice(0, 10)}</span>
                                                                         <span className="border border-border rounded px-1.5 py-0.5">本次 {task.estimatedHours} 天</span>
                                                                         <span className="border border-border rounded px-1.5 py-0.5">已填 {task.actualHours || 0}h</span>
+                                                                        {task.isBillable === false && <span className="border border-amber-200 bg-amber-50 text-amber-700 rounded px-1.5 py-0.5">觀察者 / 非計費</span>}
                                                                     </div>
                                                                 </div>
                                                                 <div className="flex items-center gap-2 shrink-0">

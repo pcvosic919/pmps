@@ -10,7 +10,7 @@ import { OpportunityModel } from "../models/Opportunity";
 import { CalendarTaskModel } from "../models/CalendarTask";
 import mongoose from "mongoose";
 import { TRPCError } from "@trpc/server";
-import { approvalActions, srStatuses } from "../../shared/types";
+import { approvalActions, attachmentCategories, srStatuses, srTypes } from "../../shared/types";
 import {
     assertAuthorized,
     assertFound,
@@ -125,6 +125,72 @@ const getCompletionPercentageForStatus = (status: "not_started" | "in_progress" 
     if (status === "completed") return 100;
     if (status === "not_started") return 0;
     return current > 0 && current < 100 ? current : 50;
+};
+
+const idString = (value: any) => value?._id?.toString?.() || value?.toString?.() || "";
+
+const isWatcherMember = (sr: any, userId: string) =>
+    (sr.members || []).some((member: any) =>
+        member.memberRole === "watcher" && idString(member.userId) === userId
+    );
+
+const buildSrActivityAssignment = (sr: any, assignee: any, options?: { isPmView?: boolean; isBacklog?: boolean }) => {
+    const projectWindow = getProjectScheduleWindow(sr);
+    const isWatcher = isWatcherMember(sr, assignee?._id?.toString?.() || assignee?.toString?.() || "");
+    return {
+        id: sr._id.toString(),
+        srId: sr._id.toString(),
+        wbsItemId: undefined,
+        title: sr.externalServiceType || sr.title,
+        totalEstimatedHours: 0,
+        scheduledDays: 0,
+        remainingDays: 0,
+        estimatedHours: 1,
+        actualHours: 0,
+        status: sr.status === "completed" ? "completed" : sr.status === "in_progress" ? "in_progress" : "not_started",
+        description: sr.billingAllocation || "",
+        code: sr.externalProjectCode || "",
+        srTitle: sr.title,
+        srType: sr.srType,
+        assigneeId: assignee?._id?.toString?.() || assignee?.toString?.() || "",
+        assigneeName: assignee?.name || assignee?.email || "未指派",
+        assigneeEmail: assignee?.email || "",
+        assigneeDepartment: assignee?.department || "",
+        memberRole: isWatcher ? "watcher" : "assignee",
+        isBillable: !isWatcher,
+        isPmView: !!options?.isPmView,
+        sourceType: "other_activity",
+        projectWindowStart: projectWindow?.start,
+        projectWindowEnd: projectWindow?.end,
+        startDate: sr.plannedStartDate,
+        endDate: sr.plannedEndDate,
+        isBacklog: options?.isBacklog ?? !(sr.plannedStartDate && sr.plannedEndDate)
+    };
+};
+
+const getCalendarScopeUserIds = async (user: any, scope: "mine" | "managed" | "all") => {
+    if (scope === "all") {
+        assertAuthorized(hasAnyRole(user, ["admin"]), "只有管理員可以查看全部組織行事曆");
+        const users = await UserModel.find({ isActive: { $ne: false } }, { _id: 1 }).lean();
+        return users.map((item: any) => item._id);
+    }
+
+    if (scope === "managed") {
+        assertAuthorized(hasAnyRole(user, ["admin", "manager"]), "只有主管可以查看管理部門行事曆");
+        const departments = getManagedDepartments(user);
+        if (departments === null) {
+            const users = await UserModel.find({ isActive: { $ne: false } }, { _id: 1 }).lean();
+            return users.map((item: any) => item._id);
+        }
+        if (departments.length === 0) return [];
+        const users = await UserModel.find(
+            { department: { $in: departments }, isActive: { $ne: false } },
+            { _id: 1 }
+        ).lean();
+        return users.map((item: any) => item._id);
+    }
+
+    return [toObjectId(user.id)];
 };
 
 const buildServiceRequestSearchQuery = (search?: string) => {
@@ -307,6 +373,7 @@ export const projectsRouter = router({
                 title: 1,
                 customerName: 1,
                 contractAmount: 1,
+                finalPrice: 1,
                 recognizedRevenueAmount: 1,
                 recognitionMonth: 1,
                 srType: 1,
@@ -365,7 +432,7 @@ export const projectsRouter = router({
             title: z.string(),
             customerName: z.string().optional(),
             contractAmount: z.number(),
-            srType: z.enum(["project", "maintenance"]).default("project"),
+            srType: z.enum(srTypes).default("project"),
             totalPoints: z.number().optional(),
             pointValue: z.number().optional(),
             pmId: z.string(),
@@ -652,6 +719,7 @@ export const projectsRouter = router({
             fileName: z.string(),
             fileSize: z.number(),
             mimeType: z.string(),
+            category: z.enum(attachmentCategories).default("general"),
             fileUrl: z.string().optional(),
             fileDataBase64: z.string().optional()
         }))
@@ -691,6 +759,7 @@ export const projectsRouter = router({
                             fileName: localAttachment?.fileName || input.fileName,
                             fileSize: input.fileSize,
                             mimeType: input.mimeType,
+                            category: input.category,
                             fileUrl: localAttachment?.fileUrl || spResult?.fileUrl || input.fileUrl || "",
                             sharePointDriveId: spResult?.driveId,
                             sharePointItemId: spResult?.itemId,
@@ -781,6 +850,38 @@ export const projectsRouter = router({
             await ServiceRequestModel.updateOne(
                 { _id: input.id },
                 { $set: salesUserFields }
+            );
+            return { success: true };
+        }),
+
+    updateFinalPrice: protectedProcedure
+        .input(z.object({
+            id: z.string(),
+            finalPrice: z.number().min(0)
+        }))
+        .mutation(async ({ input, ctx }) => {
+            const sr = assertFound(
+                await ServiceRequestModel.findById(input.id)
+                    .select("pmId members wbsVersions.items.assigneeId changeRequests opportunityId")
+                    .lean(),
+                "找不到該服務請求"
+            );
+            const opportunity = sr.opportunityId
+                ? await OpportunityModel.findById(sr.opportunityId)
+                    .select("ownerId members presalesAssignments")
+                    .lean()
+                : null;
+            assertAuthorized(canManageServiceRequestStatus(ctx.user, sr, opportunity), "您沒有權限更新最終價格");
+
+            await ServiceRequestModel.updateOne(
+                { _id: input.id },
+                {
+                    $set: {
+                        finalPrice: input.finalPrice,
+                        finalPriceUpdatedAt: new Date(),
+                        finalPriceUpdatedById: toObjectId(ctx.user.id)
+                    }
+                }
             );
             return { success: true };
         }),
@@ -1017,28 +1118,54 @@ export const projectsRouter = router({
         }),
 
     getMyProjectAssignments: protectedProcedure
-        .query(async ({ ctx }) => {
-            const userId = new mongoose.Types.ObjectId(ctx.user.id);
+        .input(z.object({
+            scope: z.enum(["mine", "managed", "all"]).default("mine")
+        }).optional())
+        .query(async ({ ctx, input }) => {
+            const scope = input?.scope || "mine";
+            const scopedUserIds = await getCalendarScopeUserIds(ctx.user, scope);
+            const scopedUserIdStrings = new Set(scopedUserIds.map((id: any) => id.toString()));
+            if (scopedUserIds.length === 0) return [];
+
             const srs = await ServiceRequestModel.find({
                 $or: [
-                    { "wbsVersions.items.assigneeId": userId },
-                    { pmId: userId }
+                    { "wbsVersions.items.assigneeId": { $in: scopedUserIds } },
+                    { pmId: { $in: scopedUserIds } },
+                    { createdById: { $in: scopedUserIds } },
+                    { "members.userId": { $in: scopedUserIds } }
                 ]
             })
-                .select("title pmId wbsVersions createdAt updatedAt plannedStartDate plannedEndDate closeDate completedAt")
+                .select("title srType externalServiceType externalProjectCode billingAllocation pmId createdById members wbsVersions createdAt updatedAt plannedStartDate plannedEndDate closeDate completedAt status")
+                .populate("pmId", "name email department")
+                .populate("createdById", "name email department")
+                .populate("members.userId", "name email department")
                 .populate("wbsVersions.items.assigneeId", "name email department")
                 .lean();
 
             const srIds = srs.map((sr: any) => sr._id);
-            const [manualTasks, wbsCalendarTasks] = await Promise.all([
-                CalendarTaskModel.find({ assigneeId: userId, sourceType: "manual" }).lean(),
+            const [manualTasks, wbsCalendarTasks, presalesOpps] = await Promise.all([
+                CalendarTaskModel.find({ assigneeId: { $in: scopedUserIds }, sourceType: "manual" })
+                    .populate("assigneeId", "name email department")
+                    .lean(),
                 CalendarTaskModel.find({
                     sourceType: "wbs",
                     $or: [
-                        { assigneeId: userId },
+                        { assigneeId: { $in: scopedUserIds } },
                         { srId: { $in: srIds } }
                     ]
-                }).lean()
+                }).lean(),
+                OpportunityModel.find({
+                    $or: [
+                        { "presalesAssignments.techId": { $in: scopedUserIds } },
+                        { ownerId: { $in: scopedUserIds } },
+                        { "members.userId": { $in: scopedUserIds } }
+                    ]
+                })
+                    .select("title customerName status opportunityType expectedCloseDate ownerId members presalesAssignments salesDepartment salesRep")
+                    .populate("ownerId", "name email department")
+                    .populate("members.userId", "name email department")
+                    .populate("presalesAssignments.techId", "name email department")
+                    .lean()
             ]);
 
             const wbsTaskMap = new Map<string, any[]>();
@@ -1054,12 +1181,16 @@ export const projectsRouter = router({
                     return [];
                 }
 
-                const isPm = sr.pmId?.toString() === ctx.user.id;
+                const pmId = idString(sr.pmId);
+                const isPm = scopedUserIdStrings.has(pmId);
+                const srWatcherIds = new Set((sr.members || [])
+                    .filter((member: any) => member.memberRole === "watcher")
+                    .map((member: any) => idString(member.userId)));
 
                 return (effectiveVersion.items || [])
-                    .filter((item: any) => isPm || item.assigneeId?._id?.toString() === ctx.user.id || item.assigneeId?.toString() === ctx.user.id)
+                    .filter((item: any) => isPm || scopedUserIdStrings.has(idString(item.assigneeId)))
                     .flatMap((item: any) => {
-                        const assigneeId = item.assigneeId?._id?.toString() || item.assigneeId?.toString();
+                        const assigneeId = idString(item.assigneeId);
                         const key = `${sr._id.toString()}:${item._id.toString()}`;
                         const scheduledTasks = wbsTaskMap.get(key) || [];
                         const scheduledDays = scheduledTasks.reduce((sum, task) => sum + getScheduledDayCount(task.startDate, task.endDate), 0);
@@ -1082,6 +1213,8 @@ export const projectsRouter = router({
 	                            assigneeName: item.assigneeId?.name || "未指派",
 	                            assigneeEmail: item.assigneeId?.email || "",
 	                            assigneeDepartment: item.assigneeId?.department || "",
+                                memberRole: srWatcherIds.has(assigneeId) ? "watcher" : "assignee",
+                                isBillable: !srWatcherIds.has(assigneeId),
 	                            isPmView: isPm && assigneeId !== ctx.user.id,
 	                            sourceType: "wbs",
 	                            projectWindowStart: projectWindow?.start,
@@ -1122,16 +1255,64 @@ export const projectsRouter = router({
                 actualHours: 0,
                 startDate: task.startDate,
                 endDate: task.endDate,
-	                srTitle: "自行新增",
-	                assigneeId: task.assigneeId?.toString(),
-	                assigneeName: ctx.user.name || "我",
-	                assigneeEmail: ctx.user.email || "",
-	                assigneeDepartment: ctx.user.department || "",
-	                isPmView: false,
-	                sourceType: "manual"
-	            }));
+		                srTitle: "自行新增",
+		                assigneeId: idString(task.assigneeId),
+		                assigneeName: task.assigneeId?.name || ctx.user.name || "我",
+		                assigneeEmail: task.assigneeId?.email || ctx.user.email || "",
+		                assigneeDepartment: task.assigneeId?.department || ctx.user.department || "",
+                        memberRole: "assignee",
+                        isBillable: true,
+		                isPmView: false,
+		                sourceType: "manual"
+		            }));
 
-            return [...wbsAssignments, ...manualAssignments];
+            const otherActivityAssignments = srs
+                .filter((sr: any) =>
+                    sr.srType === "other_activity" ||
+                    (sr.members || []).some((member: any) => member.memberRole === "watcher" && scopedUserIdStrings.has(idString(member.userId)))
+                )
+                .flatMap((sr: any) => {
+                    const participants = new Map<string, any>();
+                    for (const member of sr.members || []) {
+                        const memberId = idString(member.userId);
+                        if (memberId && scopedUserIdStrings.has(memberId)) participants.set(memberId, member.userId);
+                    }
+                    const pmId = idString(sr.pmId);
+                    if (pmId && scopedUserIdStrings.has(pmId)) participants.set(pmId, sr.pmId);
+                    const createdById = idString(sr.createdById);
+                    if (createdById && scopedUserIdStrings.has(createdById)) participants.set(createdById, sr.createdById);
+                    return Array.from(participants.values()).map((participant: any) =>
+                        buildSrActivityAssignment(sr, participant, { isPmView: idString(participant) !== ctx.user.id })
+                    );
+                });
+
+            const presalesAssignments = presalesOpps.flatMap((opp: any) =>
+                (opp.presalesAssignments || [])
+                    .filter((assignment: any) => scopedUserIdStrings.has(idString(assignment.techId)))
+                    .map((assignment: any) => ({
+                        id: `${opp._id.toString()}:${idString(assignment.techId)}`,
+                        opportunityId: opp._id.toString(),
+                        title: opp.title,
+                        estimatedHours: Number(assignment.estimatedHours || 0),
+                        totalEstimatedHours: Number(assignment.estimatedHours || 0),
+                        actualHours: 0,
+                        startDate: assignment.createdAt || opp.createdAt,
+                        endDate: opp.expectedCloseDate || assignment.createdAt || opp.updatedAt,
+                        srTitle: `協銷 / ${opp.customerName || "未填客戶"}`,
+                        assigneeId: idString(assignment.techId),
+                        assigneeName: assignment.techId?.name || "未指派",
+                        assigneeEmail: assignment.techId?.email || "",
+                        assigneeDepartment: assignment.techId?.department || "",
+                        memberRole: "assignee",
+                        isBillable: true,
+                        isPmView: idString(assignment.techId) !== ctx.user.id,
+                        sourceType: "presales",
+                        status: opp.status === "converted" || opp.status === "won" ? "completed" : "in_progress",
+                        isBacklog: false
+                    }))
+            );
+
+            return [...wbsAssignments, ...otherActivityAssignments, ...presalesAssignments, ...manualAssignments];
         }),
 
     updateWbsItemSchedule: protectedProcedure
@@ -1314,7 +1495,7 @@ export const projectsRouter = router({
 
     getMyProjectTimesheets: protectedProcedure
         .query(async ({ ctx }) => {
-            const items = await TimesheetModel.find({ techId: ctx.user.id, type: "project" })
+            const items = await TimesheetModel.find({ techId: ctx.user.id, type: { $in: ["project", "other_activity"] } })
                 .populate("srId")
                 .sort({ workDate: -1 })
                 .lean();
@@ -1337,10 +1518,12 @@ export const projectsRouter = router({
                     id: t._id.toString(),
                     srId: t.srId?._id.toString(),
                     wbsItemId: t.wbsItemId?.toString(),
+                    type: t.type,
                     workDate: t.workDate,
                     hours: t.hours,
                     description: t.description,
                     costAmount: t.costAmount,
+                    isBillable: t.isBillable !== false,
                     wbsItemTitle: wbsItemTitle,
                     srTitle: t.srId?.title || "未知專案"
                 };
@@ -1350,7 +1533,7 @@ export const projectsRouter = router({
     logProjectTime: roleProcedure(["admin", "tech", "presales", "pm"])
         .input(z.object({
             srId: z.string(), // Added for query aggregation efficiency
-            wbsItemId: z.string(),
+            wbsItemId: z.string().optional(),
             workDate: z.coerce.date(),
             hours: z.number(),
             description: z.string(),
@@ -1368,7 +1551,7 @@ export const projectsRouter = router({
             );
             const srAccessView = assertFound(
                 await ServiceRequestModel.findById(input.srId)
-                    .select("pmId members wbsVersions.items.assigneeId changeRequests opportunityId")
+                    .select("pmId members srType wbsVersions.items.assigneeId changeRequests opportunityId")
                     .lean(),
                 "找不到該服務請求"
             );
@@ -1379,24 +1562,32 @@ export const projectsRouter = router({
                 : null;
             assertAuthorized(canAccessServiceRequest(ctx.user, srAccessView, opportunity), "您沒有權限填寫此專案工時");
 
-            const effectiveVersion = getEffectiveWbsVersion(sr);
-            const wbsItem = effectiveVersion?.items?.id(input.wbsItemId);
-            if (!effectiveVersion || !wbsItem) {
-                throw new TRPCError({ code: "BAD_REQUEST", message: "找不到可填報的 WBS 項目" });
-            }
-            if (wbsItem.assigneeId?.toString() !== ctx.user.id && !hasAnyRole(ctx.user, ["admin", "manager"])) {
-                throw new TRPCError({ code: "FORBIDDEN", message: "您只能填寫指派給自己的 WBS 項目" });
+            const isObserver = isWatcherMember(srAccessView, ctx.user.id);
+            let wbsItem: any = null;
+            let effectiveVersion: any = null;
+            if (input.wbsItemId) {
+                effectiveVersion = getEffectiveWbsVersion(sr);
+                wbsItem = effectiveVersion?.items?.id(input.wbsItemId);
+                if (!effectiveVersion || !wbsItem) {
+                    throw new TRPCError({ code: "BAD_REQUEST", message: "找不到可填報的 WBS 項目" });
+                }
+                if (wbsItem.assigneeId?.toString() !== ctx.user.id && !isObserver && !hasAnyRole(ctx.user, ["admin", "manager"])) {
+                    throw new TRPCError({ code: "FORBIDDEN", message: "您只能填寫指派給自己的 WBS 項目" });
+                }
+            } else if (sr.srType !== "other_activity" && !isObserver) {
+                throw new TRPCError({ code: "BAD_REQUEST", message: "此類型工時需選擇 WBS 項目" });
             }
 
             const user = await UserModel.findById(ctx.user.id).select("costRate").lean();
             const hourlyRate = user?.costRate?.hourlyRate || 500;
+            const isBillable = !isObserver;
 
-            const costAmount = input.hours * hourlyRate;
+            const costAmount = isBillable ? input.hours * hourlyRate : 0;
 
             await TimesheetModel.create({
-                type: "project",
+                type: sr.srType === "other_activity" ? "other_activity" : "project",
                 srId: toObjectId(input.srId),
-                wbsItemId: toObjectId(input.wbsItemId),
+                wbsItemId: input.wbsItemId ? toObjectId(input.wbsItemId) : undefined,
                 techId: toObjectId(ctx.user.id),
                 workDate: input.workDate,
                 hours: input.hours,
@@ -1404,17 +1595,20 @@ export const projectsRouter = router({
                 workType: input.workType,
                 costCategory: input.costCategory,
                 externalAssignmentKey: input.externalAssignmentKey,
-                costAmount: costAmount
+                costAmount,
+                isBillable
             });
 
-            wbsItem.actualHours = (wbsItem.actualHours || 0) + input.hours;
-            const nextStatus = input.taskStatus || (wbsItem.status === "completed" ? "completed" : "in_progress");
-            wbsItem.status = nextStatus;
-            wbsItem.completionPercentage = getCompletionPercentageForStatus(nextStatus, wbsItem.completionPercentage || 0);
+            if (wbsItem && isBillable) {
+                wbsItem.actualHours = (wbsItem.actualHours || 0) + input.hours;
+                const nextStatus = input.taskStatus || (wbsItem.status === "completed" ? "completed" : "in_progress");
+                wbsItem.status = nextStatus;
+                wbsItem.completionPercentage = getCompletionPercentageForStatus(nextStatus, wbsItem.completionPercentage || 0);
+                sr.markModified("wbsVersions");
+            }
             if (!["in_progress", "completed", "cancelled"].includes(sr.status)) {
                 sr.status = "in_progress";
             }
-            sr.markModified("wbsVersions");
             await sr.save();
             return { success: true };
         }),
