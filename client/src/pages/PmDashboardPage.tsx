@@ -21,6 +21,7 @@ import { useCurrentUser } from "../lib/useCurrentUser";
 export function PmDashboardPage() {
     const { hasRole } = useCurrentUser();
     const { data: projects, isLoading } = trpc.projects.srList.useQuery({ limit: 50 });
+    const getProjectAmount = (project: any) => Number(project.finalPrice ?? project.contractAmount ?? 0);
 
     const activeProjects = useMemo(() => 
         (projects || []).filter(p => !["completed", "cancelled"].includes(p.status)),
@@ -30,7 +31,7 @@ export function PmDashboardPage() {
         if (!activeProjects.length) return { totalAmount: 0, atRisk: 0, new: 0, active: 0 };
         
         return activeProjects.reduce((acc, p) => ({
-            totalAmount: acc.totalAmount + (p.contractAmount || 0),
+            totalAmount: acc.totalAmount + getProjectAmount(p),
             atRisk: acc.atRisk + (p.marginWarning ? 1 : 0),
             new: acc.new + (p.status === "new" ? 1 : 0),
             active: acc.active + (p.status === "in_progress" ? 1 : 0)
@@ -42,7 +43,7 @@ export function PmDashboardPage() {
             .map(p => ({
                 name: p.title.length > 10 ? p.title.substring(0, 10) + '...' : p.title,
                 fullTitle: p.title,
-                amount: p.contractAmount || 0,
+                amount: getProjectAmount(p),
                 margin: p.marginEstimate || 0,
                 warning: p.marginWarning
             }))
@@ -156,12 +157,12 @@ export function PmDashboardPage() {
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
                 <div className="lg:col-span-2 bg-card/70 backdrop-blur-md border border-primary/10 rounded-2xl shadow-[0_4px_24px_rgba(0,0,0,0.02)] p-6 hover:shadow-[0_8px_30px_rgba(var(--primary),0.05)] transition-shadow">
                     <h3 className="text-lg font-bold mb-6 flex items-center tracking-wide">
-                        <Activity className="w-5 h-5 mr-2 text-primary drop-shadow-[0_0_5px_rgba(var(--primary),0.5)]" /> Top 10 活躍專案 (按合約額)
+                        <Activity className="w-5 h-5 mr-2 text-primary drop-shadow-[0_0_5px_rgba(var(--primary),0.5)]" /> Top 10 活躍專案 (按最終成交金額)
                     </h3>
                     <div className="h-[300px] w-full">
                         {hasRole("tech") ? (
                             <div className="h-full flex items-center justify-center text-muted-foreground italic bg-muted/20 rounded-xl border border-dashed">
-                                合約金額資訊僅限特定角色查閱
+                                成交金額資訊僅限特定角色查閱
                             </div>
                         ) : (
                             <ResponsiveContainer width="100%" height="100%">
@@ -170,7 +171,7 @@ export function PmDashboardPage() {
                                     <XAxis dataKey="name" tick={{ fontSize: 12 }} stroke="hsl(var(--muted-foreground))" />
                                     <YAxis tick={{ fontSize: 12 }} stroke="hsl(var(--muted-foreground))" tickFormatter={(val) => `NT$${val/1000}k`} />
                                     <Tooltip 
-                                        formatter={(value: any) => [`NT$ ${Number(value).toLocaleString()}`, "合約金額"]}
+                                        formatter={(value: any) => [`NT$ ${Number(value).toLocaleString()}`, "最終成交金額"]}
                                         labelFormatter={(label, payload) => payload?.[0]?.payload?.fullTitle || label}
                                         cursor={{fill: 'hsl(var(--primary)/0.05)'}}
                                         contentStyle={{ borderRadius: '12px', border: '1px solid hsl(var(--primary)/0.2)', backgroundColor: 'hsl(var(--card)/0.9)', backdropFilter: 'blur(8px)', boxShadow: '0 10px 25px -5px rgba(0, 0, 0, 0.1), 0 8px 10px -6px rgba(0, 0, 0, 0.1)' }}
@@ -216,7 +217,7 @@ export function PmDashboardPage() {
                                         <span className="bg-primary/10 text-primary border border-primary/20 shadow-inner px-2.5 py-1 rounded-md capitalize font-semibold tracking-wide">
                                             {p.status.replace("_", " ")}
                                         </span>
-                                        {!hasRole("tech") && <span className="font-mono font-medium text-muted-foreground group-hover:text-foreground transition-colors">NT$ {p.contractAmount?.toLocaleString()}</span>}
+                                        {!hasRole("tech") && <span className="font-mono font-medium text-muted-foreground group-hover:text-foreground transition-colors">NT$ {getProjectAmount(p).toLocaleString()}</span>}
                                     </div>
                                 </a>
                             </Link>

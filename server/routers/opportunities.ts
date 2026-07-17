@@ -547,6 +547,7 @@ export const opportunitiesRouter = router({
                 salesRep: salesUserFields?.salesRep || input.salesRep || opportunity.salesRep || "",
                 externalServiceType: "協銷轉專案",
                 contractAmount: input.contractAmount,
+                finalPrice: input.contractAmount,
                 opportunityId: input.opportunityId,
                 pmId: input.pmId ? toObjectId(input.pmId) : undefined,
                 createdById: toObjectId(ctx.user.id),

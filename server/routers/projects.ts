@@ -498,6 +498,7 @@ export const projectsRouter = router({
                 salesRep: salesUserFields?.salesRep || input.salesRep || oppSalesRep,
                 externalServiceType: input.externalServiceType || input.srType,
                 contractAmount: input.contractAmount,
+                finalPrice: input.contractAmount,
                 recognitionMonth: input.recognitionMonth || undefined,
                 srType: input.srType,
                 totalPoints: input.totalPoints,
@@ -995,7 +996,7 @@ export const projectsRouter = router({
                     .select("ownerId members presalesAssignments")
                     .lean()
                 : null;
-            assertAuthorized(canManageServiceRequestStatus(ctx.user, sr, opportunity), "您沒有權限更新最終價格");
+            assertAuthorized(canManageServiceRequestStatus(ctx.user, sr, opportunity), "您沒有權限更新最終成交金額");
 
             await ServiceRequestModel.updateOne(
                 { _id: input.id },
@@ -1216,7 +1217,12 @@ export const projectsRouter = router({
                             }
                         }
                     }
-                    sr.contractAmount += cr.amountAdjustment;
+                    const previousContractAmount = Number(sr.contractAmount || 0);
+                    const shouldSyncFinalPrice = sr.finalPrice == null || Number(sr.finalPrice || 0) === previousContractAmount;
+                    sr.contractAmount = previousContractAmount + cr.amountAdjustment;
+                    if (shouldSyncFinalPrice) {
+                        sr.finalPrice = sr.contractAmount;
+                    }
                 }
             }
 

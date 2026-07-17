@@ -7,6 +7,11 @@ import { SystemSettingModel } from "../../models/Settings";
 
 export const copilotApiRouter = Router();
 
+const getProjectStatisticAmount = (project: { finalPrice?: number | null; contractAmount?: number | null }) =>
+    project.finalPrice == null ? Number(project.contractAmount || 0) : Number(project.finalPrice || 0);
+
+const projectStatisticAmountExpr = { $ifNull: ["$finalPrice", "$contractAmount"] };
+
 // API Key middleware — checks env var first, then DB apiToken
 const requireApiKey = async (req: any, res: any, next: any) => {
     const apiKey = req.header("X-API-KEY");
@@ -39,7 +44,7 @@ copilotApiRouter.get("/projects/active", async (_req, res) => {
             status: { $nin: ["completed", "cancelled"] }
         })
             .populate("pmId", "name email")
-            .select("title contractAmount status marginEstimate marginWarning pmId createdAt")
+            .select("title contractAmount finalPrice status marginEstimate marginWarning pmId createdAt")
             .sort({ createdAt: -1 })
             .limit(30)
             .lean();
@@ -51,7 +56,9 @@ copilotApiRouter.get("/projects/active", async (_req, res) => {
                 projectName: p.title,
                 status: p.status,
                 pm: p.pmId?.name || "未指派",
-                contractAmount: p.contractAmount,
+                contractAmount: getProjectStatisticAmount(p),
+                quotedContractAmount: p.contractAmount,
+                finalPrice: p.finalPrice ?? p.contractAmount,
                 marginEstimate: p.marginEstimate,
                 isMarginAtRisk: p.marginWarning,
                 startDate: p.createdAt
@@ -76,7 +83,7 @@ copilotApiRouter.get("/projects/search", async (req, res) => {
             $text: { $search: q }
         })
             .populate("pmId", "name email")
-            .select("title contractAmount status marginEstimate marginWarning pmId wbsVersions changeRequests createdAt")
+            .select("title contractAmount finalPrice status marginEstimate marginWarning pmId wbsVersions changeRequests createdAt")
             .sort({ createdAt: -1 })
             .limit(10)
             .lean();
@@ -100,7 +107,9 @@ copilotApiRouter.get("/projects/search", async (req, res) => {
                     projectName: p.title,
                     status: p.status,
                     pm: p.pmId?.name || "未指派",
-                    contractAmount: p.contractAmount,
+                    contractAmount: getProjectStatisticAmount(p),
+                    quotedContractAmount: p.contractAmount,
+                    finalPrice: p.finalPrice ?? p.contractAmount,
                     marginEstimate: p.marginEstimate,
                     isMarginAtRisk: p.marginWarning,
                     wbs: latestWbs ? {
@@ -160,7 +169,9 @@ copilotApiRouter.get("/projects/:id", async (req, res) => {
             projectName: project.title,
             status: project.status,
             pm: (project.pmId as any)?.name || "未指派",
-            contractAmount: project.contractAmount,
+            contractAmount: getProjectStatisticAmount(project),
+            quotedContractAmount: project.contractAmount,
+            finalPrice: project.finalPrice ?? project.contractAmount,
             financials: {
                 marginEstimate: project.marginEstimate,
                 isMarginAtRisk: project.marginWarning
@@ -198,7 +209,7 @@ copilotApiRouter.get("/projects/summary", async (_req, res) => {
     try {
         const [statusGroups, atRisk, criticalIssues] = await Promise.all([
             ServiceRequestModel.aggregate([
-                { $group: { _id: "$status", count: { $sum: 1 }, totalContract: { $sum: "$contractAmount" } } }
+                { $group: { _id: "$status", count: { $sum: 1 }, totalContract: { $sum: projectStatisticAmountExpr } } }
             ]),
             ServiceRequestModel.countDocuments({ marginWarning: true, status: { $nin: ["completed", "cancelled"] } }),
             IssueModel.countDocuments({ priority: { $in: ["high", "critical"] }, status: { $in: ["open", "in_progress"] } })

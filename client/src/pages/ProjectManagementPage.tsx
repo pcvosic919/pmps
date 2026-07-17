@@ -61,11 +61,11 @@ export function ProjectManagementPage() {
     };
 
     const handleUpdateFinalPrice = (sr: any) => {
-        const value = window.prompt("請輸入最終價格 (NT$)", String(sr.finalPrice ?? sr.contractAmount ?? 0));
+        const value = window.prompt("請輸入最終成交金額 (NT$)", String(sr.finalPrice ?? sr.contractAmount ?? 0));
         if (value === null) return;
         const finalPrice = Number(value);
         if (Number.isNaN(finalPrice) || finalPrice < 0) {
-            alert("請輸入有效的最終價格");
+            alert("請輸入有效的最終成交金額");
             return;
         }
         updateFinalPrice.mutate({ id: sr.id, finalPrice });
@@ -198,8 +198,8 @@ export function ProjectManagementPage() {
 	                                    <div className="flex items-center gap-6 text-sm text-muted-foreground flex-wrap">
                                         {sr.customerName && <span>客戶: <span className="font-semibold text-foreground">{sr.customerName}</span></span>}
                                         {sr.externalServiceType && <span>服務類型: <span className="font-semibold text-foreground">{sr.externalServiceType}</span></span>}
-	                                        {!hasRole("tech") && <span>合約金額: <span className="font-semibold text-foreground">NT$ {sr.contractAmount?.toLocaleString()}</span></span>}
-                                            {!hasRole("tech") && <span>最終價格: <span className="font-semibold text-foreground">NT$ {(sr.finalPrice ?? 0).toLocaleString()}</span></span>}
+	                                        {!hasRole("tech") && <span>合約報價: <span className="font-semibold text-foreground">NT$ {sr.contractAmount?.toLocaleString()}</span></span>}
+                                            {!hasRole("tech") && <span>最終成交金額: <span className="font-semibold text-foreground">NT$ {(sr.finalPrice ?? sr.contractAmount ?? 0).toLocaleString()}</span></span>}
                                         {sr.externalAssignments?.length > 0 && (
                                             <span>匯入工時: <span className="font-semibold text-foreground">
                                                 {sr.externalAssignments.reduce((sum: number, a: any) => sum + (a.actualHours || 0), 0).toLocaleString()}
@@ -302,7 +302,7 @@ export function ProjectManagementPage() {
                                                 }}
                                                 className="px-3 py-1.5 text-xs border border-border rounded-lg hover:bg-muted transition-colors text-muted-foreground whitespace-nowrap"
                                             >
-                                                更新最終價格
+                                                更新最終成交金額
                                             </button>
                                         )}
                                 </div>

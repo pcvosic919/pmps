@@ -147,7 +147,7 @@ export function ReportBuilderPage() {
         ],
         business_department_activity: [
             "業務部門代碼沿用帳號與案件上的業務部門欄位。",
-            "專案統計金額優先使用最終價格，未填則使用合約金額。",
+            "專案統計金額優先使用最終成交金額，未填則使用合約報價金額。",
             "Excel 會匯出 Summary_業務部門、協銷明細、專案明細三個頁籤。"
         ],
         technical_handler_management: [

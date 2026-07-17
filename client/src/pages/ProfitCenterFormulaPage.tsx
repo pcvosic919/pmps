@@ -590,7 +590,7 @@ export default function ProfitCenterFormulaPage() {
                         <span>💡 公式與目標計算說明</span>
                     </h4>
                     <ul className="text-xs text-muted-foreground space-y-2 leading-relaxed">
-                        <li>• <strong>專案毛利 (Project Margin)</strong> = 合約金額 − 直接人力成本 − (直接成本 × 管銷費用分攤率)</li>
+                        <li>• <strong>專案毛利 (Project Margin)</strong> = 最終成交金額 − 直接人力成本 − (直接成本 × 管銷費用分攤率)</li>
                         <li>• <strong>達標判定 (Success Tracking)</strong>：實際毛利率 ≥ 目標毛利率 → <span className="text-emerald-500 font-semibold underline decoration-dotted">綠色標記</span>; 反之則顯示 <span className="text-rose-500 font-semibold underline decoration-dotted">紅色警示</span>。</li>
                         <li>• <strong>稼動率 (Utilization Rate)</strong> = (實際可計費工時 / 月標準法定工時) × 100%</li>
                         <li>• <strong>SLA 達成率 (SLA Fulfillment)</strong> = (準時完成之服務工單數 / 總結案工單數) × 100%</li>

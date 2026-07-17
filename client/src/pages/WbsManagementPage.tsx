@@ -149,9 +149,9 @@ export function WbsManagementPage() {
     const updateFinalPriceMutation = trpc.projects.updateFinalPrice.useMutation({
         onSuccess: () => {
             utils.projects.srById.invalidate({ id: srId });
-            toast.success("最終價格已更新");
+            toast.success("最終成交金額已更新");
         },
-        onError: (err) => toast.error(err.message || "更新最終價格失敗")
+        onError: (err) => toast.error(err.message || "更新最終成交金額失敗")
     });
 
     const addProjectMemberMutation = trpc.projects.addSrMember.useMutation({
@@ -778,11 +778,11 @@ export function WbsManagementPage() {
     };
 
     const handleUpdateFinalPrice = () => {
-        const value = window.prompt("請輸入與業務敲定的最終價格 (NT$)", String(sr?.finalPrice ?? sr?.contractAmount ?? 0));
+        const value = window.prompt("請輸入與業務敲定的最終成交金額 (NT$)", String(sr?.finalPrice ?? sr?.contractAmount ?? 0));
         if (value === null) return;
         const finalPrice = Number(value);
         if (Number.isNaN(finalPrice) || finalPrice < 0) {
-            toast.error("請輸入有效的最終價格");
+            toast.error("請輸入有效的最終成交金額");
             return;
         }
         updateFinalPriceMutation.mutate({ id: sr.id, finalPrice });
@@ -875,19 +875,19 @@ export function WbsManagementPage() {
                             {!hasRole("tech") && (
                                 <>
 	                                    <div className="flex justify-between">
-	                                        <span className="text-muted-foreground">合約金額</span>
+	                                        <span className="text-muted-foreground">合約報價</span>
 	                                        <span className="font-bold">NT$ {sr.contractAmount?.toLocaleString() || 0}</span>
 	                                    </div>
                                         <div className="flex justify-between">
-                                            <span className="text-muted-foreground">最終價格</span>
-                                            <span className="font-bold">NT$ {(sr.finalPrice ?? 0).toLocaleString()}</span>
+                                            <span className="text-muted-foreground">最終成交金額</span>
+                                            <span className="font-bold">NT$ {(sr.finalPrice ?? sr.contractAmount ?? 0).toLocaleString()}</span>
                                         </div>
                                         {canEditSalesOwner && (
                                             <button
                                                 onClick={handleUpdateFinalPrice}
                                                 className="w-full mt-2 px-3 py-2 rounded-lg border border-emerald-200 bg-emerald-50 text-emerald-700 text-sm font-semibold hover:bg-emerald-100 transition-colors"
                                             >
-                                                更新最終價格
+                                                更新最終成交金額
                                             </button>
                                         )}
                                         <div>

@@ -22,8 +22,8 @@ const reportTypes = ["utilization", "settlement", "timesheets", "project_profita
 
 const defaultKpiSourceDefinitions = [
     { key: "target", label: "年度目標", source: "系統 KPI 目標設定", rule: "部門/個人目標以系統內 KPI 目標設定為準。", isActive: true },
-    { key: "recognizedRevenue", label: "實際認列收入", source: "系統專案認列金額與結案資料", rule: "以 ServiceRequest 的認列月份與認列金額為主；未填認列金額時，已結案專案以合約金額估算。", isActive: true },
-    { key: "pipeline", label: "Pipeline 預估", source: "系統商機與未結案專案", rule: "商機金額依狀態加權；未結案專案以尚未認列合約金額納入 Pipeline。", isActive: true },
+    { key: "recognizedRevenue", label: "實際認列收入", source: "系統專案認列金額與結案資料", rule: "以 ServiceRequest 的認列月份與認列金額為主；未填認列金額時，已結案專案以最終成交金額估算。", isActive: true },
+    { key: "pipeline", label: "Pipeline 預估", source: "系統商機與未結案專案", rule: "商機金額依狀態加權；未結案專案以尚未認列最終成交金額納入 Pipeline。", isActive: true },
     { key: "settlement", label: "月度結算", source: "月結快照與工時成本", rule: "月結提供成本、毛利與鎖帳快照；可對照 KPI，但不直接覆蓋認列收入。", isActive: true }
 ] as const;
 
@@ -246,6 +246,9 @@ const addRevenueBucket = (
 const getEmptyRevenueBucket = (): RevenueBucket => ({ total: 0, q1: 0, q2: 0, q3: 0, q4: 0 });
 
 const getKpiDepartment = (item: any) => item.salesDepartment || item.pmId?.department || item.ownerId?.department || "未指定";
+const getProjectStatisticAmount = (sr: { finalPrice?: number | null; contractAmount?: number | null }) =>
+    sr.finalPrice == null ? Number(sr.contractAmount || 0) : Number(sr.finalPrice || 0);
+const projectStatisticAmountExpr = { $ifNull: ["$finalPrice", "$contractAmount"] };
 
 const buildSettlementSnapshotPayload = async (month: string, type: "project" | "presales") => {
     const startDate = new Date(`${month}-01T00:00:00.000Z`);
@@ -256,7 +259,7 @@ const buildSettlementSnapshotPayload = async (month: string, type: "project" | "
 
     if (type === "project") {
         const [srs, timesheets] = await Promise.all([
-            ServiceRequestModel.find({}, { _id: 1, title: 1, pmId: 1, contractAmount: 1, status: 1 }).populate("pmId", "name department").lean(),
+            ServiceRequestModel.find({}, { _id: 1, title: 1, pmId: 1, contractAmount: 1, finalPrice: 1, status: 1 }).populate("pmId", "name department").lean(),
             TimesheetModel.find({ type: "project", workDate: { $gte: startDate, $lte: endDate } }).populate("techId", "name department costRate").lean()
         ]);
         const costMap = new Map<string, { cost: number; hours: number }>();
@@ -270,17 +273,18 @@ const buildSettlementSnapshotPayload = async (month: string, type: "project" | "
         const rows = (srs as any[]).map((sr) => {
             const cost = costMap.get(sr._id.toString()) || { cost: 0, hours: 0 };
             const overhead = Math.round(cost.cost * (overheadRate / 100));
+            const revenue = getProjectStatisticAmount(sr);
             return {
                 id: sr._id.toString(),
                 title: sr.title,
                 owner: sr.pmId?.name || "",
                 department: sr.pmId?.department || "",
                 status: sr.status,
-                revenue: sr.contractAmount || 0,
+                revenue,
                 hours: cost.hours,
                 directCost: cost.cost,
                 overhead,
-                margin: (sr.contractAmount || 0) - cost.cost - overhead
+                margin: revenue - cost.cost - overhead
             };
         });
         return {
@@ -479,7 +483,7 @@ export const analyticsRouter = router({
 
             // Fetch timesheets and users to calculate REVENUE (hours * rate)
             const [srs, opps, timesheets, locks] = await Promise.all([
-                ServiceRequestModel.find(srQuery, { _id: 1, title: 1, pmId: 1, contractAmount: 1, status: 1 }).lean(),
+                ServiceRequestModel.find(srQuery, { _id: 1, title: 1, pmId: 1, contractAmount: 1, finalPrice: 1, status: 1 }).lean(),
                 OpportunityModel.find(oppQuery, { _id: 1, title: 1, customerName: 1, status: 1 }).lean(),
                 TimesheetModel.find(tsMatch).populate("techId").lean(),
                 SettlementLockModel.find({ month: currentMonth }).lean()
@@ -516,18 +520,21 @@ export const analyticsRouter = router({
                 projects: srs.map((sr: any) => {
                     const totalCost = projectRevMap.get(sr._id.toString()) ?? 0;
                     const totalHours = projectHoursMap.get(sr._id.toString()) ?? 0;
+                    const statisticAmount = getProjectStatisticAmount(sr);
                     // 本月收入費用 = 時數 × 時薪 (totalCost)
-                    // 本月毛利預估 = 合約金額 - 本月費用
-                    const margin = sr.contractAmount - totalCost;
+                    // 本月毛利預估 = 最終成交金額 - 本月費用
+                    const margin = statisticAmount - totalCost;
                     return {
                         id: sr._id.toString(),
                         title: sr.title,
                         pmId: sr.pmId?.toString(),
-                        contractAmount: sr.contractAmount,
+                        contractAmount: statisticAmount,
+                        quotedContractAmount: sr.contractAmount,
+                        finalPrice: sr.finalPrice,
                         totalHours,      // 本月時數
                         totalCost,       // 本月收入費用 (時數×時薪)
                         margin,
-                        marginPercent: sr.contractAmount > 0 ? Math.round((margin / sr.contractAmount) * 100) : 0,
+                        marginPercent: statisticAmount > 0 ? Math.round((margin / statisticAmount) * 100) : 0,
                         status: sr.status
                     };
                 }),
@@ -836,11 +843,11 @@ export const analyticsRouter = router({
                                 $cond: [{ $eq: ["$status", "in_progress"] }, 1, 0]
                             }
                         },
-                        totalRevenue: { $sum: "$contractAmount" }
+                        totalRevenue: { $sum: projectStatisticAmountExpr }
                     }
                 }
             ]),
-            ServiceRequestModel.find(srMatch, { _id: 1, title: 1, status: 1, contractAmount: 1 })
+            ServiceRequestModel.find(srMatch, { _id: 1, title: 1, status: 1, contractAmount: 1, finalPrice: 1 })
                 .sort({ createdAt: -1, _id: -1 })
                 .limit(5)
                 .lean(),
@@ -895,7 +902,7 @@ export const analyticsRouter = router({
                 id: sr._id.toString(),
                 title: sr.title,
                 status: sr.status,
-                amount: sr.contractAmount
+                amount: getProjectStatisticAmount(sr)
             }))
         };
     }),
@@ -958,17 +965,17 @@ export const analyticsRouter = router({
                 deptMap.get(dept)!.users.push(u);
             }
 
-            // 年度 SR 合約金額按 PM 部門分組
+            // 年度 SR 最終成交金額按 PM 部門分組
             const allSrs = await ServiceRequestModel.find(
                 { createdAt: { $gte: yearStart, $lte: yearEnd } },
-                { contractAmount: 1, pmId: 1 }
+                { contractAmount: 1, finalPrice: 1, pmId: 1 }
             ).lean();
             for (const sr of allSrs as any[]) {
                 const pmUser = (allUsers as any[]).find(u => u._id.toString() === sr.pmId?.toString());
                 if (!pmUser) continue;
                 const dept = pmUser.department || "未指定";
                 if (deptMap.has(dept)) {
-                    deptMap.get(dept)!.revenue += (sr.contractAmount || 0);
+                    deptMap.get(dept)!.revenue += getProjectStatisticAmount(sr);
                 }
             }
 
@@ -979,14 +986,14 @@ export const analyticsRouter = router({
                         { status: "completed", updatedAt: { $gte: yearStart, $lte: yearEnd } }
                     ]
                 },
-                { recognizedRevenueAmount: 1, contractAmount: 1, pmId: 1 }
+                { recognizedRevenueAmount: 1, contractAmount: 1, finalPrice: 1, pmId: 1 }
             ).lean();
             for (const sr of recognizedSrs as any[]) {
                 const pmUser = (allUsers as any[]).find(u => u._id.toString() === sr.pmId?.toString());
                 if (!pmUser) continue;
                 const dept = pmUser.department || "未指定";
                 if (deptMap.has(dept)) {
-                    deptMap.get(dept)!.recognizedRevenue += (sr.recognizedRevenueAmount ?? sr.contractAmount ?? 0);
+                    deptMap.get(dept)!.recognizedRevenue += (sr.recognizedRevenueAmount ?? getProjectStatisticAmount(sr));
                 }
             }
 
@@ -1138,7 +1145,7 @@ export const analyticsRouter = router({
                 {
                     $group: {
                         _id: "$status",
-                        totalRevenue: { $sum: "$contractAmount" },
+                        totalRevenue: { $sum: projectStatisticAmountExpr },
                         count: { $sum: 1 }
                     }
                 }
@@ -1181,7 +1188,7 @@ export const analyticsRouter = router({
                 { $group: { _id: "$techId", totalCost: { $sum: "$costAmount" } } }
             ]),
             ServiceRequestModel.aggregate([
-                { $group: { _id: "$pmId", totalRevenue: { $sum: "$contractAmount" } } }
+                { $group: { _id: "$pmId", totalRevenue: { $sum: projectStatisticAmountExpr } } }
             ])
         ]);
 
@@ -1288,7 +1295,7 @@ export const analyticsRouter = router({
             const [statusAgg, serviceTypeAgg, departmentAgg, assignmentAgg, overdueItems] = await Promise.all([
                 ServiceRequestModel.aggregate([
                     { $match: match },
-                    { $group: { _id: "$externalStatus", count: { $sum: 1 }, amount: { $sum: "$contractAmount" } } },
+                    { $group: { _id: "$externalStatus", count: { $sum: 1 }, amount: { $sum: projectStatisticAmountExpr } } },
                     { $sort: { count: -1 } }
                 ]),
                 ServiceRequestModel.aggregate([
@@ -1583,6 +1590,7 @@ export const analyticsRouter = router({
 
                 const projectRows = srs.map((sr: any) => {
                     const spent = pCostMap.get(sr._id.toString()) || 0;
+                    const statisticAmount = getProjectStatisticAmount(sr);
                     return {
                         Type: "Project",
                         Name: sr.title,
@@ -1590,8 +1598,10 @@ export const analyticsRouter = router({
                         Department: sr.pmId?.department || "N/A",
                         Status: sr.status,
                         "Period Spent": spent,
-                        "Total Value": sr.contractAmount,
-                        "Health Indicator": spent > sr.contractAmount ? "Loss" : "Profit"
+                        "Total Value": statisticAmount,
+                        "Quoted Contract": Number(sr.contractAmount || 0),
+                        "Final Price": sr.finalPrice ?? "",
+                        "Health Indicator": spent > statisticAmount ? "Loss" : "Profit"
                     };
                 });
 
@@ -1706,8 +1716,8 @@ export const analyticsRouter = router({
                         "專案/活動名稱": sr.title || "",
                         "客戶名稱": sr.customerName || "",
                         "狀態": sr.status || "",
-                        "合約金額": contractAmount,
-                        "最終價格": finalPrice ?? "",
+                        "合約報價金額": contractAmount,
+                        "最終成交金額": finalPrice ?? contractAmount,
                         "統計金額": statisticAmount,
                         "PM": sr.pmId?.name || "",
                         "預計開始": toDateText(sr.plannedStartDate),
@@ -1750,13 +1760,15 @@ export const analyticsRouter = router({
                 return srs.map((sr: any) => {
                     const directCost = costMap.get(sr._id.toString()) || 0;
                     const overhead = Math.round(directCost * (overheadRate / 100));
-                    const netProfit = (sr.contractAmount || 0) - directCost - overhead;
-                    const marginPct = sr.contractAmount > 0 ? Math.round((netProfit / sr.contractAmount) * 100) : 0;
+                    const statisticAmount = getProjectStatisticAmount(sr);
+                    const netProfit = statisticAmount - directCost - overhead;
+                    const marginPct = statisticAmount > 0 ? Math.round((netProfit / statisticAmount) * 100) : 0;
                     return {
                         "\u5c08\u6848": sr.title,
                         "\u5ba2\u6236": (sr.opportunityId as any)?.customerName || "-",
                         "PM": (sr.pmId as any)?.name || "Unknown",
-                        "\u5408\u7d04\u91d1\u984d": sr.contractAmount || 0,
+                        "\u5408\u7d04\u5831\u50f9\u91d1\u984d": sr.contractAmount || 0,
+                        "\u6700\u7d42\u6210\u4ea4\u91d1\u984d": statisticAmount,
                         "\u76f4\u63a5\u6210\u672c": directCost,
                         "\u7ba1\u92b7\u5206\u6524": overhead,
                         "\u6de8\u5229\u6f64": netProfit,
@@ -1778,7 +1790,7 @@ export const analyticsRouter = router({
 
                 const [revenueAgg, costAgg] = await Promise.all([
                     ServiceRequestModel.aggregate([
-                        { $group: { _id: "$pmId", totalRevenue: { $sum: "$contractAmount" }, count: { $sum: 1 } } }
+                        { $group: { _id: "$pmId", totalRevenue: { $sum: projectStatisticAmountExpr }, count: { $sum: 1 } } }
                     ]),
                     TimesheetModel.aggregate([
                         { $match: { type: "project", isBillable: { $ne: false }, workDate: { $gte: start, $lte: end } } },
@@ -1818,13 +1830,14 @@ export const analyticsRouter = router({
                 return srs.map((sr: any) => {
                     const actual = costMap.get(sr._id.toString())?.cost || 0;
                     const hours = costMap.get(sr._id.toString())?.hours || 0;
-                    const budget = sr.contractAmount || 0;
+                    const budget = getProjectStatisticAmount(sr);
                     const variance = budget - actual;
                     const variancePct = budget > 0 ? Math.round((variance / budget) * 100) : 0;
                     return {
                         "\u5c08\u6848": sr.title,
                         "PM": (sr.pmId as any)?.name || "Unknown",
-                        "\u9810\u7b97 (Budget)": budget,
+                        "\u6700\u7d42\u6210\u4ea4\u9810\u7b97": budget,
+                        "\u5408\u7d04\u5831\u50f9": sr.contractAmount || 0,
                         "\u5be6\u969b\u82b1\u8cbb": actual,
                         "\u504f\u5dee": variance,
                         "\u504f\u5dee%": variancePct,
@@ -2470,7 +2483,7 @@ export const analyticsRouter = router({
                     KpiTargetModel.find(targetMatch).sort({ scope: 1, department: 1, userName: 1 }).lean(),
                     ServiceRequestModel.find(srMatch)
                         .populate("pmId", "name department")
-                        .select("title salesDepartment pmId status contractAmount recognizedRevenueAmount recognitionMonth actualEndDate createdAt updatedAt")
+                        .select("title salesDepartment pmId status contractAmount finalPrice recognizedRevenueAmount recognitionMonth actualEndDate createdAt updatedAt")
                         .lean(),
                     OpportunityModel.find(oppMatch)
                         .populate("ownerId", "name department")
@@ -2550,7 +2563,7 @@ export const analyticsRouter = router({
                     }
 
                     if (sr.status !== "completed" && sr.status !== "cancelled") {
-                        const openAmount = Math.max(0, Number(sr.contractAmount || 0) - Math.max(0, recognizedAmount));
+                        const openAmount = Math.max(0, getProjectStatisticAmount(sr) - Math.max(0, recognizedAmount));
                         addAmount(openSrPipelineByDept, department, openAmount);
                         if (personKey) {
                             addAmount(openSrPipelineByPerson, personKey, openAmount);
@@ -2781,7 +2794,7 @@ export const analyticsRouter = router({
             }
 
             const [srs, timesheets] = await Promise.all([
-                ServiceRequestModel.find(srMatch, { srType: 1, contractAmount: 1, totalPoints: 1, pointValue: 1 }).lean(),
+                ServiceRequestModel.find(srMatch, { srType: 1, contractAmount: 1, finalPrice: 1, totalPoints: 1, pointValue: 1 }).lean(),
                 TimesheetModel.find(tsMatch).populate("techId", "costRate").lean(),
                 UserModel.find({}, { costRate: 1 }).lean()
             ]);
@@ -2795,10 +2808,11 @@ export const analyticsRouter = router({
 
             // 1. Calculate SR Revenues (Projects & Maintenance created in period)
             for (const sr of srs as any[]) {
+                const statisticAmount = getProjectStatisticAmount(sr);
                 if (sr.srType === "maintenance") {
-                    maintenanceRevenue += (sr.contractAmount || 0);
+                    maintenanceRevenue += statisticAmount;
                 } else {
-                    projectRevenue += (sr.contractAmount || 0);
+                    projectRevenue += statisticAmount;
                 }
             }
 
