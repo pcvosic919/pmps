@@ -279,6 +279,7 @@ export function OpportunityDetailPage() {
     const isConverted = opp.status === "converted";
     const isBusinessOwner = hasRole("business") && opp.ownerId === user?.id;
     const canEditSalesOwner = hasRole("admin") || hasRole("manager") || hasRole("presales") || isBusinessOwner;
+    const canEditOpportunityMembers = hasRole("admin") || hasRole("manager") || hasRole("presales") || user?.id === opp.ownerId;
     const canReportTime = hasRole("admin") || hasRole("manager") || hasRole("pm") || hasRole("presales") || hasRole("tech");
 
     const getTechName = (techId: string) => {
@@ -617,7 +618,7 @@ export function OpportunityDetailPage() {
                 <div className="bg-card border border-border/50 rounded-xl shadow-sm overflow-hidden flex flex-col">
                     <div className="p-4 border-b border-border/50 bg-muted/30 flex justify-between items-center">
                         <h3 className="font-bold flex items-center"><Users className="w-5 h-5 mr-2 text-primary" />商機成員</h3>
-                        {!hasRole("business") && (
+                        {canEditOpportunityMembers && (
                             <button onClick={() => { if (!isConverted) { setShowMemberModal(true); setMemberError(""); } }}
                                 disabled={isConverted}
                                 className="text-xs font-medium text-primary hover:text-primary/80 flex items-center px-2 py-1 rounded hover:bg-primary/10 transition-colors disabled:opacity-50">
@@ -640,7 +641,7 @@ export function OpportunityDetailPage() {
                                                     <p className="text-xs text-muted-foreground capitalize">{m.memberRole}</p>
                                                 </div>
                                             </div>
-                                            {m.memberRole !== "owner" && (
+                                            {canEditOpportunityMembers && m.memberRole !== "owner" && (
                                                 <button
                                                     onClick={() => !isConverted && removeMemberMutation.mutate({ memberId: m.id })}
                                                     disabled={isConverted}
@@ -837,7 +838,9 @@ export function OpportunityDetailPage() {
 	                                    placeholder="搜尋姓名或 Email..."
 	                                    onSelect={(selectedUser) => setMemberUserId(selectedUser.id)}
 	                                    onClear={() => setMemberUserId("")}
-	                                    filterUser={(pickerUser) => !members?.find((m: any) => m.userId === pickerUser.id)}
+	                                    filterUser={(pickerUser) => memberRole === "owner"
+                                            ? !members?.find((m: any) => m.userId === pickerUser.id && m.memberRole === "owner")
+                                            : !members?.find((m: any) => m.userId === pickerUser.id)}
 	                                />
 	                            </div>
                             <div>

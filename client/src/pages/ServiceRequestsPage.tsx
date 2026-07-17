@@ -35,7 +35,7 @@ const srSchema = z.object({
     contractAmount: z.number().min(0, "合約金額不能為負").optional(),
     totalPoints: z.number().min(0).optional(),
     pointValue: z.number().min(0).optional(),
-    pmId: z.string().min(1, "請指派 PM"),
+    pmId: z.string().optional(),
     joinPmAsMember: z.boolean().default(true)
 });
 
@@ -552,7 +552,7 @@ export function ServiceRequestsPage() {
                                             name="pmId"
                                             render={({ field }: any) => (
                                                 <FormItem>
-                                                    <FormLabel>指派 PM *</FormLabel>
+                                                    <FormLabel>指派 PM</FormLabel>
                                                     <FormControl>
                                                         <UserSearchPicker
                                                             users={[...(users?.items || [])].sort((left: any, right: any) => {
@@ -561,7 +561,7 @@ export function ServiceRequestsPage() {
                                                                 return Number(rightIsPm) - Number(leftIsPm) || left.name.localeCompare(right.name, "zh-Hant");
                                                             })}
                                                             selectedUserId={field.value}
-                                                            placeholder="搜尋 PM 或輸入 Email 前綴..."
+                                                            placeholder="可選，搜尋 PM 或輸入 Email 前綴..."
                                                             onSelect={(selectedUser) => field.onChange(selectedUser.id)}
                                                             onClear={() => field.onChange("")}
                                                             filterUser={(pickerUser) => pickerUser.isActive !== false}
@@ -586,7 +586,7 @@ export function ServiceRequestsPage() {
                                                     </FormControl>
                                                     <div className="space-y-1 leading-none">
                                                         <FormLabel>將 PM 加入專案團隊成員</FormLabel>
-                                                        <p className="text-sm text-muted-foreground">若取消勾選，PM 將不會出現在成員列表中</p>
+                                                        <p className="text-sm text-muted-foreground">有指派 PM 時才會加入；未指派 PM 仍可建立專案</p>
                                                     </div>
                                                 </FormItem>
                                             )}

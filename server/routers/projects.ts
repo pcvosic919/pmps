@@ -41,14 +41,26 @@ const assertSettlementUnlocked = async (month: string, type: "presales" | "proje
     }
 };
 
-const buildSrMembers = (creatorId: string, pmId: string, joinPmAsMember: boolean = true) => {
+const buildSrMembers = (creatorId: string, pmId?: string, joinPmAsMember: boolean = true) => {
     const members: Array<{ userId: any; memberRole: "owner" | "assignee" | "participant" | "watcher" }> = [
         { userId: toObjectId(creatorId), memberRole: "owner" }
     ];
-    if (joinPmAsMember && pmId !== creatorId) {
+    if (pmId && joinPmAsMember && pmId !== creatorId) {
         members.push({ userId: toObjectId(pmId), memberRole: "assignee" as const });
     }
     return members;
+};
+
+const ensureSrOwnerMember = async (sr: any) => {
+    const members = sr.members || [];
+    const ownerId = idString(sr.createdById);
+    if (!ownerId || members.some((member: any) => member.memberRole === "owner")) return members;
+
+    await ServiceRequestModel.updateOne(
+        { _id: sr._id },
+        { $push: { members: { userId: toObjectId(ownerId), memberRole: "owner" } } }
+    );
+    return [...members, { userId: toObjectId(ownerId), memberRole: "owner" }];
 };
 
 const getSalesUserFields = async (salesUserId?: string) => {
@@ -439,7 +451,7 @@ export const projectsRouter = router({
             srType: z.enum(srTypes).default("project"),
             totalPoints: z.number().optional(),
             pointValue: z.number().optional(),
-            pmId: z.string(),
+            pmId: z.string().optional(),
             salesUserId: z.string().optional(),
             salesDepartment: z.string().trim().optional(),
             salesRep: z.string().trim().optional(),
@@ -490,7 +502,7 @@ export const projectsRouter = router({
                 srType: input.srType,
                 totalPoints: input.totalPoints,
                 pointValue: input.pointValue,
-                pmId: toObjectId(input.pmId),
+                pmId: input.pmId ? toObjectId(input.pmId) : undefined,
                 createdById: toObjectId(ctx.user.id),
                 createdByNameSnapshot: ctx.user.name || ctx.user.email || "",
                 createdByDepartment: ctx.user.department || "",
@@ -512,8 +524,8 @@ export const projectsRouter = router({
 
             // Document folder hook
             try {
-                const pm = await UserModel.findById(input.pmId).select("name").lean();
-                const folder = await folderStorageService.createRecordFolder(input.title, "專案", customerName || "未知公司", pm?.name || "PM");
+                const pm = input.pmId ? await UserModel.findById(input.pmId).select("name").lean() : null;
+                const folder = await folderStorageService.createRecordFolder(input.title, "專案", customerName || "未知公司", pm?.name || ctx.user.name || "PM");
                 if (folder) {
                     await ServiceRequestModel.updateOne(
                         { _id: sr._id },
@@ -531,12 +543,14 @@ export const projectsRouter = router({
                 );
             }
 
-            await createNotification({
-                userId: input.pmId,
-                type: "approval",
-                message: `已建立新專案「${input.title}」，請前往專案管理確認與安排 WBS。`,
-                actionUrl: "/projects"
-            });
+            if (input.pmId) {
+                await createNotification({
+                    userId: input.pmId,
+                    type: "approval",
+                    message: `已建立新專案「${input.title}」，請前往專案管理確認與安排 WBS。`,
+                    actionUrl: "/projects"
+                });
+            }
 
             return { id: sr._id.toString() };
         }),
@@ -546,7 +560,7 @@ export const projectsRouter = router({
         .query(async ({ input, ctx }) => {
             const sr: any = assertFound(
                 await ServiceRequestModel.findById(input.srId)
-                    .select("pmId members opportunityId wbsVersions.items.assigneeId changeRequests")
+                    .select("pmId createdById members opportunityId wbsVersions.items.assigneeId changeRequests")
                     .populate("members.userId", "name email department title role roles")
                     .lean(),
                 "找不到該服務請求"
@@ -555,15 +569,21 @@ export const projectsRouter = router({
                 ? await OpportunityModel.findById(sr.opportunityId).select("ownerId members presalesAssignments").lean()
                 : null;
             assertAuthorized(canAccessServiceRequest(ctx.user, sr, opportunity), "您沒有權限查看此專案成員");
-            return (sr.members || []).map((member: any) => ({
-                id: member._id?.toString(),
+            const members = await ensureSrOwnerMember(sr);
+            const userIds = members.map((member: any) => member.userId?._id || member.userId).filter(Boolean);
+            const fallbackUsers = await UserModel.find({ _id: { $in: userIds } })
+                .select("name email department title role roles")
+                .lean();
+            const fallbackUserMap = new Map(fallbackUsers.map((item: any) => [item._id.toString(), item]));
+            return members.map((member: any) => ({
+                id: member._id?.toString() || `${input.srId}:${idString(member.userId)}:owner`,
                 userId: member.userId?._id?.toString() || member.userId?.toString(),
-                userName: member.userId?.name || member.userId?.email || "未知使用者",
-                email: member.userId?.email || "",
-                department: member.userId?.department || "",
-                title: member.userId?.title || "",
-                role: member.userId?.role || "",
-                roles: member.userId?.roles || [],
+                userName: member.userId?.name || member.userId?.email || fallbackUserMap.get(idString(member.userId))?.name || "未知使用者",
+                email: member.userId?.email || fallbackUserMap.get(idString(member.userId))?.email || "",
+                department: member.userId?.department || fallbackUserMap.get(idString(member.userId))?.department || "",
+                title: member.userId?.title || fallbackUserMap.get(idString(member.userId))?.title || "",
+                role: member.userId?.role || fallbackUserMap.get(idString(member.userId))?.role || "",
+                roles: member.userId?.roles || fallbackUserMap.get(idString(member.userId))?.roles || [],
                 memberRole: member.memberRole
             }));
         }),
@@ -591,8 +611,20 @@ export const projectsRouter = router({
             if (user.isActive === false) {
                 throw new TRPCError({ code: "BAD_REQUEST", message: "無法加入已停用帳號" });
             }
-            if ((sr.members || []).some((member: any) => idString(member.userId) === input.userId)) {
-                throw new TRPCError({ code: "BAD_REQUEST", message: "此使用者已是專案成員" });
+            const existingMember = (sr.members || []).find((member: any) => idString(member.userId) === input.userId);
+            if (input.memberRole === "owner") {
+                await ServiceRequestModel.updateOne(
+                    { _id: input.srId },
+                    { $set: { "members.$[owners].memberRole": "participant" } },
+                    { arrayFilters: [{ "owners.memberRole": "owner" }] }
+                );
+            }
+            if (existingMember) {
+                await ServiceRequestModel.updateOne(
+                    { _id: input.srId, "members.userId": toObjectId(input.userId) },
+                    { $set: { "members.$.memberRole": input.memberRole } }
+                );
+                return { success: true };
             }
             await ServiceRequestModel.updateOne(
                 { _id: input.srId },

@@ -79,7 +79,7 @@ export function WbsManagementPage() {
     const [showEditSalesModal, setShowEditSalesModal] = useState(false);
     const [showProjectMemberModal, setShowProjectMemberModal] = useState(false);
     const [projectMemberUserId, setProjectMemberUserId] = useState("");
-    const [projectMemberRole, setProjectMemberRole] = useState<"participant" | "watcher">("participant");
+    const [projectMemberRole, setProjectMemberRole] = useState<"owner" | "participant" | "watcher">("participant");
     const [editedSalesUserId, setEditedSalesUserId] = useState("");
     const [editedSalesRep, setEditedSalesRep] = useState("");
     const [editedSalesDepartment, setEditedSalesDepartment] = useState("");
@@ -353,7 +353,8 @@ export function WbsManagementPage() {
 	            { key: "overdue", label: "逾期未完成", count: overdue.length, examples: overdue.slice(0, 3).map((item: any) => item.title) }
 	        ].filter(item => item.count > 0);
 	    })();
-	    const canEditSalesOwner = hasRole("admin") || hasRole("manager") || user?.id === sr.pmId;
+	    const isProjectOwnerMember = (projectMembers || []).some((member: any) => member.userId === user?.id && member.memberRole === "owner");
+	    const canEditSalesOwner = hasRole("admin") || hasRole("manager") || user?.id === sr.pmId || isProjectOwnerMember;
 
     const getStatusColor = (status: string) => {
         switch (status) {
@@ -1660,16 +1661,19 @@ export function WbsManagementPage() {
                                     placeholder="搜尋姓名或 Email..."
                                     onSelect={(selectedUser) => setProjectMemberUserId(selectedUser.id)}
                                     onClear={() => setProjectMemberUserId("")}
-                                    filterUser={(pickerUser) => !projectMembers?.find((member: any) => member.userId === pickerUser.id)}
+                                    filterUser={(pickerUser) => projectMemberRole === "owner"
+                                        ? !projectMembers?.find((member: any) => member.userId === pickerUser.id && member.memberRole === "owner")
+                                        : !projectMembers?.find((member: any) => member.userId === pickerUser.id)}
                                 />
                             </div>
                             <div>
                                 <label className="block text-sm font-medium mb-1">角色</label>
                                 <select
                                     value={projectMemberRole}
-                                    onChange={event => setProjectMemberRole(event.target.value as "participant" | "watcher")}
+                                    onChange={event => setProjectMemberRole(event.target.value as "owner" | "participant" | "watcher")}
                                     className="w-full border border-border rounded-lg px-3 py-2 bg-background text-sm focus:outline-none focus:ring-2 focus:ring-primary/50"
                                 >
+                                    <option value="owner">負責人 (Owner)</option>
                                     <option value="participant">參與人員</option>
                                     <option value="watcher">觀察者 / 學習</option>
                                 </select>

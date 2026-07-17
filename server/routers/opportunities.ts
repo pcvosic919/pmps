@@ -103,6 +103,18 @@ const buildSrMembers = (creatorId: string, pmId?: string, techId?: string, presa
     return members;
 };
 
+const ensureOpportunityOwnerMember = async (opportunity: any) => {
+    const members = opportunity.members || [];
+    const ownerId = opportunity.ownerId?.toString?.() || opportunity.ownerId;
+    if (!ownerId || members.some((member: any) => member.memberRole === "owner")) return members;
+
+    await OpportunityModel.updateOne(
+        { _id: opportunity._id },
+        { $push: { members: { userId: toObjectId(ownerId), memberRole: "owner" } } }
+    );
+    return [...members, { userId: toObjectId(ownerId), memberRole: "owner" }];
+};
+
 export const opportunitiesRouter = router({
     list: protectedProcedure
         .input(listInput)
@@ -256,12 +268,13 @@ export const opportunitiesRouter = router({
             );
             assertAuthorized(canAccessOpportunity(ctx.user, opp), "您沒有權限檢視商機成員");
             
-            const userIds = (opp.members || []).map((m: any) => m.userId);
+            const members = await ensureOpportunityOwnerMember(opp);
+            const userIds = members.map((m: any) => m.userId);
             const users = await UserModel.find({ _id: { $in: userIds } }, { name: 1 }).lean();
             const userMap = Object.fromEntries(users.map(u => [u._id.toString(), u.name]));
 
-            return (opp.members || []).map((m: any) => ({
-                id: m._id.toString(),
+            return members.map((m: any) => ({
+                id: m._id?.toString() || `${input.opportunityId}:${m.userId.toString()}:owner`,
                 opportunityId: input.opportunityId,
                 userId: m.userId.toString(),
                 userName: userMap[m.userId.toString()] || `使用者 #${m.userId}`,
@@ -282,15 +295,30 @@ export const opportunitiesRouter = router({
                     .lean(),
                 "找不到該商機"
             );
-            assertAuthorized(canManageOpportunity(ctx.user, opportunity), "您沒有權限新增商機成員");
+            const isOwner = opportunity.ownerId?.toString() === ctx.user.id;
+            assertAuthorized(canManageOpportunity(ctx.user, opportunity) || isOwner, "您沒有權限新增商機成員");
             assertOpportunityNotConverted(opportunity);
 
-            const existing = await OpportunityModel.findOne({
-                _id: input.opportunityId,
-                "members.userId": input.userId
-            });
-            if (existing) {
-                throw new TRPCError({ code: "CONFLICT", message: "此成員已在商機中" });
+            const existingMember = (opportunity.members || []).find((member: any) => member.userId?.toString() === input.userId);
+            if (input.memberRole === "owner") {
+                await OpportunityModel.updateOne(
+                    { _id: input.opportunityId },
+                    {
+                        $set: {
+                            ownerId: toObjectId(input.userId),
+                            "members.$[owners].memberRole": "assignee"
+                        }
+                    },
+                    { arrayFilters: [{ "owners.memberRole": "owner" }] }
+                );
+            }
+
+            if (existingMember) {
+                await OpportunityModel.updateOne(
+                    { _id: input.opportunityId, "members.userId": toObjectId(input.userId) },
+                    { $set: { "members.$.memberRole": input.memberRole } }
+                );
+                return { success: true };
             }
 
             await OpportunityModel.updateOne(
@@ -309,7 +337,8 @@ export const opportunitiesRouter = router({
                     .lean(),
                 "找不到該商機"
             );
-            assertAuthorized(canManageOpportunity(ctx.user, opportunity), "您沒有權限移除此商機成員");
+            const isOwner = opportunity.ownerId?.toString() === ctx.user.id;
+            assertAuthorized(canManageOpportunity(ctx.user, opportunity) || isOwner, "您沒有權限移除此商機成員");
             assertOpportunityNotConverted(opportunity);
 
             await OpportunityModel.updateOne(
