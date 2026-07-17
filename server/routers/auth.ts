@@ -46,6 +46,14 @@ const issueSession = (user: {
     }
 };
 
+const touchLastLogin = async (userId: { toString(): string } | string) => {
+    const id = userId.toString();
+    if (id === BREAKGLASS_CONFIG.user.id) return;
+    await UserModel.updateOne({ _id: id }, { $set: { lastLoginAt: new Date() } }).catch((error) => {
+        console.error("Failed to update lastLoginAt", error);
+    });
+};
+
 const demoLoginInput = z.object({
     email: z.string().email()
 });
@@ -110,6 +118,7 @@ export const authRouter = router({
                     );
                 }
 
+                await touchLastLogin(user._id);
                 return issueSession(user);
             } catch (error) {
                 if (error instanceof TRPCError) throw error;
@@ -163,6 +172,7 @@ export const authRouter = router({
                 throw new TRPCError({ code: "NOT_FOUND", message: "找不到指定的 Demo 帳號，請先執行 Demo 資料初始化" });
             }
 
+            await touchLastLogin(user._id);
             return issueSession(user);
         }),
 
@@ -223,6 +233,7 @@ export const authRouter = router({
                     throw new TRPCError({ code: "FORBIDDEN", message: "此帳號已停用，請聯絡管理員" });
                 }
 
+                await touchLastLogin(user._id);
                 return issueSession(user);
             } catch (error) {
                 if (error instanceof TRPCError) throw error;

@@ -15,6 +15,23 @@ const defaultSettings = {
     pcDeptKpiTargets: {} as Record<string, number>,
 };
 
+type KpiSourceDefinition = {
+    key: "target" | "recognizedRevenue" | "pipeline" | "settlement";
+    label: string;
+    source: string;
+    rule: string;
+    isActive: boolean;
+};
+
+const defaultPipelineWeights: Record<string, number> = {
+    "lead": 0.2,
+    "qualified": 0.4,
+    "proposal": 0.6,
+    "negotiation": 0.8,
+    "won": 1,
+    "lost": 0,
+};
+
 export default function ProfitCenterFormulaPage() {
     const [settings, setSettings] = useState(defaultSettings);
     const [targetYear, setTargetYear] = useState(new Date().getFullYear());
@@ -23,6 +40,10 @@ export default function ProfitCenterFormulaPage() {
     const [selectedPersonId, setSelectedPersonId] = useState("");
     const [personTarget, setPersonTarget] = useState("");
     const [personNote, setPersonNote] = useState("");
+    const [pipelineWeights, setPipelineWeights] = useState<Record<string, number>>(defaultPipelineWeights);
+    const [importedPipelineWeight, setImportedPipelineWeight] = useState(1);
+    const [sourceDefinitions, setSourceDefinitions] = useState<KpiSourceDefinition[]>([]);
+    const [settlementLinkRule, setSettlementLinkRule] = useState("");
     
     const utils = trpc.useUtils();
     const { data: departments } = trpc.users.getDepartments.useQuery();
@@ -52,6 +73,19 @@ export default function ProfitCenterFormulaPage() {
             toast.error(error.message || "年度目標儲存失敗");
         }
     });
+    const updateKpiPolicy = trpc.analytics.updateKpiPolicy.useMutation({
+        onSuccess: async () => {
+            toast.success("KPI 治理規則已儲存");
+            await refetchGovernance();
+            await utils.analytics.getKpiGovernance.invalidate();
+            await utils.analytics.getKpiData.invalidate();
+            await utils.analytics.getKpiRevenueDashboard.invalidate();
+            await utils.analytics.generateReport.invalidate();
+        },
+        onError: (error) => {
+            toast.error(error.message || "KPI 治理規則儲存失敗");
+        }
+    });
 
     useEffect(() => {
         if (data) {
@@ -68,6 +102,15 @@ export default function ProfitCenterFormulaPage() {
             });
         }
     }, [data]);
+
+    useEffect(() => {
+        const policy = governance?.policy;
+        if (!policy) return;
+        setPipelineWeights(policy.pipelineWeights || defaultPipelineWeights);
+        setImportedPipelineWeight(policy.importedPipelineWeight ?? 1);
+        setSourceDefinitions(policy.sourceDefinitions || []);
+        setSettlementLinkRule(policy.settlementLinkRule || "");
+    }, [governance?.policy]);
 
     const deptTargetTotal = useMemo(
         () => Object.values(settings.pcDeptKpiTargets || {}).reduce((sum, value) => sum + Number(value || 0), 0),
@@ -121,6 +164,22 @@ export default function ProfitCenterFormulaPage() {
         setPersonTarget("");
         setPersonNote("");
         toast.success("個人年度目標已儲存");
+    };
+
+    const handleSaveKpiPolicy = async () => {
+        await updateKpiPolicy.mutateAsync({
+            year: targetYear,
+            sourceDefinitions,
+            pipelineWeights,
+            importedPipelineWeight,
+            settlementLinkRule
+        });
+    };
+
+    const updateSourceDefinition = (key: string, field: keyof KpiSourceDefinition, value: string) => {
+        setSourceDefinitions((current) =>
+            current.map((source) => source.key === key ? { ...source, [field]: value } : source)
+        );
     };
 
     if (isLoading) {
@@ -237,6 +296,96 @@ export default function ProfitCenterFormulaPage() {
                                 className="w-full p-2.5 rounded-lg border border-input bg-background/50 focus:bg-background transition-colors"
                             />
                             <p className="text-xs text-muted-foreground mt-1.5">用於計算維運收入：扣除點數 × 此單價。</p>
+                        </div>
+                    </div>
+
+                    <div className="grid gap-6 border-t border-border/50 pt-8">
+                        <div>
+                            <label className="block text-sm font-bold mb-2">KPI Pipeline 加權規則</label>
+                            <p className="text-xs text-muted-foreground mb-4">KPI 儀表板、年度目標認列報表與匯入 Pipeline 會統一使用此處權重。</p>
+                            <div className="grid gap-4 lg:grid-cols-[1fr_280px]">
+                                <div className="grid gap-3 sm:grid-cols-2">
+                                    {Object.entries(pipelineWeights).map(([status, weight]) => (
+                                        <label key={status} className="grid grid-cols-[1fr_96px] items-center gap-3 rounded-lg border border-border/60 bg-muted/10 p-3 text-sm">
+                                            <span className="font-medium">{status}</span>
+                                            <input
+                                                type="number"
+                                                min={0}
+                                                max={1}
+                                                step={0.05}
+                                                value={weight}
+                                                onChange={(event) => setPipelineWeights((current) => ({ ...current, [status]: Number(event.target.value) }))}
+                                                className="rounded-md border border-input bg-background px-2 py-1 text-right"
+                                            />
+                                        </label>
+                                    ))}
+                                </div>
+                                <div className="rounded-lg border border-border/60 bg-muted/10 p-3">
+                                    <label className="block text-sm font-bold mb-2">匯入 Pipeline 權重</label>
+                                    <input
+                                        type="number"
+                                        min={0}
+                                        max={1}
+                                        step={0.05}
+                                        value={importedPipelineWeight}
+                                        onChange={(event) => setImportedPipelineWeight(Number(event.target.value))}
+                                        className="w-full rounded-md border border-input bg-background px-3 py-2 text-right"
+                                    />
+                                    <p className="mt-2 text-xs text-muted-foreground">從 Excel 匯入的 Pipeline 若沒有狀態分級，使用此權重計算預估達成。</p>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div>
+                            <label className="block text-sm font-bold mb-2">KPI 資料來源定義</label>
+                            <div className="grid gap-3">
+                                {sourceDefinitions.length === 0 ? (
+                                    <div className="rounded-lg border border-border/60 p-4 text-sm text-muted-foreground">尚未建立資料來源定義</div>
+                                ) : (
+                                    sourceDefinitions.map((source) => (
+                                        <div key={source.key} className="grid gap-3 rounded-lg border border-border/60 bg-muted/10 p-4">
+                                            <input
+                                                value={source.label}
+                                                onChange={(event) => updateSourceDefinition(source.key, "label", event.target.value)}
+                                                className="rounded-md border border-input bg-background px-3 py-2 text-sm font-semibold"
+                                            />
+                                            <input
+                                                value={source.source}
+                                                onChange={(event) => updateSourceDefinition(source.key, "source", event.target.value)}
+                                                className="rounded-md border border-input bg-background px-3 py-2 text-sm"
+                                                placeholder="資料來源"
+                                            />
+                                            <textarea
+                                                value={source.rule}
+                                                onChange={(event) => updateSourceDefinition(source.key, "rule", event.target.value)}
+                                                className="min-h-[72px] rounded-md border border-input bg-background px-3 py-2 text-sm"
+                                                placeholder="統計規則"
+                                            />
+                                        </div>
+                                    ))
+                                )}
+                            </div>
+                        </div>
+
+                        <div>
+                            <label className="block text-sm font-bold mb-2">月結與 KPI 認列關聯</label>
+                            <textarea
+                                value={settlementLinkRule}
+                                onChange={(event) => setSettlementLinkRule(event.target.value)}
+                                className="min-h-[84px] w-full rounded-lg border border-input bg-background/50 p-3 text-sm focus:bg-background"
+                            />
+                        </div>
+
+                        <div className="flex justify-end">
+                            <button
+                                type="button"
+                                onClick={handleSaveKpiPolicy}
+                                disabled={updateKpiPolicy.isPending}
+                                className="inline-flex items-center rounded-lg bg-secondary px-4 py-2 text-sm font-semibold text-secondary-foreground hover:bg-secondary/80 disabled:opacity-50"
+                            >
+                                <Save className="mr-2 h-4 w-4" />
+                                {updateKpiPolicy.isPending ? "儲存中..." : "儲存 KPI 治理規則"}
+                            </button>
                         </div>
                     </div>
 

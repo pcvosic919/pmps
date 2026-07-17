@@ -24,7 +24,7 @@ export const skillLevels = [
 
 export type SkillLevel = typeof skillLevels[number];
 
-export const memberRoles = ["owner", "assignee", "watcher"] as const;
+export const memberRoles = ["owner", "assignee", "participant", "watcher"] as const;
 export type MemberRole = typeof memberRoles[number];
 
 export const timesheetTypes = ["presales", "project", "other_activity"] as const;
@@ -200,6 +200,7 @@ export interface WbsItemInput {
     startDate?: Date;
     endDate?: Date;
     assigneeId?: string;
+    assigneeIds?: string[];
     completionPercentage?: number;
     status?: WbsItemStatus;
     colorCode?: string;

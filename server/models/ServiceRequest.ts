@@ -1,9 +1,10 @@
 import mongoose, { Schema, Document } from "mongoose";
 import { attachmentCategories, changeRequestStatuses, memberRoles, srStatuses, srTypes, wbsItemStatuses, wbsVersionStatuses, type ChangeRequestInput, type ChangeRequestStatus, type CustomFieldValue, type DepartmentApproval, type MemberRole, type ServiceRequestAttachment, type SrStatus, type SrType, type WbsItemInput, type WbsVersionInput, type WbsVersionStatus } from "../../shared/types";
 
-export interface IWbsItem extends Omit<WbsItemInput, "assigneeId"> {
+export interface IWbsItem extends Omit<WbsItemInput, "assigneeId" | "assigneeIds"> {
     id: mongoose.Types.ObjectId;
     assigneeId?: mongoose.Types.ObjectId;
+    assigneeIds?: mongoose.Types.ObjectId[];
 }
 
 export interface IWbsVersion extends Omit<WbsVersionInput, "submittedBy" | "reviewedBy" | "items" | "auditLogs" | "departmentApprovals"> {
@@ -118,6 +119,7 @@ const WbsItemSchema = new Schema<IWbsItem>({
     startDate: { type: Date },
     endDate: { type: Date },
     assigneeId: { type: Schema.Types.ObjectId, ref: "User" },
+    assigneeIds: [{ type: Schema.Types.ObjectId, ref: "User" }],
     completionPercentage: { type: Number, default: 0, min: 0, max: 100 },
     status: { type: String, enum: wbsItemStatuses, default: "not_started", required: true },
     colorCode: { type: String, default: "#E2E8F0" },

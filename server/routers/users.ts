@@ -89,7 +89,8 @@ export const usersRouter = router({
                     roles: u.roles,
                     isActive: u.isActive,
                     provider: u.provider,
-                    costRate: (u as any).costRate
+                    costRate: (u as any).costRate,
+                    lastLoginAt: (u as any).lastLoginAt
                 })),
                 nextCursor: hasMore && lastItem
                     ? encodeCursor(lastItem._id, ((lastItem as Record<string, string | number | Date | null>)[sortBy] ?? null) instanceof Date
@@ -101,6 +102,7 @@ export const usersRouter = router({
 
     pmList: protectedProcedure.query(async () => {
         const users = await UserModel.find({
+            isActive: { $ne: false },
             $or: [{ role: "pm" }, { roles: "pm" }]
         })
             .select("name email department title role roles isActive provider")
@@ -110,6 +112,7 @@ export const usersRouter = router({
 
     techList: protectedProcedure.query(async () => {
         const users = await UserModel.find({
+            isActive: { $ne: false },
             $or: [{ role: "tech" }, { roles: "tech" }]
         })
             .select("name email department title role roles isActive provider costRate")
@@ -117,9 +120,37 @@ export const usersRouter = router({
         return users.map(u => ({ ...u, id: u._id.toString() }));
     }),
 
+    resourceList: protectedProcedure.query(async () => {
+        const resourceRoles = ["tech", "presales", "pm"];
+        const users = await UserModel.find({
+            isActive: { $ne: false },
+            $or: [
+                { role: { $in: resourceRoles } },
+                { roles: { $in: resourceRoles } }
+            ]
+        })
+            .select("name email department title role roles isActive provider costRate skills")
+            .sort({ department: 1, name: 1 })
+            .lean();
+        return users.map(u => ({ ...u, id: u._id.toString() }));
+    }),
+
+    activeUsers: protectedProcedure.query(async () => {
+        const users = await UserModel.find({
+            isActive: { $ne: false },
+            lastLoginAt: { $exists: true, $ne: null }
+        })
+            .select("name email department title role roles isActive provider lastLoginAt")
+            .sort({ lastLoginAt: -1 })
+            .limit(50)
+            .lean();
+        return users.map(u => ({ ...u, id: u._id.toString() }));
+    }),
+
     presalesList: protectedProcedure.query(async () => {
         const allowedRoles = ["presales", "tech", "pm"];
         const users = await UserModel.find({
+            isActive: { $ne: false },
             $or: [
                 { role: { $in: allowedRoles } },
                 { roles: { $in: allowedRoles } }

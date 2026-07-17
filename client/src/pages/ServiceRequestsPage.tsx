@@ -10,6 +10,7 @@ import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { BusinessUserPicker } from "../components/BusinessUserPicker";
+import { UserSearchPicker } from "../components/UserSearchPicker";
 import { CompanySearchPicker } from "../components/CompanySearchPicker";
 import { useDebounce } from "../lib/useDebounce";
 import { FormSection, FormSummaryPanel, StickyFormActions } from "../components/FormLayout";
@@ -40,19 +41,26 @@ const srSchema = z.object({
 
 const serviceTypeOptions = [
     "專案服務",
-    "維護專案",
-    "協銷-會議",
+    "維運",
+    "其他活動",
+    "教育訓練",
+    "內部專案",
+    "活動支援",
     "遠端技術服務",
     "遠端問題解決",
     "到場服務",
     "教育訓練-其他",
-    "活動支援",
     "技術諮詢",
     "託管服務",
     "MCI Activity"
 ] as const;
 
 const isPresetServiceType = (value?: string) => serviceTypeOptions.some((option) => option === value);
+const srTypeForServiceType = (value?: string): "project" | "maintenance" | "other_activity" => {
+    if (value === "維運") return "maintenance";
+    if (["其他活動", "教育訓練", "內部專案", "活動支援"].includes(value || "")) return "other_activity";
+    return "project";
+};
 
 export function ServiceRequestsPage() {
     const { user, hasRole } = useCurrentUser();
@@ -99,7 +107,7 @@ export function ServiceRequestsPage() {
         defaultValues: { 
             title: "", customerName: "", srType: "project", contractAmount: 0, 
             salesUserId: "", salesDepartment: "", salesRep: "",
-            externalServiceType: "", plannedStartDate: "", plannedEndDate: "", reviewDate: "", warrantyExpiresAt: "",
+            externalServiceType: "專案服務", plannedStartDate: "", plannedEndDate: "", reviewDate: "", warrantyExpiresAt: "",
             billingAllocation: "", recognitionMonth: "",
             totalPoints: 0, pointValue: 500, 
             pmId: "", joinPmAsMember: true 
@@ -333,46 +341,26 @@ export function ServiceRequestsPage() {
                                         />
                                         <FormField
                                             control={form.control}
-                                            name="srType"
-                                            render={({ field }: any) => (
-                                                <FormItem>
-                                                    <FormLabel>類型 *</FormLabel>
-                                                    <Select value={field.value} onValueChange={field.onChange}>
-                                                        <FormControl>
-                                                            <SelectTrigger>
-                                                                <SelectValue placeholder="請選擇類型" />
-                                                            </SelectTrigger>
-                                                        </FormControl>
-                                                        <SelectContent>
-                                                            <SelectItem value="project">專案 (Project)</SelectItem>
-                                                            <SelectItem value="maintenance">維運 (Maintenance)</SelectItem>
-                                                            <SelectItem value="other_activity">其他活動</SelectItem>
-                                                        </SelectContent>
-                                                    </Select>
-                                                    <FormMessage />
-                                                </FormItem>
-                                            )}
-                                        />
-                                        <FormField
-                                            control={form.control}
                                             name="externalServiceType"
                                             render={({ field }: any) => {
                                                 const selectedValue = useCustomServiceType || (field.value && !isPresetServiceType(field.value)) ? "custom" : field.value || "";
                                                 const showCustomInput = useCustomServiceType || selectedValue === "custom";
 
                                                 return (
-                                                    <FormItem className="md:col-span-2">
-                                                        <FormLabel>服務類型</FormLabel>
+                                                    <FormItem>
+                                                        <FormLabel>專案/服務類型 *</FormLabel>
                                                         <Select
                                                             value={selectedValue}
                                                             onValueChange={(value) => {
                                                                 if (value === "custom") {
                                                                     setUseCustomServiceType(true);
                                                                     field.onChange("");
+                                                                    form.setValue("srType", "project");
                                                                     return;
                                                                 }
                                                                 setUseCustomServiceType(false);
                                                                 field.onChange(value);
+                                                                form.setValue("srType", srTypeForServiceType(value));
                                                             }}
                                                         >
                                                             <FormControl>
@@ -565,20 +553,20 @@ export function ServiceRequestsPage() {
                                             render={({ field }: any) => (
                                                 <FormItem>
                                                     <FormLabel>指派 PM *</FormLabel>
-                                                    <Select value={field.value} onValueChange={field.onChange}>
-                                                        <FormControl>
-                                                            <SelectTrigger>
-                                                                <SelectValue placeholder="請選擇 PM" />
-                                                            </SelectTrigger>
-                                                        </FormControl>
-                                                        <SelectContent>
-                                                            {users?.items?.filter((u: any) => u.role === "pm" || u.roles?.includes("pm")).map((u: any) => (
-                                                                <SelectItem key={u.id} value={u.id}>
-                                                                    {u.name}
-                                                                </SelectItem>
-                                                            ))}
-                                                        </SelectContent>
-                                                    </Select>
+                                                    <FormControl>
+                                                        <UserSearchPicker
+                                                            users={[...(users?.items || [])].sort((left: any, right: any) => {
+                                                                const leftIsPm = left.role === "pm" || left.roles?.includes("pm");
+                                                                const rightIsPm = right.role === "pm" || right.roles?.includes("pm");
+                                                                return Number(rightIsPm) - Number(leftIsPm) || left.name.localeCompare(right.name, "zh-Hant");
+                                                            })}
+                                                            selectedUserId={field.value}
+                                                            placeholder="搜尋 PM 或輸入 Email 前綴..."
+                                                            onSelect={(selectedUser) => field.onChange(selectedUser.id)}
+                                                            onClear={() => field.onChange("")}
+                                                            filterUser={(pickerUser) => pickerUser.isActive !== false}
+                                                        />
+                                                    </FormControl>
                                                     <FormMessage />
                                                 </FormItem>
                                             )}

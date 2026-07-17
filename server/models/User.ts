@@ -16,6 +16,7 @@ export interface IUser extends Document {
     skills: UserSkill[];
     costRate: UserCostRate;
     costRateHistory?: UserCostRateHistory[];
+    lastLoginAt?: Date;
     createdAt: Date;
     updatedAt: Date;
 }
@@ -46,7 +47,8 @@ const UserSchema = new Schema<IUser>({
         hourlyRate: { type: Number },
         currency: { type: String },
         updatedAt: { type: Date, default: Date.now }
-    }]
+    }],
+    lastLoginAt: { type: Date }
 }, { timestamps: true });
 
 UserSchema.index({ role: 1, isActive: 1 });
@@ -54,6 +56,7 @@ UserSchema.index({ name: 1, _id: 1 });
 UserSchema.index({ email: 1, _id: 1 });
 UserSchema.index({ department: 1, _id: 1 });
 UserSchema.index({ createdAt: -1 });
+UserSchema.index({ lastLoginAt: -1 });
 UserSchema.index({ name: "text", email: "text", department: "text" });
 
 export const UserModel = mongoose.models.User || mongoose.model<IUser>("User", UserSchema);

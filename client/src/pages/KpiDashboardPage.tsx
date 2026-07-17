@@ -1,5 +1,6 @@
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import { trpc } from "../lib/trpc";
+import { Link } from "wouter";
 import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip as RechartsTooltip, BarChart, Bar, LineChart, Line, XAxis, YAxis, CartesianGrid } from "recharts";
 import { TrendingUp, Users, AlertTriangle, CheckCircle, PieChart as PieChartIcon, Download } from "lucide-react";
 import { exportArraysToXlsx } from "../lib/exportXlsx";
@@ -7,15 +8,6 @@ import { exportArraysToXlsx } from "../lib/exportXlsx";
 export function KpiDashboardPage() {
     const [filterDepts, setFilterDepts] = useState<string[]>([]);
     const [filterUsers, setFilterUsers] = useState<string[]>([]);
-    const [targetForm, setTargetForm] = useState({
-        scope: "department",
-        department: "",
-        userId: "",
-        targetAmount: 0,
-        note: ""
-    });
-    const [pipelineWeights, setPipelineWeights] = useState<Record<string, number>>({});
-    const [importedPipelineWeight, setImportedPipelineWeight] = useState(1);
 
     const filterInput = {
         departments: filterDepts.length > 0 ? filterDepts : undefined,
@@ -33,23 +25,9 @@ export function KpiDashboardPage() {
     const { data: projectStatusData, isLoading: projectStatusLoading } = trpc.analytics.getProjectStatusData.useQuery(filterInput);
     const { data: deptKpiData, isLoading: deptKpiLoading } = trpc.analytics.getDeptKpi.useQuery();
     const { data: importedRevenueData, isLoading: importedRevenueLoading } = trpc.analytics.getKpiRevenueDashboard.useQuery();
-    const { data: governance, refetch: refetchGovernance } = trpc.analytics.getKpiGovernance.useQuery({ year: new Date().getFullYear() });
-    const utils = trpc.useContext();
-    const updatePolicy = trpc.analytics.updateKpiPolicy.useMutation({
-        onSuccess: () => {
-            refetchGovernance();
-            utils.analytics.getKpiData.invalidate();
-            utils.analytics.getDeptKpi.invalidate();
-            utils.analytics.getKpiRevenueDashboard.invalidate();
-        }
-    });
-    const upsertTarget = trpc.analytics.upsertKpiTarget.useMutation({
-        onSuccess: () => {
-            refetchGovernance();
-            utils.analytics.getDeptKpi.invalidate();
-            setTargetForm({ scope: "department", department: "", userId: "", targetAmount: 0, note: "" });
-        }
-    });
+    const { data: governance } = trpc.analytics.getKpiGovernance.useQuery({ year: new Date().getFullYear() });
+    const kpiPolicy = governance?.policy;
+    const pipelineWeightEntries = Object.entries(kpiPolicy?.pipelineWeights || {});
     const [visibleCharts, setVisibleCharts] = useState({
         opportunityMix: true,
         projectStatus: true,
@@ -93,36 +71,6 @@ export function KpiDashboardPage() {
         rows.push(["forecast_revenue", String(kpiData?.forecastRevenue || 0)]);
         return rows;
     }, [importedRevenueData, kpiData, trendData, utData]);
-
-    useEffect(() => {
-        if (!governance?.policy) return;
-        setPipelineWeights(governance.policy.pipelineWeights || {});
-        setImportedPipelineWeight(governance.policy.importedPipelineWeight ?? 1);
-    }, [governance]);
-
-    const handleSavePolicy = () => {
-        if (!governance?.policy) return;
-        updatePolicy.mutate({
-            year: governance.year,
-            sourceDefinitions: governance.policy.sourceDefinitions,
-            pipelineWeights,
-            importedPipelineWeight,
-            settlementLinkRule: governance.policy.settlementLinkRule
-        });
-    };
-
-    const handleSaveTarget = () => {
-        if (!targetForm.department || targetForm.targetAmount < 0) return;
-        const selectedUser = allUsers.find((u: any) => u.id === targetForm.userId);
-        upsertTarget.mutate({
-            year: governance?.year || new Date().getFullYear(),
-            scope: targetForm.scope as "department" | "person",
-            department: targetForm.scope === "person" ? selectedUser?.department || targetForm.department : targetForm.department,
-            userId: targetForm.scope === "person" ? targetForm.userId || undefined : undefined,
-            targetAmount: Number(targetForm.targetAmount || 0),
-            note: targetForm.note || undefined
-        });
-    };
 
     const handleExport = () => {
         exportArraysToXlsx(exportRows, `kpi-dashboard-${new Date().toISOString().slice(0, 10)}.xlsx`, "KPI Dashboard");
@@ -273,83 +221,53 @@ export function KpiDashboardPage() {
 
             <details open className="bg-card border border-border rounded-xl shadow-sm [&>summary::-webkit-details-marker]:hidden">
                 <summary className="cursor-pointer select-none border-b border-border px-4 py-3 text-sm font-bold hover:bg-muted/40">
-                    KPI 治理設定
+                    KPI 治理摘要
                 </summary>
             <div className="grid gap-4 p-4 lg:grid-cols-3">
                 <div className="bg-card border border-border rounded-xl p-5 shadow-sm lg:col-span-1">
                     <h3 className="font-bold mb-3">KPI 資料來源定義</h3>
                     <div className="space-y-3">
-                        {(governance?.policy?.sourceDefinitions || []).map((source: any) => (
+                        {(kpiPolicy?.sourceDefinitions || []).map((source: any) => (
                             <div key={source.key} className="border border-border rounded-lg p-3">
                                 <div className="text-sm font-semibold">{source.label}</div>
                                 <div className="text-xs text-muted-foreground mt-1">{source.source}</div>
                                 <div className="text-xs mt-1">{source.rule}</div>
                             </div>
                         ))}
-                    </div>
-                </div>
-
-                <div className="bg-card border border-border rounded-xl p-5 shadow-sm">
-                    <h3 className="font-bold mb-3">Pipeline 加權</h3>
-                    <div className="space-y-2">
-                        {Object.entries(pipelineWeights).map(([status, value]) => (
-                            <label key={status} className="grid grid-cols-[1fr_90px] items-center gap-3 text-sm">
-                                <span className="text-muted-foreground">{status}</span>
-                                <input
-                                    type="number"
-                                    min="0"
-                                    max="1"
-                                    step="0.05"
-                                    value={value}
-                                    onChange={(e) => setPipelineWeights(current => ({ ...current, [status]: Number(e.target.value) }))}
-                                    className="rounded-md border border-input bg-background px-2 py-1 text-right"
-                                />
-                            </label>
-                        ))}
-                        <label className="grid grid-cols-[1fr_90px] items-center gap-3 text-sm pt-2 border-t border-border">
-                            <span className="text-muted-foreground">匯入 Pipeline 權重</span>
-                            <input
-                                type="number"
-                                min="0"
-                                max="1"
-                                step="0.05"
-                                value={importedPipelineWeight}
-                                onChange={(e) => setImportedPipelineWeight(Number(e.target.value))}
-                                className="rounded-md border border-input bg-background px-2 py-1 text-right"
-                            />
-                        </label>
-                        <button onClick={handleSavePolicy} disabled={updatePolicy.isPending} className="w-full mt-2 rounded-lg bg-primary px-3 py-2 text-sm font-semibold text-primary-foreground disabled:opacity-50">
-                            儲存加權規則
-                        </button>
-                    </div>
-                </div>
-
-                <div className="bg-card border border-border rounded-xl p-5 shadow-sm">
-                    <h3 className="font-bold mb-3">年度目標設定</h3>
-                    <div className="space-y-2">
-                        <select value={targetForm.scope} onChange={(e) => setTargetForm(f => ({ ...f, scope: e.target.value, userId: "" }))} className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm">
-                            <option value="department">部門目標</option>
-                            <option value="person">個人目標</option>
-                        </select>
-                        {targetForm.scope === "person" ? (
-                            <select value={targetForm.userId} onChange={(e) => {
-                                const user = allUsers.find((u: any) => u.id === e.target.value);
-                                setTargetForm(f => ({ ...f, userId: e.target.value, department: user?.department || "" }));
-                            }} className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm">
-                                <option value="">選擇人員</option>
-                                {allUsers.map((u: any) => <option key={u.id} value={u.id}>{u.name} - {u.department || "未指定"}</option>)}
-                            </select>
-                        ) : (
-                            <select value={targetForm.department} onChange={(e) => setTargetForm(f => ({ ...f, department: e.target.value }))} className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm">
-                                <option value="">選擇部門</option>
-                                {departments.map(d => <option key={d} value={d}>{d}</option>)}
-                            </select>
+                        {!kpiPolicy?.sourceDefinitions?.length && (
+                            <div className="text-sm text-muted-foreground">尚未設定資料來源定義</div>
                         )}
-                        <input type="number" min="0" value={targetForm.targetAmount} onChange={(e) => setTargetForm(f => ({ ...f, targetAmount: Number(e.target.value) }))} placeholder="年度目標金額" className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm" />
-                        <input value={targetForm.note} onChange={(e) => setTargetForm(f => ({ ...f, note: e.target.value }))} placeholder="備註" className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm" />
-                        <button onClick={handleSaveTarget} disabled={upsertTarget.isPending} className="w-full rounded-lg bg-primary px-3 py-2 text-sm font-semibold text-primary-foreground disabled:opacity-50">
-                            儲存年度目標
-                        </button>
+                    </div>
+                </div>
+
+                <div className="bg-card border border-border rounded-xl p-5 shadow-sm">
+                    <h3 className="font-bold mb-3">Pipeline 加權規則</h3>
+                    <div className="space-y-2">
+                        {pipelineWeightEntries.map(([status, value]) => (
+                            <div key={status} className="grid grid-cols-[1fr_90px] items-center gap-3 text-sm">
+                                <span className="text-muted-foreground">{status}</span>
+                                <span className="rounded-md bg-muted px-2 py-1 text-right font-semibold">{Math.round(Number(value) * 100)}%</span>
+                            </div>
+                        ))}
+                        {pipelineWeightEntries.length === 0 && (
+                            <div className="text-sm text-muted-foreground">尚未設定 Pipeline 權重</div>
+                        )}
+                        <div className="grid grid-cols-[1fr_90px] items-center gap-3 text-sm pt-2 border-t border-border">
+                            <span className="text-muted-foreground">匯入 Pipeline 權重</span>
+                            <span className="rounded-md bg-muted px-2 py-1 text-right font-semibold">
+                                {Math.round(Number(kpiPolicy?.importedPipelineWeight ?? 1) * 100)}%
+                            </span>
+                        </div>
+                        <p className="pt-2 text-xs text-muted-foreground">{kpiPolicy?.settlementLinkRule}</p>
+                    </div>
+                </div>
+
+                <div className="bg-card border border-border rounded-xl p-5 shadow-sm">
+                    <h3 className="font-bold mb-3">年度目標設定入口</h3>
+                    <div className="space-y-3">
+                        <p className="text-sm text-muted-foreground">
+                            KPI 治理設定已集中到「利潤中心公式」，此處只顯示目前年度目標摘要，避免兩邊可編輯造成口徑不一致。
+                        </p>
                         <div className="max-h-28 overflow-y-auto pt-2 text-xs text-muted-foreground">
                             {(governance?.targets || []).slice(0, 8).map((target: any) => (
                                 <div key={target.id} className="flex justify-between border-t border-border py-1">
@@ -357,7 +275,13 @@ export function KpiDashboardPage() {
                                     <span>NT$ {Number(target.targetAmount || 0).toLocaleString()}</span>
                                 </div>
                             ))}
+                            {!governance?.targets?.length && (
+                                <div className="border-t border-border py-2">尚未設定年度目標</div>
+                            )}
                         </div>
+                        <Link href="/formula/profit-center" className="inline-flex w-full items-center justify-center rounded-lg bg-primary px-3 py-2 text-sm font-semibold text-primary-foreground hover:bg-primary/90">
+                            前往利潤中心公式設定
+                        </Link>
                     </div>
                 </div>
             </div>

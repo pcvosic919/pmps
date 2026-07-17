@@ -1,8 +1,8 @@
 # PMP System — 專案管理平台
 
-> **Project Management Platform (Full Phase 1-8)** — 整合售前、SR 管理、WBS、工時、結算、AI 整合與 SharePoint 的全流程 SaaS 系統
+> **Project Management Platform** — 整合售前、SR 管理、WBS、工時、結算、報表、Calendar、公司主檔、文件目錄與 SharePoint/本機儲存的全流程系統
 
-[![Status](https://img.shields.io/badge/Status-100%25_Completed-success?style=for-the-badge)](https://github.com/pcvosic919/pmps)
+[![Status](https://img.shields.io/badge/Status-Active_Development-success?style=for-the-badge)](https://github.com/pcvosic919/pmps)
 [![Stack](https://img.shields.io/badge/Stack-React_19_|_TRPC_|_MongoDB-blue?style=for-the-badge)](https://github.com/pcvosic919/pmps)
 
 ---
@@ -30,12 +30,12 @@ PMPsystem/
 | React | 19.x | UI 框架 |
 | Vite | 7.x | 建構工具 |
 | TailwindCSS | 4.x | 樣式 |
-| shadcn/ui | latest | UI 元件庫 |
+| Radix UI / 自訂元件 | latest | Dialog、Select、Form 等 UI 元件 |
 | tRPC | 11.x | 型別安全 API Client |
 | @tanstack/react-query | 5.x | 資料請求 + 分頁 |
 | react-hook-form | 7.x | 表單管理 |
-| zod | 3.22 | 資料驗證 |
-| @hookform/resolvers | 2.9.11 | Zod 整合 |
+| zod | 3.x | 資料驗證 |
+| @hookform/resolvers | 5.x | Zod 整合 |
 | recharts | 3.x | 專案報表與稼動率動態圖表 |
 | lucide-react | latest | 圖示系統 |
 | i18next | latest | 多語系支援 (zh-TW/en) |
@@ -47,8 +47,8 @@ PMPsystem/
 |---|---|---|
 | Express | 4.x | HTTP 伺服器 |
 | tRPC | 11.x | 型別安全 API Server |
-| MongoDB | 6.x+ | 正式唯一資料庫 |
-| Mongoose | 8.x / 9.x | MongoDB ODM / Schema 定義 |
+| MongoDB | 4.4+ / 6.x+ | 正式唯一資料庫；Docker compose 預設使用 `mongo:4.4` |
+| Mongoose | 9.x | MongoDB ODM / Schema 定義 |
 | dotenv | 16.x | 環境變數 |
 
 ---
@@ -58,8 +58,10 @@ PMPsystem/
 ### 環境需求
 - **Node.js** `>= 22.0.0`
 - **pnpm** `>= 9.0.0`
+- **MongoDB**：本機開發預設 `mongodb://localhost:27017/pmp_system`；Docker compose 會另外啟動 MongoDB，主機對外 port 為 `27018`
+- **Docker / Docker Compose**：Ubuntu 部署建議使用
 
-### 安裝與啟動
+### 本機開發啟動
 
 ```bash
 # 安裝依賴
@@ -83,6 +85,68 @@ pnpm dev
 - **前端**: http://localhost:5173
 - **後端 API**: http://localhost:5000
 - **健康檢查**: http://localhost:5000/api/health
+
+### Ubuntu + Docker 啟動
+
+目前 `docker-compose.yml` 會啟動兩個服務：
+- `mongodb`：容器內 `27017`，主機對外 `27018`
+- `web`：使用 `network_mode: "host"`，後端服務聽 `5000`
+
+```bash
+# 第一次部署
+git clone https://github.com/pcvosic919/pmps.git
+cd pmps
+
+# Docker compose 會讀取 .env 進行變數替換；至少請設定 JWT_SECRET
+cat <<'EOF' > .env
+JWT_SECRET=replace-with-a-long-random-secret
+EOF
+
+docker compose up -d --build
+docker compose ps
+curl http://127.0.0.1:5000/api/health
+```
+
+Docker 啟動後：
+- **系統入口**: http://伺服器IP:5000
+- **健康檢查**: http://伺服器IP:5000/api/health
+- **MongoDB**: `mongodb://127.0.0.1:27018/pmp_system`
+
+> 注意：`web` 服務使用 host network，適合 Ubuntu/Linux 伺服器。若改成 bridge network，需要同步調整 `docker-compose.yml` 裡的 `MONGODB_URI`，例如改成 `mongodb://mongodb:27017/pmp_system`。
+
+#### Docker 啟用 Demo 登入
+
+Docker image 內 `NODE_ENV=production`，因此 Demo 快速登入預設不會自動開啟。若測試環境需要 Demo，請在 `docker-compose.yml` 的 `web.environment` 加上：
+
+```yaml
+- DEMO_LOGIN_ENABLED=true
+```
+
+正式環境請不要開啟 Demo 登入。
+
+#### 本機路徑 / SMB 網路磁碟
+
+系統的「自動建立文件目錄」可在 **系統設定 → 自動建立文件目錄** 切換：
+- `SharePoint`
+- `本機路徑`
+- `停用`
+
+若 Ubuntu 已掛載 SMB 網路磁碟，建議用 Docker volume 掛到容器內固定路徑，例如：
+
+```yaml
+services:
+  web:
+    volumes:
+      - /mnt/pmps-documents:/app/storage/documents
+```
+
+然後在系統設定填入：
+
+```text
+/app/storage/documents
+```
+
+建立商機或專案時，系統會依此設定自動建立 `商機/` 或 `專案/` 子目錄。請確認 Ubuntu 掛載點與 Docker 容器都有寫入權限。
 
 ### 其他指令
 
@@ -115,28 +179,32 @@ docker compose run --rm web \
 
 ---
 
-## 🐳 Docker 與 Azure 部署
+## 🐳 Docker / Ubuntu / Azure 部署
 
-本系統支援 Docker 容器化，並已整合 GitHub Actions 自動推送至 ACR (Azure Container Registry) 部署至 Azure App Service。
+本系統支援 Docker 容器化。此 repository 目前提供 `Dockerfile` 與 `docker-compose.yml`，可在 Ubuntu 伺服器上以 Docker Compose 部署；若要部署至 Azure App Service / ACR，可沿用同一個 Dockerfile。
 
 ### 環境變數 (Environment Variables)
 在生產環境 (如 Azure 控制台) 中，必須設定以下變數：
 | 變數名稱 | 必填 | 說明 |
 |---|---|---|
-| `MONGODB_URI` | **是** | Cosmos DB / MongoDB 完整連線字串 (需啟動 SSL；Cosmos DB 建議在路徑指定 database，例如 `/pmp_system`) |
+| `MONGODB_URI` | **是** | MongoDB 完整連線字串。Docker compose 預設為 `mongodb://127.0.0.1:27018/pmp_system`；Cosmos DB 建議在路徑指定 database，例如 `/pmp_system` |
 | `MONGODB_DB_NAME` | 否 | 明確指定 MongoDB database；Cosmos DB 連線字串未包含 database 路徑時會預設使用 `pmp_system`，避免落到 `test` database |
 | `JWT_SECRET` | **是** | JWT 與通知 SSE 短效 Token 簽章密鑰，未設定時服務不會啟動 |
 | `DEMO_LOGIN_ENABLED` | 否 | 設為 `true` 時允許登入頁顯示並使用 Demo 快速登入（建議僅測試環境） |
+| `API_ENCRYPTION_KEY` | 否 | 若設定，前後端 tRPC payload 會以此 key 加解密 |
+| `REQUEST_BODY_LIMIT` | 否 | Express JSON body 上限，預設 `50mb`，Excel/附件匯入較大時可調整 |
 | `ENTRA_ENABLED` | 否 | 設為 `true` 可作為 Entra ID 開關的後備值；正式建議仍由系統設定頁維護 |
 | `ENTRA_CLIENT_ID` | 否 | Entra ID SSO Client ID 後備值 |
 | `ENTRA_CLIENT_SECRET` | 否 | Entra ID 帳號同步 Client Secret 後備值 |
 | `ENTRA_TENANT_ID` | 否 | Entra ID Tenant ID 後備值 |
-| `GEMINI_API_KEY` | 否 | Google AI Studio 密鑰 (用於 AI 報表故事分析) |
-| `COPILOT_API_KEY` | **是** | Copilot Studio REST API 安全驗證密鑰 (X-API-KEY) |
+| `GEMINI_API_KEY` | 否 | Google AI Studio 密鑰；僅使用 AI 分析功能時需要 |
+| `COPILOT_API_KEY` | 否 | Copilot Studio REST API 安全驗證密鑰 (`X-API-KEY`)；只有啟用 `/api/v1` 外部機器人存取時需要 |
 | `GRAPH_API_SECRET` | 否 | Microsoft Graph API 祕鑰 (SharePoint 整合用) |
+| `SHAREPOINT_DOMAIN` | 否 | SharePoint fallback domain；未設定時使用 `contoso.sharepoint.com` 作為 placeholder |
 | `PORT` | 否 | 容器 Port，預設為 `5000` |
 | `MONGOOSE_AUTO_CREATE` | 否 | 是否允許 Mongoose 在 App 啟動時自動建立 collection；Cosmos DB 端點預設為 `false`，避免免費方案啟動時一次建立多個 400 RU/s container。這不會停用資料儲存；只要 collections 已由 `pnpm db:prepare` 建好，App 仍會正常讀寫資料。 |
 | `MONGOOSE_AUTO_INDEX` | 否 | 是否允許 Mongoose 在 App 啟動時自動建立/同步 index；Cosmos DB 端點預設為 `false`，需要時可搭配 `pnpm db:prepare` 手動同步 |
+| `SMTP_HOST` / `SMTP_PORT` / `SMTP_USER` / `SMTP_PASS` | 否 | 系統寄信功能使用；未設定時不影響核心專案管理流程 |
 
 ### Azure Cosmos DB for MongoDB 免費方案注意事項
 Cosmos DB 免費方案常見總吞吐量上限為 1000 RU/s；若每個 collection/container 都使用獨立 400 RU/s，建立第 3 個 container 時會嘗試把總量提高到 1200 RU/s，因而出現 `BadRequest (400)` / `Substatus: 1028`。建議做法：
@@ -158,12 +226,21 @@ Cosmos DB 免費方案常見總吞吐量上限為 1000 RU/s；若每個 collecti
 | Collection / Container | 主要資料 |
 |---|---|
 | `users` | 使用者、角色與帳號狀態 |
+| `companies` | 公司主檔與商機客戶選擇來源 |
 | `opportunities` | 商機資料 |
 | `servicerequests` | 專案/服務請求、WBS、變更請求、附件中繼資料 |
 | `timesheets` | 工時資料 |
+| `calendartasks` | Calendar 手動任務與排程 |
 | `issues` | 問題與風險 |
 | `notifications` | 系統通知 |
 | `settlementlocks` | 結算鎖定紀錄 |
+| `settlementsnapshots` | 月結快照 |
+| `settlementauditlogs` | 月結稽核紀錄 |
+| `revenuesnapshots` | 營收認列 / Pipeline 匯入快照 |
+| `kpitargets` | 年度 KPI 部門/個人目標 |
+| `kpipolicies` | KPI 治理與 Pipeline 權重 |
+| `importbatches` | Excel 匯入批次紀錄 |
+| `reporttemplates` | 自訂報表樣板 |
 | `customfields` | 自訂欄位設定 |
 | `systemsettings` | 系統設定 |
 
@@ -186,8 +263,6 @@ Cosmos DB 免費方案常見總吞吐量上限為 1000 RU/s；若每個 collecti
 
 ---
 
----
-
 ## 📱 頁面路由
 
 以下路由表以 `client/src/App.tsx` 的 route inventory 為唯一準則，並與側欄、頂部導覽保持同步。
@@ -205,17 +280,21 @@ Cosmos DB 免費方案常見總吞吐量上限為 1000 RU/s；若每個 collecti
 | `/notifications` | `NotificationsPage` | 上線 | 通知中心 |
 | `/system-settings` | `SystemSettingsPage` | 上線 | 系統設定 |
 | `/custom-fields` | `CustomFieldsPage` | 上線 | 自訂欄位管理 |
+| `/companies` | `CompanyManagementPage` | 上線 | 公司主檔管理與商機客戶選擇來源 |
 | `/opportunities` | `OpportunitiesPage` | 上線 | 商機清單 (無限捲動) |
 | `/opportunities/:id` | `OpportunityDetailPage` | 上線 | 商機詳情 + 成員管理 |
-| `/projects` | `ProjectManagementPage` | 上線（限 Manager / PM） | 正式專案管理入口 |
+| `/projects` | `ProjectManagementPage` | 上線（權限控管） | 正式專案管理入口，Admin / Manager / PM / Tech 可檢視 |
+| `/pm-dashboard` | `PmDashboardPage` | 上線 | 專案高階儀表板與卡片看板 |
+| `/calendar` | `CalendarPage` | 上線 | Calendar 排程與個人/組織檢視 |
 | `/service-requests` | `ServiceRequestsPage` | 上線 | SR 服務請求清單 |
 | `/service-requests/:id` | `WbsManagementPage` | 上線 | SR WBS 版本管理 |
 | `/change-requests` | `ChangeRequestsPage` | 上線 | 變更請求審核 |
 | `/presales-timesheets` | `PresalesTimesheetsPage` | 上線 | 協銷工時填報 |
 | `/project-timesheets` | `ProjectTimesheetsPage` | 上線 | 專案工時填報 |
 | `/reports` | `ReportBuilderPage` | 上線 | 報表產生器 (含 Recharts 視覺化) |
-| `/issues` | `IssueManagementPage` | 上線 | 專案議題管理 |
 | `/kpi` | `KpiDashboardPage` | 上線 | KPI 分析儀表板 |
+| `/formula/profit-center` | `ProfitCenterFormulaPage` | 上線 | 利潤中心公式、年度 KPI 目標與 Pipeline 權重設定 |
+| `/profit-center-report` | `ProfitCenterReportPage` | 上線 | 利潤中心業績結算儀表板 |
 | `/login` | `LoginPage` | 上線 | 驗證入口，不顯示於主導覽 |
 
 ### 頁面檔存廢盤點
@@ -231,15 +310,21 @@ Cosmos DB 免費方案常見總吞吐量上限為 1000 RU/s；若每個 collecti
 | `NotificationsPage.tsx` | 保留 / 上線 | `/notifications` | 通知中心 |
 | `SystemSettingsPage.tsx` | 保留 / 上線 | `/system-settings` | 系統設定 |
 | `CustomFieldsPage.tsx` | 保留 / 上線 | `/custom-fields` | 自訂欄位設定 |
+| `CompanyManagementPage.tsx` | 保留 / 上線 | `/companies` | 公司主檔管理 |
 | `OpportunitiesPage.tsx` | 保留 / 上線 | `/opportunities` | 商機清單 |
 | `OpportunityDetailPage.tsx` | 保留 / 上線 | `/opportunities/:id` | 商機詳情 |
-| `ProjectManagementPage.tsx` | 保留 / 上線 | `/projects` | 正式專案管理入口 |
+| `ProjectManagementPage.tsx` | 保留 / 上線（權限控管） | `/projects` | 正式專案管理入口 |
+| `PmDashboardPage.tsx` | 保留 / 上線 | `/pm-dashboard` | 專案高階儀表板 |
+| `CalendarPage.tsx` | 保留 / 上線 | `/calendar` | Calendar 排程 |
 | `ServiceRequestsPage.tsx` | 保留 / 上線 | `/service-requests` | SR 清單 |
 | `WbsManagementPage.tsx` | 保留 / 上線 | `/service-requests/:id` | WBS 管理 |
 | `ChangeRequestsPage.tsx` | 保留 / 上線 | `/change-requests` | CR 模組 |
 | `PresalesTimesheetsPage.tsx` | 保留 / 上線 | `/presales-timesheets` | 協銷工時 |
 | `ProjectTimesheetsPage.tsx` | 保留 / 上線 | `/project-timesheets` | 專案工時 |
+| `ReportBuilderPage.tsx` | 保留 / 上線 | `/reports` | 自訂報表產生與匯出 |
 | `KpiDashboardPage.tsx` | 保留 / 上線 | `/kpi` | KPI 儀表板 |
+| `ProfitCenterFormulaPage.tsx` | 保留 / 上線 | `/formula/profit-center` | 利潤中心公式與 KPI 設定 |
+| `ProfitCenterReportPage.tsx` | 保留 / 上線 | `/profit-center-report` | 利潤中心業績結算儀表板 |
 | `LoginPage.tsx` | 保留 / 上線 | `/login` | 登入頁 |
 | `UsersPage.tsx` | 合併後移除 | — | 舊版帳號管理雛形，已由 `UserManagementPage.tsx` 取代 |
 | `TimesheetsPage.tsx` | 合併後移除 | — | 已拆為協銷 / 專案工時兩個正式頁面 |
@@ -257,13 +342,22 @@ Cosmos DB 免費方案常見總吞吐量上限為 1000 RU/s；若每個 collecti
 目前主要集合/文件結構如下：
 
 ```
-users                  # 使用者、技能、費率、成本歷程
-opportunities          # 商機、成員、協銷指派、自訂欄位值
-service_requests       # SR、附件、WBS 版本、變更請求
-issues                 # 專案議題、影響等級、處理狀態
-timesheets             # 協銷 / 專案工時
+users                  # 使用者、角色、技能、費率、登入紀錄
+companies              # 公司主檔與客戶名稱來源
+opportunities          # 商機、成員、協銷指派、自訂欄位值、附件
+servicerequests        # SR / 專案、附件、WBS 版本、變更請求、成員
+calendartasks          # Calendar 手動任務與 WBS 排程
+issues                 # 專案議題、優先級、處理狀態
+timesheets             # 協銷 / 專案 / 其他活動工時
 notifications          # 系統通知
 settlementlocks        # 月結鎖定
+settlementsnapshots    # 月結快照
+settlementauditlogs    # 月結稽核紀錄
+revenuesnapshots       # 年度目標認列 / Pipeline 匯入資料
+kpitargets             # KPI 年度部門與個人目標
+kpipolicies            # KPI 資料來源定義與 Pipeline 權重
+importbatches          # 匯入批次紀錄
+reporttemplates        # 自訂報表樣板
 systemsettings         # 系統設定
 customfields           # 自訂欄位定義
 ```
@@ -289,42 +383,82 @@ user       → 一般用戶
 ### `opportunities` — 商機管理
 - `list` — 分頁查詢商機
 - `getById` — 取得商機詳情
+- `getMembers` / `addMember` / `removeMember` — 商機成員管理
 - `create` — 建立商機
 - `updateStatus` — 更新商機狀態
+- `updateSalesOwner` — 更新業務與業務部門
+- `uploadAttachment` — 上傳商機附件
 - `assignPresales` — 指派協銷技術人員
 - `logPresalesTime` — 記錄協銷工時
 - `createSR` — 從商機建立 SR
 
 ### `projects` — 專案/SR 管理
-- `listSRs` — 查詢 SR 清單
-- `getSRById` — SR 詳情
-- `getWbsVersions` — WBS 版本清單
+- `srList` — 查詢 SR / 專案清單
+- `srById` — SR 詳情與 WBS 版本
+- `createSR` — 手動建立 SR / 專案 / 其他活動
+- `getSrMembers` / `addSrMember` / `removeSrMember` — 專案參與人員與觀察者管理
+- `updateSRStatus` — 更新 SR 狀態
+- `updateSalesOwner` — 更新專案業務
+- `updateFinalPrice` — 更新最終價格
 - `submitWbsVersion` — 提交 WBS 版本審核
-- `approveWbs` — 核准 WBS
+- `reviewWbsVersion` — 跨部門 WBS 核准 / 退回
+- `scheduleWbsItem` / `updateWbsItemSchedule` — WBS 排程
+- `createCalendarTask` / `updateCalendarTaskSchedule` — Calendar 手動任務
+- `generateWbsQuote` — WBS 轉報價單資料
 - `logProjectTime` — 記錄專案工時
-- `createCR` — 建立變更請求
-- `listCRs` — 查詢變更請求
+- `createCr` / `crList` / `reviewCr` — 變更請求
+- `uploadSrAttachment` / `srAttachmentsList` — 專案附件
+- `delete` — 刪除 SR（後端仍為 admin procedure；前端限制 `demo@demo.com` 可刪除）
 
 ### `users` — 用戶管理
 - `list` — 分頁查詢用戶
+- `pmList` / `techList` / `presalesList` / `resourceList` — 依角色取得人員清單
+- `activeUsers` — 取得曾登入的活躍帳號
 - `updateUser` — 更新用戶資料 (角色/部門/狀態)
 - `createManual` — 手動建立用戶
 - `deleteManual` — 刪除用戶
-- `setCostRate` — 設定費率
+- `updateCostRate` / `updateBatchCostRates` — 設定費率
+- `syncEntraUsers` / `clearAllEntraUsers` — Entra ID 同步與清理
+
+### `companies` — 公司管理
+- `list` — 查詢公司主檔
+- `create` — 新增公司
+- `bulkUpsert` — Excel 匯入 / 批次更新公司
+- `update` — 更新公司
+- `delete` — 刪除公司
 
 ### `analytics` — 分析與報表
-- `getKpis` — KPI 指標彙整
+- `getKpiData` — KPI 指標彙整
 - `getUtilization` — 稼動率資料
 - `getSettlements` — 月結清單
+- `lockSettlement` / `unlockSettlement` — 月結鎖定與解除
+- `getKpiGovernance` / `updateKpiPolicy` / `upsertKpiTarget` — KPI 目標、資料來源與 Pipeline 權重
+- `getReportCatalog` / `generateReport` — 自訂報表目錄與匯出資料
+- `getOpenCasesDashboard` / `getKpiRevenueDashboard` — 未結案與年度目標認列儀表板
+- `getProfitCenterReport` — 利潤中心報表
 - `getNotifications` — 通知清單
 
 ### `system` — 系統設定
 - `getSettings` — 取得系統設定
-- `updateSetting` — 更新設定
+- `updateSettings` — 更新設定
+- `getCustomFields` / `createCustomField` / `updateCustomField` / `deleteCustomField` — 自訂欄位
+- `listSharePointFiles` / `ensureSharePointFolder` / `testSharePointFolder` — SharePoint 文件目錄相關操作
+
+### `auth` — 登入與身分
+- `login` — 帳密登入
+- `demoLogin` / `demoStatus` — Demo 登入
+- `entraConfig` / `entraLogin` — Microsoft Entra ID 登入
+- `me` — 目前登入使用者
+- `streamToken` — 通知 SSE Token
+
+### `issues` — 專案議題
+- `listBySr` — 查詢專案議題
+- `create` — 建立議題
+- `update` — 更新議題
+- `delete` — 刪除議題
 
 ### `integrations` — 整合
-- `syncEntra` — Microsoft Entra ID 同步 (骨架)
-- `sharePoint` — 透過 `SharePointService` 進行文件與 RAG 資訊對接
+- `uploadDocument` — 舊版整合測試 stub；正式附件上傳以 `opportunities.uploadAttachment` / `projects.uploadSrAttachment` 為主
 
 ### 🤖 `Copilot REST API (v1)` — AI 機器人對接 (非 tRPC)
 - `GET /api/v1/projects/active` — 提供給 Copilot 的進行中專案清單 (RAG 最佳化)
@@ -340,7 +474,7 @@ user       → 一般用戶
 client/src/
 ├── components/
 │   ├── AppLayout.tsx        # 左側導覽 + 整體布局
-│   └── ui/                  # shadcn/ui 元件
+│   └── ui/                  # Radix UI / 自訂基礎元件
 │       ├── button.tsx
 │       ├── dialog.tsx
 │       ├── form.tsx
@@ -364,15 +498,22 @@ client/src/
 server/
 ├── _core/
 │   └── trpc.ts              # tRPC router/procedure 定義 + context
+├── api/v1/
+│   └── routes.ts            # Copilot / 外部系統 REST API
 ├── routers/
+│   ├── auth.ts
 │   ├── opportunities.ts
 │   ├── projects.ts
 │   ├── users.ts
 │   ├── analytics.ts
 │   ├── system.ts
+│   ├── companies.ts
+│   ├── issues.ts
 │   └── integrations.ts
 ├── db.ts                    # MongoDB 連線入口
 ├── models/                  # Mongoose models
+├── services/                # SharePoint / 本機文件目錄服務
+├── scripts/                 # Excel 匯入腳本
 └── index.ts                 # Express 入口 + 健康檢查
 ```
 
@@ -393,11 +534,14 @@ Authorization: Bearer <pmp_auth_token>
 - **Demo 快速登入**：測試/開發環境可直接選擇預設角色，一鍵取得 JWT；需先執行 `pnpm seed:demo` 建立 Demo 帳號。
 
 ### Demo 帳號
+- `demo@demo.com`
 - `demo_admin@demo.com`
 - `demo_manager@demo.com`
 - `demo_business@demo.com`
+- `demo_presales@demo.com`
 - `demo_pm@demo.com`
 - `demo_tech@demo.com`
+- `demo_presales2@demo.com`
 
 > 預設 Demo 密碼：`password123`
 
@@ -487,16 +631,13 @@ pnpm dev
 ## 🛠️ 開發注意事項
 
 ### 套件版本固定
-- `zod` 鎖定 `^3.22.4`，`@hookform/resolvers` 鎖定 `2.9.11`（高版本不相容）
+- 目前前端使用 `zod` 3.x、`@hookform/resolvers` 5.x、React 19、Vite 7；版本以 `package.json` / `pnpm-lock.yaml` 為準
 - MongoDB / Mongoose 是唯一資料路徑；新增或修改資料結構時，請只更新 `server/models/*.ts` 與 `shared/types.ts`
 
-### shadcn/ui 安裝
-元件位於 `client/src/components/ui/`，需透過以下方式安裝：
-```bash
-cd client
-npx shadcn@latest add [component]
-# 注意：生成的檔案若在 @/ 路徑下需手動移至 src/components/ui/
-```
+### UI 元件
+- `client/src/components/ui/` 放置基礎 UI 元件。
+- 目前主要使用 Radix UI、TailwindCSS 與專案自訂元件。
+- 新增表單或 Dialog 時，優先沿用既有元件與 `UserSearchPicker` / `BusinessUserPicker`，避免再做一套搜尋狀態造成輸入閃爍。
 
 ### 分頁/無限捲動
 - `users.list` 與 `opportunities.list` 均支援 `limit` + `cursor` 分頁

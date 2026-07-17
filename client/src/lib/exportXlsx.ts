@@ -14,6 +14,7 @@ type WbsWorkbookItem = {
     title: string;
     estimatedHours: number;
     assigneeId?: string;
+    assigneeIds?: string[];
     level?: number;
     code?: string;
     description?: string;
@@ -243,6 +244,11 @@ const buildWbsRows = (items: WbsWorkbookItem[], allPeople: WbsWorkbookPerson[]) 
         }
 
         const assignee = item.assigneeId ? peopleById.get(item.assigneeId) : undefined;
+        const additionalAssigneeNames = (item.assigneeIds || [])
+            .filter((assigneeId) => assigneeId !== item.assigneeId)
+            .map((assigneeId) => peopleById.get(assigneeId)?.displayName || peopleById.get(assigneeId)?.name || assigneeId)
+            .filter(Boolean)
+            .join(", ");
         const completionPercentage = item.completionPercentage || 0;
 
         return {
@@ -257,6 +263,7 @@ const buildWbsRows = (items: WbsWorkbookItem[], allPeople: WbsWorkbookPerson[]) 
             amount: (item.estimatedHours || 0) * (assignee?.dailyRate || 0),
             assigneeName: assignee?.name || "",
             assigneeDisplayName: assignee?.displayName || assignee?.name || "",
+            additionalAssigneeNames,
             department: assignee?.department || "",
             startDate: normalizeDateText(item.startDate),
             endDate: normalizeDateText(item.endDate),
@@ -516,7 +523,7 @@ export function exportWbsCostWorkbook(input: WbsWorkbookInput): WbsWorkbookExpor
     const versionText = input.version ? String(input.version) : "";
     const missingRatePeople = Array.from(new Set(rows.filter((row) => row.assigneeName && row.dailyRate <= 0).map((row) => row.assigneeName)));
 
-    const actionHeaders = ["階層", "工作項次", "工作項目", "工作編號", "工作說明", "工作天數(小計)", "負責單位", "負責人", "起始時間", "起訖時間", "完成百分比", "備註", "SR ID", "WBS 版本", "匯出時間"];
+    const actionHeaders = ["階層", "工作項次", "工作項目", "工作編號", "工作說明", "工作天數(小計)", "負責單位", "負責人", "其他指派人員", "起始時間", "起訖時間", "完成百分比", "備註", "SR ID", "WBS 版本", "匯出時間"];
     const actionSheet = XLSX.utils.aoa_to_sheet([
         actionHeaders,
         ...rows.map((row) => [
@@ -528,6 +535,7 @@ export function exportWbsCostWorkbook(input: WbsWorkbookInput): WbsWorkbookExpor
             row.days,
             row.department || technicalDepartment,
             row.assigneeName || "",
+            row.additionalAssigneeNames || "",
             row.startDate,
             row.endDate,
             row.completionPercentage,
@@ -546,6 +554,7 @@ export function exportWbsCostWorkbook(input: WbsWorkbookInput): WbsWorkbookExpor
         { wch: 14 },
         { wch: 20 },
         { wch: 28 },
+        { wch: 32 },
         { wch: 13 },
         { wch: 13 },
         { wch: 12 },
@@ -554,7 +563,7 @@ export function exportWbsCostWorkbook(input: WbsWorkbookInput): WbsWorkbookExpor
         { wch: 10 },
         { wch: 20 },
     ];
-    actionSheet["!autofilter"] = { ref: `A1:O${Math.max(rows.length + 1, 1)}` };
+    actionSheet["!autofilter"] = { ref: `A1:P${Math.max(rows.length + 1, 1)}` };
     applyTableTheme(actionSheet, 1, Math.max(rows.length + 1, 1), actionHeaders.length);
     XLSX.utils.book_append_sheet(workbook, actionSheet, "Action Item");
 

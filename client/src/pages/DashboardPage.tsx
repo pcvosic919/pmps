@@ -10,10 +10,7 @@ export function DashboardPage() {
     const isAdminLike = hasRole("admin") || hasRole("manager");
     const [searchTerm, setSearchTerm] = useState("");
     const [sortBy, setSortBy] = useState<"name" | "email" | "role">("name");
-    const { data: usersData, isLoading } = trpc.users.list.useQuery(
-        { limit: 8, search: searchTerm, sortBy, sortOrder: "asc" },
-        { enabled: isAdminLike }
-    );
+    const { data: activeUsers, isLoading } = trpc.users.activeUsers.useQuery(undefined, { enabled: isAdminLike });
     const { data: activeProjects } = trpc.projects.getActiveProjectCount.useQuery(undefined, { enabled: isAdminLike });
     const { data: activeOpps } = trpc.opportunities.getActiveOpportunityCount.useQuery(undefined, { enabled: isAdminLike });
     const { data: notifications } = trpc.analytics.getNotifications.useQuery(
@@ -51,6 +48,17 @@ export function DashboardPage() {
             tone: "text-amber-600"
         }
     ], [approvalNotifications.length, todoNotifications.length, warningNotifications.length, hasRole]);
+    const displayedActiveUsers = useMemo(() => {
+        const keyword = searchTerm.trim().toLowerCase();
+        return [...(activeUsers || [])]
+            .filter((item: any) => !keyword || [item.name, item.email, item.department, item.role].some(value => String(value || "").toLowerCase().includes(keyword)))
+            .sort((left: any, right: any) => {
+                if (sortBy === "email") return String(left.email || "").localeCompare(String(right.email || ""));
+                if (sortBy === "role") return String(left.role || "").localeCompare(String(right.role || ""));
+                return String(left.name || "").localeCompare(String(right.name || ""), "zh-Hant");
+            })
+            .slice(0, 8);
+    }, [activeUsers, searchTerm, sortBy]);
 
     if (!user) {
         return <div className="p-8 text-center text-muted-foreground">載入使用者資訊中...</div>;
@@ -203,7 +211,7 @@ export function DashboardPage() {
                                 </tr>
                             </thead>
                             <tbody className="divide-y divide-border">
-                                {usersData?.items?.map((u: any) => (
+                                {displayedActiveUsers.map((u: any) => (
                                     <tr key={u.id} className="hover:bg-muted/30 transition-colors">
                                         <td className="px-5 py-3 font-medium">{u.name}</td>
                                         <td className="px-5 py-3 text-muted-foreground">{u.email}</td>
@@ -214,6 +222,13 @@ export function DashboardPage() {
                                         </td>
                                     </tr>
                                 ))}
+                                {displayedActiveUsers.length === 0 && (
+                                    <tr>
+                                        <td colSpan={3} className="px-5 py-8 text-center text-muted-foreground">
+                                            尚無已登入使用者紀錄
+                                        </td>
+                                    </tr>
+                                )}
                             </tbody>
                         </table>
                     </div>

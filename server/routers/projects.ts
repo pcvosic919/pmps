@@ -10,7 +10,7 @@ import { OpportunityModel } from "../models/Opportunity";
 import { CalendarTaskModel } from "../models/CalendarTask";
 import mongoose from "mongoose";
 import { TRPCError } from "@trpc/server";
-import { approvalActions, attachmentCategories, srStatuses, srTypes } from "../../shared/types";
+import { approvalActions, attachmentCategories, memberRoles, srStatuses, srTypes } from "../../shared/types";
 import {
     assertAuthorized,
     assertFound,
@@ -42,7 +42,7 @@ const assertSettlementUnlocked = async (month: string, type: "presales" | "proje
 };
 
 const buildSrMembers = (creatorId: string, pmId: string, joinPmAsMember: boolean = true) => {
-    const members: Array<{ userId: any; memberRole: "owner" | "assignee" }> = [
+    const members: Array<{ userId: any; memberRole: "owner" | "assignee" | "participant" | "watcher" }> = [
         { userId: toObjectId(creatorId), memberRole: "owner" }
     ];
     if (joinPmAsMember && pmId !== creatorId) {
@@ -129,14 +129,18 @@ const getCompletionPercentageForStatus = (status: "not_started" | "in_progress" 
 
 const idString = (value: any) => value?._id?.toString?.() || value?.toString?.() || "";
 
-const isWatcherMember = (sr: any, userId: string) =>
+const getSrMemberRole = (sr: any, userId: string) =>
+    (sr.members || []).find((member: any) => idString(member.userId) === userId)?.memberRole;
+
+const isSrOwnerMember = (sr: any, userId: string) =>
     (sr.members || []).some((member: any) =>
-        member.memberRole === "watcher" && idString(member.userId) === userId
+        member.memberRole === "owner" && idString(member.userId) === userId
     );
 
 const buildSrActivityAssignment = (sr: any, assignee: any, options?: { isPmView?: boolean; isBacklog?: boolean }) => {
     const projectWindow = getProjectScheduleWindow(sr);
-    const isWatcher = isWatcherMember(sr, assignee?._id?.toString?.() || assignee?.toString?.() || "");
+    const memberRole = getSrMemberRole(sr, assignee?._id?.toString?.() || assignee?.toString?.() || "");
+    const isWatcher = memberRole === "watcher";
     return {
         id: sr._id.toString(),
         srId: sr._id.toString(),
@@ -156,7 +160,7 @@ const buildSrActivityAssignment = (sr: any, assignee: any, options?: { isPmView?
         assigneeName: assignee?.name || assignee?.email || "未指派",
         assigneeEmail: assignee?.email || "",
         assigneeDepartment: assignee?.department || "",
-        memberRole: isWatcher ? "watcher" : "assignee",
+        memberRole: memberRole || "assignee",
         isBillable: !isWatcher,
         isPmView: !!options?.isPmView,
         sourceType: "other_activity",
@@ -537,6 +541,93 @@ export const projectsRouter = router({
             return { id: sr._id.toString() };
         }),
 
+    getSrMembers: protectedProcedure
+        .input(z.object({ srId: z.string() }))
+        .query(async ({ input, ctx }) => {
+            const sr: any = assertFound(
+                await ServiceRequestModel.findById(input.srId)
+                    .select("pmId members opportunityId wbsVersions.items.assigneeId changeRequests")
+                    .populate("members.userId", "name email department title role roles")
+                    .lean(),
+                "找不到該服務請求"
+            );
+            const opportunity = sr.opportunityId
+                ? await OpportunityModel.findById(sr.opportunityId).select("ownerId members presalesAssignments").lean()
+                : null;
+            assertAuthorized(canAccessServiceRequest(ctx.user, sr, opportunity), "您沒有權限查看此專案成員");
+            return (sr.members || []).map((member: any) => ({
+                id: member._id?.toString(),
+                userId: member.userId?._id?.toString() || member.userId?.toString(),
+                userName: member.userId?.name || member.userId?.email || "未知使用者",
+                email: member.userId?.email || "",
+                department: member.userId?.department || "",
+                title: member.userId?.title || "",
+                role: member.userId?.role || "",
+                roles: member.userId?.roles || [],
+                memberRole: member.memberRole
+            }));
+        }),
+
+    addSrMember: protectedProcedure
+        .input(z.object({
+            srId: z.string(),
+            userId: z.string(),
+            memberRole: z.enum(memberRoles).default("participant")
+        }))
+        .mutation(async ({ input, ctx }) => {
+            const sr: any = assertFound(
+                await ServiceRequestModel.findById(input.srId)
+                    .select("pmId members opportunityId wbsVersions.items.assigneeId changeRequests"),
+                "找不到該服務請求"
+            );
+            const opportunity = sr.opportunityId
+                ? await OpportunityModel.findById(sr.opportunityId).select("ownerId members presalesAssignments").lean()
+                : null;
+            assertAuthorized(
+                canManageServiceRequestStatus(ctx.user, sr, opportunity) || isSrOwnerMember(sr, ctx.user.id),
+                "您沒有權限管理此專案成員"
+            );
+            const user = assertFound(await UserModel.findById(input.userId).select("_id isActive").lean(), "找不到指定使用者");
+            if (user.isActive === false) {
+                throw new TRPCError({ code: "BAD_REQUEST", message: "無法加入已停用帳號" });
+            }
+            if ((sr.members || []).some((member: any) => idString(member.userId) === input.userId)) {
+                throw new TRPCError({ code: "BAD_REQUEST", message: "此使用者已是專案成員" });
+            }
+            await ServiceRequestModel.updateOne(
+                { _id: input.srId },
+                { $push: { members: { userId: toObjectId(input.userId), memberRole: input.memberRole } } }
+            );
+            return { success: true };
+        }),
+
+    removeSrMember: protectedProcedure
+        .input(z.object({ srId: z.string(), memberId: z.string() }))
+        .mutation(async ({ input, ctx }) => {
+            const sr: any = assertFound(
+                await ServiceRequestModel.findById(input.srId)
+                    .select("pmId members opportunityId wbsVersions.items.assigneeId changeRequests"),
+                "找不到該服務請求"
+            );
+            const opportunity = sr.opportunityId
+                ? await OpportunityModel.findById(sr.opportunityId).select("ownerId members presalesAssignments").lean()
+                : null;
+            assertAuthorized(
+                canManageServiceRequestStatus(ctx.user, sr, opportunity) || isSrOwnerMember(sr, ctx.user.id),
+                "您沒有權限管理此專案成員"
+            );
+            const member = (sr.members || []).find((item: any) => item._id?.toString() === input.memberId);
+            if (!member) throw new TRPCError({ code: "NOT_FOUND", message: "找不到該專案成員" });
+            if (member.memberRole === "owner") {
+                throw new TRPCError({ code: "BAD_REQUEST", message: "不可移除專案負責人" });
+            }
+            await ServiceRequestModel.updateOne(
+                { _id: input.srId },
+                { $pull: { members: { _id: toObjectId(input.memberId) } } }
+            );
+            return { success: true };
+        }),
+
     updateSRStatus: protectedProcedure
         .input(z.object({
             id: z.string(),
@@ -796,6 +887,7 @@ export const projectsRouter = router({
                         ...item,
                         id: item._id.toString(),
                         assigneeId: item.assigneeId?.toString(),
+                        assigneeIds: (item.assigneeIds || []).map((id: any) => id.toString()),
                         status: getWbsItemStatus(item),
                         startDate: item.startDate,
                         endDate: item.endDate
@@ -894,6 +986,7 @@ export const projectsRouter = router({
                 title: z.coerce.string().trim().min(1),
                 estimatedHours: z.number(),
                 assigneeId: z.string().optional(),
+                assigneeIds: z.array(z.string()).optional(),
                 startDate: z.coerce.date().optional(),
                 endDate: z.coerce.date().optional(),
                 completionPercentage: z.number().optional(),
@@ -926,6 +1019,7 @@ export const projectsRouter = router({
 	                    title: item.title,
 	                    estimatedHours: (item.level || 0) === 0 ? 0 : item.estimatedHours,
                     assigneeId: item.assigneeId ? new mongoose.Types.ObjectId(item.assigneeId) : undefined,
+                    assigneeIds: item.assigneeIds?.length ? item.assigneeIds.map(id => new mongoose.Types.ObjectId(id)) : undefined,
                     startDate: item.startDate,
                     endDate: item.endDate,
                     status: item.status || getWbsItemStatus(item),
@@ -1269,7 +1363,7 @@ export const projectsRouter = router({
             const otherActivityAssignments = srs
                 .filter((sr: any) =>
                     sr.srType === "other_activity" ||
-                    (sr.members || []).some((member: any) => member.memberRole === "watcher" && scopedUserIdStrings.has(idString(member.userId)))
+                    (sr.members || []).some((member: any) => ["participant", "watcher"].includes(member.memberRole) && scopedUserIdStrings.has(idString(member.userId)))
                 )
                 .flatMap((sr: any) => {
                     const participants = new Map<string, any>();
@@ -1562,7 +1656,9 @@ export const projectsRouter = router({
                 : null;
             assertAuthorized(canAccessServiceRequest(ctx.user, srAccessView, opportunity), "您沒有權限填寫此專案工時");
 
-            const isObserver = isWatcherMember(srAccessView, ctx.user.id);
+            const currentMemberRole = getSrMemberRole(srAccessView, ctx.user.id);
+            const isObserver = currentMemberRole === "watcher";
+            const isParticipant = currentMemberRole === "participant";
             let wbsItem: any = null;
             let effectiveVersion: any = null;
             if (input.wbsItemId) {
@@ -1574,7 +1670,7 @@ export const projectsRouter = router({
                 if (wbsItem.assigneeId?.toString() !== ctx.user.id && !isObserver && !hasAnyRole(ctx.user, ["admin", "manager"])) {
                     throw new TRPCError({ code: "FORBIDDEN", message: "您只能填寫指派給自己的 WBS 項目" });
                 }
-            } else if (sr.srType !== "other_activity" && !isObserver) {
+            } else if (sr.srType !== "other_activity" && !isObserver && !isParticipant) {
                 throw new TRPCError({ code: "BAD_REQUEST", message: "此類型工時需選擇 WBS 項目" });
             }
 

@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { trpc } from "../lib/trpc";
 import { useRoute } from "wouter";
-import { ArrowLeft, Plus, FileText, Clock, Trash2, Save, X, CheckCircle2, XCircle, Upload, Paperclip, AlertCircle, Receipt, Download, ChevronDown, ChevronRight } from "lucide-react";
+import { ArrowLeft, Plus, FileText, Clock, Trash2, Save, X, CheckCircle2, XCircle, Upload, Paperclip, AlertCircle, Receipt, Download, ChevronDown, ChevronRight, Users, UserPlus } from "lucide-react";
 import { Link } from "wouter";
 import toast from "react-hot-toast";
 import { useCurrentUser } from "../lib/useCurrentUser";
@@ -15,7 +15,9 @@ import { fileToBase64 } from "../lib/files";
 type WbsDraftItem = {
     title: string;
     estimatedHours: number;
+    actualHours?: number;
     assigneeId: string | undefined;
+    assigneeIds?: string[];
     startDate?: Date;
     endDate?: Date;
     completionPercentage?: number;
@@ -75,6 +77,9 @@ export function WbsManagementPage() {
     const [isCreatingIssue, setIsCreatingIssue] = useState(false);
     const [newIssueData, setNewIssueData] = useState({ title: "", description: "", priority: "medium", assigneeId: "" });
     const [showEditSalesModal, setShowEditSalesModal] = useState(false);
+    const [showProjectMemberModal, setShowProjectMemberModal] = useState(false);
+    const [projectMemberUserId, setProjectMemberUserId] = useState("");
+    const [projectMemberRole, setProjectMemberRole] = useState<"participant" | "watcher">("participant");
     const [editedSalesUserId, setEditedSalesUserId] = useState("");
     const [editedSalesRep, setEditedSalesRep] = useState("");
     const [editedSalesDepartment, setEditedSalesDepartment] = useState("");
@@ -83,6 +88,7 @@ export function WbsManagementPage() {
     const { data: techs } = trpc.users.techList.useQuery();
     const { data: allUsers } = trpc.users.list.useQuery({ limit: 500 });
     const { data: attachments, refetch: refetchAttachments } = trpc.projects.srAttachmentsList.useQuery({ srId }, { enabled: !!srId });
+    const { data: projectMembers, refetch: refetchProjectMembers } = trpc.projects.getSrMembers.useQuery({ srId }, { enabled: !!srId });
     const { data: wbsQuote, refetch: refetchWbsQuote } = trpc.projects.generateWbsQuote.useQuery({ srId }, { enabled: false });
 
     // Review state...
@@ -148,6 +154,27 @@ export function WbsManagementPage() {
         onError: (err) => toast.error(err.message || "更新最終價格失敗")
     });
 
+    const addProjectMemberMutation = trpc.projects.addSrMember.useMutation({
+        onSuccess: () => {
+            refetchProjectMembers();
+            utils.projects.srById.invalidate({ id: srId });
+            setShowProjectMemberModal(false);
+            setProjectMemberUserId("");
+            setProjectMemberRole("participant");
+            toast.success("專案參與人員已新增");
+        },
+        onError: (err) => toast.error(err.message || "新增專案參與人員失敗")
+    });
+
+    const removeProjectMemberMutation = trpc.projects.removeSrMember.useMutation({
+        onSuccess: () => {
+            refetchProjectMembers();
+            utils.projects.srById.invalidate({ id: srId });
+            toast.success("專案參與人員已移除");
+        },
+        onError: (err) => toast.error(err.message || "移除專案參與人員失敗")
+    });
+
     const parseExcelDate = (value: any) => {
         if (!value) return undefined;
         if (value instanceof Date) return value;
@@ -163,6 +190,19 @@ export function WbsManagementPage() {
     const normalizeImportDate = (value?: Date) => value ? value.toISOString().slice(0, 10) : "";
     const isHeadingItem = (item: Pick<WbsDraftItem, "level">) => (item.level || 0) === 0;
     const getImportText = (value: any, fallback = "") => value == null || value === "" ? fallback : String(value).trim();
+    const findUserByText = (value?: string) => {
+        const assigneeText = String(value || "").trim().toLowerCase();
+        if (!assigneeText) return undefined;
+        return techs?.find(t =>
+            [t.id, t.name, t.email].some(candidate => String(candidate || "").trim().toLowerCase() === assigneeText)
+        ) || allUsers?.items?.find((item: any) =>
+            [item.id, item.name, item.email].some(candidate => String(candidate || "").trim().toLowerCase() === assigneeText)
+        );
+    };
+    const findUsersByTextList = (value?: string) => Array.from(new Set(String(value || "")
+        .split(/[,，;；\n]/)
+        .map(item => findUserByText(item)?.id)
+        .filter(Boolean))) as string[];
 
     const handleExcelImport = (e: React.ChangeEvent<HTMLInputElement>) => {
         const file = e.target.files?.[0];
@@ -195,12 +235,8 @@ export function WbsManagementPage() {
                             }
                         }
                     }
-                    const assigneeText = String(assigneeName || "").trim().toLowerCase();
-                    const assignee = techs?.find(t =>
-                        [t.id, t.name, t.email].some(value => String(value || "").trim().toLowerCase() === assigneeText)
-                    ) || allUsers?.items?.find((item: any) =>
-                        [item.id, item.name, item.email].some(value => String(value || "").trim().toLowerCase() === assigneeText)
-                    );
+                    const multiAssigneeIds = findUsersByTextList(row['指派人員帳號(多人)'] || row['指派人員帳號'] || row['負責人'] || row['Assignee']);
+                    const assignee = findUserByText(assigneeName) || (multiAssigneeIds[0] ? findUserByText(multiAssigneeIds[0]) : undefined);
 
                     // Determine level based on "工作項次" (e.g. "1" -> 0, "1.1" -> 1)
                     let level = Number(row['階層'] || row['Level'] || 0);
@@ -215,7 +251,8 @@ export function WbsManagementPage() {
                         title: getImportText(row['工作項目'] || row['項目名稱'] || row['Title'] || row['項目'] || row['專案階段'], '未命名項目'),
                         estimatedHours: level === 0 ? 0 : rawEstimatedHours,
                         actualHours: 0,
-                        assigneeId: assignee?.id,
+                        assigneeId: assignee?.id || multiAssigneeIds[0],
+                        assigneeIds: multiAssigneeIds,
                         level: level,
                         startDate: parseExcelDate(row['起始時間'] || row['預計執行日']),
                         endDate: parseExcelDate(row['起訖時間'] || row['預計完成日']),
@@ -244,6 +281,7 @@ export function WbsManagementPage() {
                         current.title !== item.title ||
                         Number(current.estimatedHours || 0) !== Number(item.estimatedHours || 0) ||
                         (current.assigneeId || "") !== (item.assigneeId || "") ||
+                        (current.assigneeIds || []).join(",") !== (item.assigneeIds || []).join(",") ||
                         normalizeImportDate(current.startDate) !== normalizeImportDate(item.startDate) ||
                         normalizeImportDate(current.endDate) !== normalizeImportDate(item.endDate) ||
                         (current.code || "") !== (item.code || "") ||
@@ -360,16 +398,61 @@ export function WbsManagementPage() {
         });
     };
 
-    const handleAddDraftItem = () => setDraftItems([...draftItems, { title: "", estimatedHours: 0, assigneeId: undefined, level: 0, code: "", remarks: "", status: "not_started", completionPercentage: 0 }]);
+    const handleAddDraftItem = () => setDraftItems([...draftItems, { title: "", estimatedHours: 0, actualHours: 0, assigneeId: undefined, assigneeIds: [], level: 0, code: "", remarks: "", status: "not_started", completionPercentage: 0 }]);
     const handleAddSubTask = (parentIndex: number) => {
         const parentLevel = draftItems[parentIndex].level || 0;
         const newItems = [...draftItems];
-        newItems.splice(parentIndex + 1, 0, { title: "", estimatedHours: 4, assigneeId: undefined, level: parentLevel + 1, code: "", remarks: "", status: "not_started", completionPercentage: 0 });
+        newItems.splice(parentIndex + 1, 0, { title: "", estimatedHours: 4, actualHours: 0, assigneeId: undefined, assigneeIds: [], level: parentLevel + 1, code: "", remarks: "", status: "not_started", completionPercentage: 0 });
         setDraftItems(newItems);
+    };
+    const handleApplySingleRowTemplate = (title: "教育訓練" | "內部專案") => {
+        setDraftItems([{
+            title,
+            estimatedHours: 0,
+            actualHours: 0,
+            assigneeId: undefined,
+            assigneeIds: [],
+            level: 1,
+            code: title === "教育訓練" ? "TRAINING" : "INTERNAL",
+            description: title,
+            remarks: "",
+            status: "not_started",
+            completionPercentage: 0,
+            colorCode: "#E2E8F0"
+        }]);
+        setExpandedDraftItems({});
+        toast.success(`已建立「${title}」WBS 範本，請補上天數與指派人員`);
     };
     const handleUpdateDraftItem = (index: number, field: string, value: any) => {
         const newItems = [...draftItems];
         newItems[index] = { ...newItems[index], [field]: value };
+        setDraftItems(newItems);
+    };
+    const handleSetPrimaryAssignee = (index: number, userId?: string) => {
+        const item = draftItems[index];
+        const assigneeIds = userId
+            ? Array.from(new Set([userId, ...(item.assigneeIds || [])]))
+            : (item.assigneeIds || []);
+        const newItems = [...draftItems];
+        newItems[index] = { ...item, assigneeId: userId, assigneeIds };
+        setDraftItems(newItems);
+    };
+    const handleAddDraftAssignee = (index: number, userId: string) => {
+        const item = draftItems[index];
+        const assigneeIds = Array.from(new Set([...(item.assigneeIds || []), userId]));
+        const newItems = [...draftItems];
+        newItems[index] = { ...item, assigneeId: item.assigneeId || userId, assigneeIds };
+        setDraftItems(newItems);
+    };
+    const handleRemoveDraftAssignee = (index: number, userId: string) => {
+        const item = draftItems[index];
+        const assigneeIds = (item.assigneeIds || []).filter(id => id !== userId);
+        const newItems = [...draftItems];
+        newItems[index] = {
+            ...item,
+            assigneeIds,
+            assigneeId: item.assigneeId === userId ? assigneeIds[0] : item.assigneeId
+        };
         setDraftItems(newItems);
     };
     const handleRemoveDraftItem = (index: number) => setDraftItems(draftItems.filter((_, i) => i !== index));
@@ -402,6 +485,7 @@ export function WbsManagementPage() {
                 title: item.title,
                 estimatedHours: item.estimatedHours,
                 assigneeId: item.assigneeId,
+                assigneeIds: item.assigneeIds || (item.assigneeId ? [item.assigneeId] : []),
                 startDate: item.startDate ? new Date(item.startDate) : undefined,
                 endDate: item.endDate ? new Date(item.endDate) : undefined,
                 completionPercentage: item.completionPercentage || 0,
@@ -444,7 +528,8 @@ export function WbsManagementPage() {
         if (draftItems.some(i => !i.title || (!isHeadingItem(i) && i.estimatedHours <= 0))) { toast.error("請確實填寫項目名稱；階層 1 以上才需要工作天數"); return; }
         const normalizedItems = draftItems.map(item => ({
             ...item,
-            estimatedHours: isHeadingItem(item) ? 0 : item.estimatedHours
+            estimatedHours: isHeadingItem(item) ? 0 : item.estimatedHours,
+            assigneeIds: Array.from(new Set([item.assigneeId, ...(item.assigneeIds || [])].filter(Boolean))) as string[]
         }));
         submitVersion.mutate({ srId: sr.id, versionNumber: nextVersionNumber, items: normalizedItems });
     };
@@ -455,6 +540,14 @@ export function WbsManagementPage() {
             return;
         }
         updateSalesOwnerMutation.mutate({ id: sr.id, salesUserId: editedSalesUserId });
+    };
+
+    const handleAddProjectMember = () => {
+        if (!projectMemberUserId) {
+            toast.error("請選擇專案參與人員");
+            return;
+        }
+        addProjectMemberMutation.mutate({ srId, userId: projectMemberUserId, memberRole: projectMemberRole });
     };
 
     const handleExportIssues = () => {
@@ -485,6 +578,7 @@ export function WbsManagementPage() {
                 "工作說明": "階層 0 為標題/說明列，不需填工作天數",
                 "工作天數(小計)": "",
                 "指派人員帳號": "",
+                "指派人員帳號(多人)": "",
                 "起始時間": "",
                 "起訖時間": "",
                 "完成百分比": 0,
@@ -623,7 +717,7 @@ export function WbsManagementPage() {
             toast.error("沒有可匯出的 WBS 版本資料");
             return;
         }
-        const assignedIds = Array.from(new Set(latestVersion.items.map((item: any) => item.assigneeId).filter(Boolean)));
+        const assignedIds = Array.from(new Set(latestVersion.items.flatMap((item: any) => [item.assigneeId, ...(item.assigneeIds || [])]).filter(Boolean)));
         const usersById = new Map((allUsers?.items || []).map((item: any) => [item.id, item]));
         const techsById = new Map((techs || []).map((item: any) => [item.id, item]));
         const people = assignedIds.map((id: any) => {
@@ -817,6 +911,43 @@ export function WbsManagementPage() {
 	                                        <span className={`font-bold ${sr.marginWarning ? 'text-destructive' : 'text-green-600'}`}>{sr.marginEstimate}%</span>
                                     </div>
                                 </>
+                            )}
+                        </div>
+                    </div>
+
+                    <div className="bg-card border border-border rounded-xl p-5 shadow-sm">
+                        <div className="mb-3 flex items-center justify-between">
+                            <h3 className="font-semibold text-base flex items-center"><Users className="w-4 h-4 mr-2 text-primary" />專案參與人員</h3>
+                            {canEditSalesOwner && (
+                                <button
+                                    onClick={() => setShowProjectMemberModal(true)}
+                                    className="inline-flex items-center rounded-md px-2 py-1 text-xs font-semibold text-primary hover:bg-primary/10"
+                                >
+                                    <UserPlus className="w-3.5 h-3.5 mr-1" />新增
+                                </button>
+                            )}
+                        </div>
+                        <div className="space-y-2">
+                            {(projectMembers || []).length === 0 ? (
+                                <div className="rounded-lg border border-dashed p-4 text-center text-xs text-muted-foreground">尚無專案參與人員</div>
+                            ) : (
+                                (projectMembers || []).map((member: any) => (
+                                    <div key={member.id} className="flex items-center justify-between gap-2 rounded-lg border border-border bg-muted/20 px-3 py-2 text-sm">
+                                        <div className="min-w-0">
+                                            <div className="truncate font-medium">{member.userName}</div>
+                                            <div className="truncate text-xs text-muted-foreground">{member.department || "未指定部門"} / {member.memberRole === "participant" ? "參與人員" : member.memberRole === "watcher" ? "觀察者" : member.memberRole}</div>
+                                        </div>
+                                        {canEditSalesOwner && member.memberRole !== "owner" && (
+                                            <button
+                                                onClick={() => removeProjectMemberMutation.mutate({ srId, memberId: member.id })}
+                                                className="rounded p-1 text-muted-foreground hover:bg-red-50 hover:text-red-500"
+                                                title="移除成員"
+                                            >
+                                                <Trash2 className="w-3.5 h-3.5" />
+                                            </button>
+                                        )}
+                                    </div>
+                                ))
                             )}
                         </div>
                     </div>
@@ -1285,6 +1416,23 @@ export function WbsManagementPage() {
                                         </div>
                                     </div>
                                 )}
+                                <div className="flex flex-wrap gap-2 rounded-lg border border-border bg-muted/20 p-3">
+                                    <span className="mr-1 text-xs font-semibold text-muted-foreground self-center">一鍵建立範本</span>
+                                    <button
+                                        type="button"
+                                        onClick={() => handleApplySingleRowTemplate("教育訓練")}
+                                        className="rounded-md border border-border bg-background px-3 py-1.5 text-xs font-semibold hover:bg-muted"
+                                    >
+                                        教育訓練
+                                    </button>
+                                    <button
+                                        type="button"
+                                        onClick={() => handleApplySingleRowTemplate("內部專案")}
+                                        className="rounded-md border border-border bg-background px-3 py-1.5 text-xs font-semibold hover:bg-muted"
+                                    >
+                                        內部專案
+                                    </button>
+                                </div>
                                 {draftItems.length === 0 ? (
                                     <div className="text-center p-8 border border-dashed rounded-lg bg-background">
                                         <p className="text-muted-foreground mb-4">目前沒有任何任務項目</p>
@@ -1326,13 +1474,69 @@ export function WbsManagementPage() {
 
                                                             <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
                                                                 <div className="flex flex-col gap-1 text-xs text-muted-foreground">
+                                                                    <label>工作編號</label>
+                                                                    <input
+                                                                        type="text"
+                                                                        placeholder="選填"
+                                                                        value={item.code || ""}
+                                                                        onChange={(e) => handleUpdateDraftItem(idx, "code", e.target.value)}
+                                                                        className="rounded border border-transparent bg-muted px-2 py-2 outline-none focus:border-primary focus:bg-background"
+                                                                    />
+                                                                </div>
+                                                                <div className="flex flex-col gap-1 text-xs text-muted-foreground md:col-span-2">
+                                                                    <label>工作說明</label>
+                                                                    <input
+                                                                        type="text"
+                                                                        placeholder="選填"
+                                                                        value={item.description || ""}
+                                                                        onChange={(e) => handleUpdateDraftItem(idx, "description", e.target.value)}
+                                                                        className="rounded border border-transparent bg-muted px-2 py-2 outline-none focus:border-primary focus:bg-background"
+                                                                    />
+                                                                </div>
+                                                                <div className="flex flex-col gap-1 text-xs text-muted-foreground">
                                                                     <label>指派給 (人員)</label>
                                                                     <UserSearchPicker
                                                                         users={techs || []}
                                                                         selectedUserId={item.assigneeId}
                                                                         placeholder="搜尋姓名或 Email..."
-                                                                        onSelect={(selectedUser) => handleUpdateDraftItem(idx, "assigneeId", selectedUser.id)}
-                                                                        onClear={() => handleUpdateDraftItem(idx, "assigneeId", undefined)}
+                                                                        onSelect={(selectedUser) => handleSetPrimaryAssignee(idx, selectedUser.id)}
+                                                                        onClear={() => handleSetPrimaryAssignee(idx, undefined)}
+                                                                    />
+                                                                    {(item.assigneeIds || []).length > 0 && (
+                                                                        <div className="mt-1 flex flex-wrap gap-1">
+                                                                            {(item.assigneeIds || []).map((userId) => {
+                                                                                const person = (allUsers?.items || []).find((user: any) => user.id === userId) || (techs || []).find((user: any) => user.id === userId);
+                                                                                return (
+                                                                                    <span key={userId} className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[10px] ${item.assigneeId === userId ? "border-primary/30 bg-primary/10 text-primary" : "border-border bg-muted text-muted-foreground"}`}>
+                                                                                        {person?.name || userId}
+                                                                                        {item.assigneeId !== userId && (
+                                                                                            <button type="button" onClick={() => handleRemoveDraftAssignee(idx, userId)} className="hover:text-red-500">×</button>
+                                                                                        )}
+                                                                                    </span>
+                                                                                );
+                                                                            })}
+                                                                        </div>
+                                                                    )}
+                                                                    <UserSearchPicker
+                                                                        key={`${idx}-${(item.assigneeIds || []).join(",")}`}
+                                                                        users={techs || []}
+                                                                        selectedUserId=""
+                                                                        placeholder="新增其他指派人員..."
+                                                                        onSelect={(selectedUser) => handleAddDraftAssignee(idx, selectedUser.id)}
+                                                                        filterUser={(pickerUser) => !(item.assigneeIds || []).includes(pickerUser.id)}
+                                                                    />
+                                                                </div>
+                                                                <div className="flex flex-col gap-1 text-xs text-muted-foreground">
+                                                                    <label>工作天數(小計)</label>
+                                                                    <input
+                                                                        type="number"
+                                                                        min="0.5"
+                                                                        step="0.5"
+                                                                        value={isHeading ? "" : item.estimatedHours}
+                                                                        onChange={(e) => handleUpdateDraftItem(idx, "estimatedHours", Number(e.target.value))}
+                                                                        disabled={isHeading}
+                                                                        placeholder={isHeading ? "標題列不需填" : "0"}
+                                                                        className="rounded border border-transparent bg-muted px-2 py-2 outline-none focus:border-primary focus:bg-background disabled:cursor-not-allowed disabled:opacity-70"
                                                                     />
                                                                 </div>
                                                                 <div className="flex flex-col gap-1 text-xs text-muted-foreground">
@@ -1354,19 +1558,6 @@ export function WbsManagementPage() {
                                                                     </div>
                                                                 </div>
                                                                 <div className="flex flex-col gap-1 text-xs text-muted-foreground">
-                                                                    <label>工作天數(小計)</label>
-                                                                    <input
-                                                                        type="number"
-                                                                        min="0.5"
-                                                                        step="0.5"
-                                                                        value={isHeading ? "" : item.estimatedHours}
-                                                                        onChange={(e) => handleUpdateDraftItem(idx, "estimatedHours", Number(e.target.value))}
-                                                                        disabled={isHeading}
-                                                                        placeholder={isHeading ? "標題列不需填" : "0"}
-                                                                        className="rounded border border-transparent bg-muted px-2 py-2 outline-none focus:border-primary focus:bg-background disabled:cursor-not-allowed disabled:opacity-70"
-                                                                    />
-                                                                </div>
-                                                                <div className="flex flex-col gap-1 text-xs text-muted-foreground">
                                                                     <label>狀態</label>
                                                                     <select
                                                                         value={item.status || "not_started"}
@@ -1382,40 +1573,20 @@ export function WbsManagementPage() {
                                                                         <option value="completed">完成</option>
                                                                     </select>
                                                                 </div>
+                                                                <div className="flex flex-col gap-1 text-xs text-muted-foreground">
+                                                                    <label>備註</label>
+                                                                    <input
+                                                                        type="text"
+                                                                        placeholder="選填"
+                                                                        value={item.remarks || ""}
+                                                                        onChange={(e) => handleUpdateDraftItem(idx, "remarks", e.target.value)}
+                                                                        className="rounded border border-transparent bg-muted px-2 py-2 outline-none focus:border-primary focus:bg-background"
+                                                                    />
+                                                                </div>
                                                             </div>
 
                                                             {isExpanded && (
                                                                 <div className="grid gap-3 border-t border-border/50 pt-3 md:grid-cols-2">
-                                                                    <div className="flex flex-col gap-1 text-xs text-muted-foreground">
-                                                                        <label>工作編號</label>
-                                                                        <input
-                                                                            type="text"
-                                                                            placeholder="選填"
-                                                                            value={item.code || ""}
-                                                                            onChange={(e) => handleUpdateDraftItem(idx, "code", e.target.value)}
-                                                                            className="rounded border border-transparent bg-muted px-2 py-1.5 outline-none focus:border-primary focus:bg-background"
-                                                                        />
-                                                                    </div>
-                                                                    <div className="flex flex-col gap-1 text-xs text-muted-foreground">
-                                                                        <label>備註</label>
-                                                                        <input
-                                                                            type="text"
-                                                                            placeholder="選填"
-                                                                            value={item.remarks || ""}
-                                                                            onChange={(e) => handleUpdateDraftItem(idx, "remarks", e.target.value)}
-                                                                            className="rounded border border-transparent bg-muted px-2 py-1.5 outline-none focus:border-primary focus:bg-background"
-                                                                        />
-                                                                    </div>
-                                                                    <div className="flex flex-col gap-1 text-xs text-muted-foreground md:col-span-2">
-                                                                        <label>工作說明</label>
-                                                                        <textarea
-                                                                            placeholder="選填"
-                                                                            value={item.description || ""}
-                                                                            rows={2}
-                                                                            onChange={(e) => handleUpdateDraftItem(idx, "description", e.target.value)}
-                                                                            className="resize-y rounded border border-transparent bg-muted px-2 py-1.5 outline-none focus:border-primary focus:bg-background"
-                                                                        />
-                                                                    </div>
                                                                     <div className="flex items-center text-xs text-muted-foreground">
                                                                         <span className="mr-2">色標</span>
                                                                         <input
@@ -1471,6 +1642,52 @@ export function WbsManagementPage() {
                     )}
                 </div>
             </div>
+
+            {/* Edit Sales Owner Modal */}
+            {showProjectMemberModal && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm">
+                    <div className="bg-card border border-border rounded-xl shadow-xl w-full max-w-md mx-4 p-6 space-y-5">
+                        <div className="flex justify-between items-center">
+                            <h2 className="text-lg font-bold flex items-center"><UserPlus className="w-5 h-5 mr-2 text-primary" />新增專案參與人員</h2>
+                            <button onClick={() => setShowProjectMemberModal(false)} className="p-1 rounded-full hover:bg-muted"><X className="w-5 h-5 text-muted-foreground" /></button>
+                        </div>
+                        <div className="space-y-4">
+                            <div>
+                                <label className="block text-sm font-medium mb-1">選擇使用者</label>
+                                <UserSearchPicker
+                                    users={allUsers?.items || []}
+                                    selectedUserId={projectMemberUserId}
+                                    placeholder="搜尋姓名或 Email..."
+                                    onSelect={(selectedUser) => setProjectMemberUserId(selectedUser.id)}
+                                    onClear={() => setProjectMemberUserId("")}
+                                    filterUser={(pickerUser) => !projectMembers?.find((member: any) => member.userId === pickerUser.id)}
+                                />
+                            </div>
+                            <div>
+                                <label className="block text-sm font-medium mb-1">角色</label>
+                                <select
+                                    value={projectMemberRole}
+                                    onChange={event => setProjectMemberRole(event.target.value as "participant" | "watcher")}
+                                    className="w-full border border-border rounded-lg px-3 py-2 bg-background text-sm focus:outline-none focus:ring-2 focus:ring-primary/50"
+                                >
+                                    <option value="participant">參與人員</option>
+                                    <option value="watcher">觀察者 / 學習</option>
+                                </select>
+                            </div>
+                        </div>
+                        <div className="flex justify-end space-x-3">
+                            <button onClick={() => setShowProjectMemberModal(false)} className="px-4 py-2 text-sm border border-border rounded-lg hover:bg-muted">取消</button>
+                            <button
+                                onClick={handleAddProjectMember}
+                                disabled={addProjectMemberMutation.isPending}
+                                className="px-4 py-2 text-sm bg-primary text-primary-foreground rounded-lg hover:bg-primary/90 disabled:opacity-50"
+                            >
+                                {addProjectMemberMutation.isPending ? "新增中..." : "確認新增"}
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
 
             {/* Edit Sales Owner Modal */}
             {showEditSalesModal && (

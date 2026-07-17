@@ -18,7 +18,7 @@ interface ResourceEdit {
 }
 
 export function ResourcesPage() {
-    const { data: usersData, isLoading } = trpc.users.list.useQuery({ limit: 100 });
+    const { data: resources, isLoading } = trpc.users.resourceList.useQuery();
     const { data: utilizationData } = trpc.analytics.getUtilization.useQuery();
     const updateUserMutation = trpc.users.updateUser.useMutation();
 
@@ -33,11 +33,6 @@ export function ResourcesPage() {
     if (isLoading) {
         return <div className="p-8 text-center text-muted-foreground">載入資源池資料中...</div>;
     }
-
-    const resources = usersData?.items?.filter(
-        (u: any) => u.role === 'tech' || u.role === 'presales' || u.role === 'pm' ||
-            (u.roles && (u.roles.includes('tech') || u.roles.includes('presales') || u.roles.includes('pm')))
-    );
 
     const openEdit = (user: any) => {
         const existingSkills = localSkills[user.id] ?? [

@@ -55,7 +55,7 @@ export function ProjectTimesheetsPage() {
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
         const selectedActivity = (assignments || []).find((assignment: any) => assignment.srId === selectedProjectId);
-        const canSubmitWithoutWbs = selectedActivity?.srType === "other_activity" || selectedActivity?.memberRole === "watcher";
+        const canSubmitWithoutWbs = selectedActivity?.srType === "other_activity" || selectedActivity?.memberRole === "watcher" || selectedActivity?.memberRole === "participant";
         if (!selectedProjectId || (!selectedWbsId && !canSubmitWithoutWbs) || !hours || !workDate || !description) return;
 
         setIsSubmitting(true);
@@ -76,14 +76,15 @@ export function ProjectTimesheetsPage() {
     // Derived unique projects from assignments for the filter dropdown
     const assignedProjects = useMemo(() => {
         if (!assignments) return [];
-        const unique = new Map<string, { id: string; title: string; srType?: string; isObserver?: boolean; items: any[] }>();
+        const unique = new Map<string, { id: string; title: string; srType?: string; isObserver?: boolean; isParticipant?: boolean; items: any[] }>();
         assignments.forEach((a: any) => {
             if (!a.srId) return;
             if (!unique.has(a.srId)) {
-                unique.set(a.srId, { id: a.srId, title: a.srTitle, srType: a.srType, isObserver: a.memberRole === "watcher", items: [] });
+                unique.set(a.srId, { id: a.srId, title: a.srTitle, srType: a.srType, isObserver: a.memberRole === "watcher", isParticipant: a.memberRole === "participant", items: [] });
             }
             const project = unique.get(a.srId);
             if (project && a.memberRole === "watcher") project.isObserver = true;
+            if (project && a.memberRole === "participant") project.isParticipant = true;
             if (project && a.wbsItemId && !project.items.some(item => item.wbsItemId === a.wbsItemId)) {
                 project.items.push(a);
             }
@@ -94,7 +95,7 @@ export function ProjectTimesheetsPage() {
     const selectedProject = assignedProjects.find((project) => project.id === selectedProjectId);
     const availableWbsItems = selectedProject?.items || [];
     const selectedWbsItem = availableWbsItems.find((item: any) => (item.wbsItemId || item.id) === selectedWbsId);
-    const canSubmitWithoutWbs = selectedProject?.srType === "other_activity" || selectedProject?.isObserver;
+    const canSubmitWithoutWbs = selectedProject?.srType === "other_activity" || selectedProject?.isObserver || selectedProject?.isParticipant;
     const scheduledDayAssignments = useMemo(() => {
         if (!assignments || !workDate) return [];
         const selectedDay = new Date(workDate).setHours(0, 0, 0, 0);
@@ -252,7 +253,7 @@ export function ProjectTimesheetsPage() {
 		                                )}
                                         {canSubmitWithoutWbs && (
                                             <p className="text-xs text-muted-foreground mt-1 flex items-center gap-1">
-                                                <AlertCircle className="w-3 h-3" /> 其他活動或觀察者工時可不選 WBS；觀察者工時不納入計費。
+                                                <AlertCircle className="w-3 h-3" /> 其他活動、參與人員或觀察者工時可不選 WBS；觀察者工時不納入計費。
                                             </p>
                                         )}
 	                                {selectedWbsItem?.status === "completed" && (
