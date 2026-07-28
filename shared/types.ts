@@ -65,9 +65,10 @@ export const opportunityStatuses = [
     "new",
     "qualified",
     "presales_active",
+    "quoting",
+    "converted",
     "won",
-    "lost",
-    "converted"
+    "lost"
 ] as const;
 
 export type OpportunityStatus = typeof opportunityStatuses[number];

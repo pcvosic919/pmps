@@ -23,7 +23,6 @@ const oppSchema = z.object({
     salesRep: z.string().optional(),
     estimatedValue: z.number().min(0, "金額不能為負數"),
     opportunityType: z.enum(["revenue", "presales"]),
-    status: z.enum(["new", "qualified", "presales_active", "won", "converted", "lost"]),
     productNames: z.array(z.string()).optional(),
     description: z.string().optional(),
     approvedM365: z.boolean().default(false),
@@ -101,7 +100,6 @@ export function OpportunitiesPage() {
             salesRep: "",
             estimatedValue: 0,
             opportunityType: "revenue",
-            status: "new",
             productNames: [],
             description: "",
             approvedM365: false,
@@ -147,7 +145,6 @@ export function OpportunitiesPage() {
             salesRep: values.salesRep,
             estimatedValue: values.estimatedValue,
             opportunityType: values.opportunityType,
-            status: values.status,
             productNames: values.productNames,
             description: values.description,
             approvedM365: values.approvedM365,
@@ -166,6 +163,7 @@ export function OpportunitiesPage() {
             case 'new': return 'bg-blue-100 text-blue-800 border-blue-200 dark:bg-blue-900/30 dark:text-blue-300 dark:border-blue-800';
             case 'qualified': return 'bg-purple-100 text-purple-800 border-purple-200 dark:bg-purple-900/30 dark:text-purple-300 dark:border-purple-800';
             case 'presales_active': return 'bg-amber-100 text-amber-800 border-amber-200 dark:bg-amber-900/30 dark:text-amber-300 dark:border-amber-800';
+            case 'quoting': return 'bg-orange-100 text-orange-800 border-orange-200 dark:bg-orange-900/30 dark:text-orange-300 dark:border-orange-800';
             case 'won': return 'bg-green-100 text-green-800 border-green-200 dark:bg-green-900/30 dark:text-green-300 dark:border-green-800';
             case 'converted': return 'bg-indigo-100 text-indigo-800 border-indigo-200 dark:bg-indigo-900/30 dark:text-indigo-300 dark:border-indigo-800';
             case 'lost': return 'bg-red-100 text-red-800 border-red-200 dark:bg-red-900/30 dark:text-red-300 dark:border-red-800';
@@ -178,6 +176,7 @@ export function OpportunitiesPage() {
             new: "待處理",
             qualified: "已確認",
             presales_active: "協銷中",
+            quoting: "報價中",
             won: "已成交",
             converted: "已轉案",
             lost: "已失敗"
@@ -231,7 +230,7 @@ export function OpportunitiesPage() {
                                 <th className="px-6 py-4">類型</th>
                                 <th className="px-6 py-4">客戶名稱</th>
                                 <th className="px-6 py-4">業務</th>
-                                <th className="px-6 py-4">預估金額 (NT$)</th>
+                                <th className="px-6 py-4">商機金額 (NT$)</th>
                                 <th className="px-6 py-4">負責人</th>
                                 <th className="px-6 py-4">建立日期</th>
                                 <th className="px-6 py-4 text-right">操作</th>
@@ -430,7 +429,7 @@ export function OpportunitiesPage() {
                                             name="estimatedValue"
                                             render={({ field }: any) => (
                                                 <FormItem>
-                                                    <FormLabel>預估金額 (NT$)</FormLabel>
+                                                    <FormLabel>商機金額 (NT$)</FormLabel>
                                                     <FormControl>
                                                         <Input
                                                             type="number"
@@ -564,7 +563,7 @@ export function OpportunitiesPage() {
                                             { label: "業務", value: selectedSalesRep },
                                             { label: "業務部門", value: selectedSalesDepartment },
                                             { label: "類型", value: opportunityTypeLabels[watchedOppType] },
-                                            { label: "預估金額", value: `NT$ ${watchedEstimatedValue.toLocaleString()}` },
+                                            { label: "商機金額", value: `NT$ ${watchedEstimatedValue.toLocaleString()}` },
                                             { label: "產品", value: watchedProducts.length ? watchedProducts.join("、") : "" }
                                         ]}
                                     />

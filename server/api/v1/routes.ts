@@ -241,7 +241,7 @@ copilotApiRouter.get("/projects/summary", async (_req, res) => {
 
 /**
  * GET /api/v1/opportunities/active
- * 列出進行中的商機（非 won/lost/converted）
+ * 列出進行中的商機（包含 quoting，排除 won/lost/converted）
  */
 copilotApiRouter.get("/opportunities/active", async (_req, res) => {
     try {

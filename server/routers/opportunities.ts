@@ -28,6 +28,13 @@ import {
     buildOpportunityListQuery,
     opportunitySortFields,
 } from "./opportunities.listing";
+import {
+    canConvertOpportunityStatus,
+    getInitialOpportunityStatus,
+    getStatusAfterMemberAssignment,
+    getStatusAfterPresalesAssignment,
+    isTerminalOpportunityStatus
+} from "./opportunity-workflow";
 
 const listInput = z.object({
     limit: z.number().min(1).max(100).nullish(),
@@ -37,15 +44,24 @@ const listInput = z.object({
     sortOrder: z.enum(["asc", "desc"]).optional()
 }).optional();
 
-const assertOpportunityNotConverted = (opportunity: { status?: string }) => {
-    if (opportunity.status === "converted") {
-        throw new TRPCError({ code: "BAD_REQUEST", message: "已轉案的商機不可再修改，請結案重建" });
+const assertOpportunityEditable = (opportunity: { status?: string }) => {
+    if (isTerminalOpportunityStatus(opportunity.status)) {
+        throw new TRPCError({ code: "BAD_REQUEST", message: "已轉案、已成交或已失敗的商機不可編輯" });
     }
 };
 
 const assertOpportunityAssignable = (opportunity: { status?: string }) => {
-    if (["won", "lost", "converted"].includes(opportunity.status || "")) {
+    if (isTerminalOpportunityStatus(opportunity.status)) {
         throw new TRPCError({ code: "BAD_REQUEST", message: "此商機目前狀態不可再指派協銷" });
+    }
+};
+
+const assertOpportunityConvertible = (opportunity: { status?: string }) => {
+    if (!canConvertOpportunityStatus(opportunity.status as any)) {
+        const message = opportunity.status === "converted"
+            ? "此商機已轉案，請勿重複建立專案"
+            : "已失敗的商機不可建立專案";
+        throw new TRPCError({ code: "BAD_REQUEST", message });
     }
 };
 
@@ -194,7 +210,6 @@ export const opportunitiesRouter = router({
             salesRep: z.string().trim().optional(),
             estimatedValue: z.number().default(0),
             opportunityType: z.enum(opportunityTypes).default("revenue"),
-            status: z.enum(opportunityStatuses).default("new"),
             expectedCloseDate: z.date().optional(),
             customFields: z.array(z.object({
                 fieldId: z.string(),
@@ -209,10 +224,12 @@ export const opportunitiesRouter = router({
         .mutation(async ({ input, ctx }) => {
             const ownerId = ctx.user.id;
             const salesUserFields = await getSalesUserFields(input.salesUserId);
+            const initialStatus = getInitialOpportunityStatus(hasAnyRole(ctx.user, ["presales"]));
             await ensureCompanyByName(input.customerName, ownerId);
 
             const result = await OpportunityModel.create({
                 ...input,
+                status: initialStatus,
                 salesUserId: salesUserFields?.salesUserId,
                 salesRep: salesUserFields?.salesRep || input.salesRep || "",
                 salesDepartment: salesUserFields?.salesDepartment || input.salesDepartment || "",
@@ -297,7 +314,7 @@ export const opportunitiesRouter = router({
             );
             const isOwner = opportunity.ownerId?.toString() === ctx.user.id;
             assertAuthorized(canManageOpportunity(ctx.user, opportunity) || isOwner, "您沒有權限新增商機成員");
-            assertOpportunityNotConverted(opportunity);
+            assertOpportunityEditable(opportunity);
 
             const existingMember = (opportunity.members || []).find((member: any) => member.userId?.toString() === input.userId);
             if (input.memberRole === "owner") {
@@ -318,12 +335,24 @@ export const opportunitiesRouter = router({
                     { _id: input.opportunityId, "members.userId": toObjectId(input.userId) },
                     { $set: { "members.$.memberRole": input.memberRole } }
                 );
+                const nextStatus = getStatusAfterMemberAssignment(opportunity.status);
+                if (nextStatus !== opportunity.status) {
+                    await OpportunityModel.updateOne(
+                        { _id: input.opportunityId, status: opportunity.status },
+                        { $set: { status: nextStatus } }
+                    );
+                }
                 return { success: true };
             }
 
             await OpportunityModel.updateOne(
                 { _id: input.opportunityId },
-                { $push: { members: { userId: toObjectId(input.userId), memberRole: input.memberRole } } }
+                {
+                    $push: { members: { userId: toObjectId(input.userId), memberRole: input.memberRole } },
+                    ...(getStatusAfterMemberAssignment(opportunity.status) !== opportunity.status
+                        ? { $set: { status: getStatusAfterMemberAssignment(opportunity.status) } }
+                        : {})
+                }
             );
             return { success: true };
         }),
@@ -339,7 +368,7 @@ export const opportunitiesRouter = router({
             );
             const isOwner = opportunity.ownerId?.toString() === ctx.user.id;
             assertAuthorized(canManageOpportunity(ctx.user, opportunity) || isOwner, "您沒有權限移除此商機成員");
-            assertOpportunityNotConverted(opportunity);
+            assertOpportunityEditable(opportunity);
 
             await OpportunityModel.updateOne(
                 { "members._id": input.memberId },
@@ -484,14 +513,16 @@ export const opportunitiesRouter = router({
             );
             const isTechOrPresales = hasAnyRole(ctx.user, ["tech", "presales"]);
             assertAuthorized(canManageOpportunity(ctx.user, opportunity) || isTechOrPresales, "您沒有權限指派售前");
-            assertOpportunityNotConverted(opportunity);
+            assertOpportunityEditable(opportunity);
             assertOpportunityAssignable(opportunity);
 
             await OpportunityModel.updateOne(
                 { _id: input.opportunityId },
                 {
                     $push: { presalesAssignments: { techId: toObjectId(input.techId), estimatedHours: input.estimatedHours } },
-                    $set: { status: "presales_active" }
+                    ...(getStatusAfterPresalesAssignment(opportunity.status) !== opportunity.status
+                        ? { $set: { status: getStatusAfterPresalesAssignment(opportunity.status) } }
+                        : {})
                 }
             );
 
@@ -536,7 +567,7 @@ export const opportunitiesRouter = router({
                 "找不到該商機"
             );
             assertAuthorized(canManageOpportunity(ctx.user, opportunity), "您沒有權限從此商機建立 SR");
-            assertOpportunityNotConverted(opportunity);
+            assertOpportunityConvertible(opportunity);
             const salesUserFields = await getSalesUserFields(input.salesUserId);
 
             const result = await ServiceRequestModel.create({
@@ -600,7 +631,8 @@ export const opportunitiesRouter = router({
     updateStatus: protectedProcedure
         .input(z.object({
             id: z.string(),
-            status: z.enum(opportunityStatuses)
+            status: z.enum(opportunityStatuses),
+            estimatedValue: z.number().min(0, "商機金額不能為負數").optional()
         }))
         .mutation(async ({ input, ctx }) => {
             const opportunity = assertFound(
@@ -610,11 +642,19 @@ export const opportunitiesRouter = router({
                 "找不到該商機"
             );
             assertAuthorized(canManageOpportunity(ctx.user, opportunity), "您沒有權限更新商機狀態");
-            assertOpportunityNotConverted(opportunity);
+            assertOpportunityEditable(opportunity);
+            if (input.status === "quoting" && input.estimatedValue === undefined) {
+                throw new TRPCError({ code: "BAD_REQUEST", message: "切換為報價中時必須輸入商機金額" });
+            }
 
             await OpportunityModel.updateOne(
                 { _id: input.id },
-                { $set: { status: input.status } }
+                {
+                    $set: {
+                        status: input.status,
+                        ...(input.status === "quoting" ? { estimatedValue: input.estimatedValue } : {})
+                    }
+                }
             );
             return { success: true };
         }),
@@ -635,7 +675,7 @@ export const opportunitiesRouter = router({
                 "找不到該商機"
             );
             assertAuthorized(canManageOpportunity(ctx.user, opportunity), "您沒有權限更新自訂欄位");
-            assertOpportunityNotConverted(opportunity);
+            assertOpportunityEditable(opportunity);
 
             await OpportunityModel.updateOne(
                 { _id: input.id },
@@ -660,7 +700,7 @@ export const opportunitiesRouter = router({
             const isBusinessOwner = isOpportunityBusinessOwner(ctx.user, opportunity);
             const canUpdate = hasAnyRole(ctx.user, ["admin", "manager"]) || isBusinessOwner;
             assertAuthorized(canUpdate, "您沒有權限更新商機描述");
-            assertOpportunityNotConverted(opportunity);
+            assertOpportunityEditable(opportunity);
 
             await OpportunityModel.updateOne(
                 { _id: input.id },
@@ -672,7 +712,7 @@ export const opportunitiesRouter = router({
     updateEstimatedValue: protectedProcedure
         .input(z.object({
             id: z.string(),
-            estimatedValue: z.number().min(0, "預估金額不能為負數")
+            estimatedValue: z.number().min(0, "商機金額不能為負數")
         }))
         .mutation(async ({ input, ctx }) => {
             const opportunity = assertFound(
@@ -684,12 +724,12 @@ export const opportunitiesRouter = router({
 
             const isBusinessOwner = isOpportunityBusinessOwner(ctx.user, opportunity);
             const canUpdate = hasAnyRole(ctx.user, ["admin", "manager", "presales"]) || isBusinessOwner;
-            assertAuthorized(canUpdate, "您沒有權限更新預估金額");
-            assertOpportunityNotConverted(opportunity);
+            assertAuthorized(canUpdate, "您沒有權限更新商機金額");
+            assertOpportunityEditable(opportunity);
 
             await OpportunityModel.updateOne(
                 { _id: input.id },
-                { $set: { estimatedValue: input.estimatedValue } }
+                { $set: { estimatedValue: input.estimatedValue, status: "quoting" } }
             );
 
             return { success: true };
@@ -711,7 +751,7 @@ export const opportunitiesRouter = router({
             const isBusinessOwner = isOpportunityBusinessOwner(ctx.user, opportunity);
             const canUpdate = hasAnyRole(ctx.user, ["admin", "manager", "presales"]) || isBusinessOwner;
             assertAuthorized(canUpdate, "您沒有權限更新商機類型");
-            assertOpportunityNotConverted(opportunity);
+            assertOpportunityEditable(opportunity);
 
             await OpportunityModel.updateOne(
                 { _id: input.id },
@@ -729,7 +769,7 @@ export const opportunitiesRouter = router({
         .mutation(async ({ input, ctx }) => {
             const opportunity = assertFound(
                 await OpportunityModel.findById(input.id)
-                    .select("ownerId members presalesAssignments")
+                    .select("ownerId members presalesAssignments status")
                     .lean(),
                 "找不到該商機"
             );
@@ -737,11 +777,19 @@ export const opportunitiesRouter = router({
             const isBusinessOwner = isOpportunityBusinessOwner(ctx.user, opportunity);
             const canUpdate = hasAnyRole(ctx.user, ["admin", "manager", "presales"]) || isBusinessOwner;
             assertAuthorized(canUpdate, "您沒有權限更新業務欄位");
+            assertOpportunityEditable(opportunity);
             const salesUserFields = assertFound(await getSalesUserFields(input.salesUserId), "找不到指定的業務帳號");
 
             await OpportunityModel.updateOne(
                 { _id: input.id },
-                { $set: salesUserFields }
+                {
+                    $set: {
+                        ...salesUserFields,
+                        ...(getStatusAfterMemberAssignment(opportunity.status) !== opportunity.status
+                            ? { status: getStatusAfterMemberAssignment(opportunity.status) }
+                            : {})
+                    }
+                }
             );
 
             return { success: true };
@@ -766,7 +814,7 @@ export const opportunitiesRouter = router({
                 "找不到該商機"
             );
             await assertSettlementUnlocked(getMonthKey(input.workDate), "presales");
-            assertOpportunityNotConverted(opportunity);
+            assertOpportunityEditable(opportunity);
 
             const isAssignedPresales = (opportunity.presalesAssignments || []).some((assignment: any) =>
                 assignment.techId?.toString() === ctx.user.id
@@ -801,9 +849,10 @@ export const opportunitiesRouter = router({
             await assertSettlementUnlocked(getMonthKey(new Date(ts.workDate)), "presales");
             const opportunity = ts.opportunityId
                 ? await OpportunityModel.findById(ts.opportunityId)
-                    .select("ownerId members presalesAssignments")
+                    .select("ownerId members presalesAssignments status")
                     .lean()
                 : null;
+            if (opportunity) assertOpportunityEditable(opportunity);
             assertAuthorized(
                 canManageTimesheet(ctx.user, ts, { opportunity }),
                 "您沒有權限刪除此協銷工時"
@@ -829,6 +878,7 @@ export const opportunitiesRouter = router({
                 "找不到該商機"
             );
             assertAuthorized(canManageOpportunity(ctx.user, opp) || hasAnyRole(ctx.user, ["admin", "manager"]), "您沒有權限上傳附件");
+            assertOpportunityEditable(opp);
             
             const localAttachment = opp.localFolderPath && input.fileDataBase64
                 ? await writeLocalAttachment(opp.localFolderPath, input.fileName, input.fileDataBase64)
@@ -868,8 +918,9 @@ export const opportunitiesRouter = router({
             if (!canDeleteRecord(ctx.user)) {
                 throw new TRPCError({ code: "FORBIDDEN", message: "只有 Demo@demo.com 可以刪除資料" });
             }
-            const opp = await OpportunityModel.findById(input.id);
+            const opp = await OpportunityModel.findById(input.id).select("status");
             assertFound(opp, "找不到該商機");
+            assertOpportunityEditable(opp);
             
             await OpportunityModel.findByIdAndDelete(input.id);
             return { success: true };

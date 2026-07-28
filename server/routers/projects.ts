@@ -485,6 +485,9 @@ export const projectsRouter = router({
                 if (opportunity.status === "converted") {
                     throw new TRPCError({ code: "BAD_REQUEST", message: "此商機已轉案，請勿重複建立 SR" });
                 }
+                if (opportunity.status === "lost") {
+                    throw new TRPCError({ code: "BAD_REQUEST", message: "已失敗的商機不可建立 SR" });
+                }
             }
             const salesUserFields = await getSalesUserFields(input.salesUserId);
             const customerName = input.customerName || oppCustomerName;

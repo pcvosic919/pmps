@@ -31,7 +31,7 @@ const defaultPipelineWeights: Record<string, number> = {
     new: 0.2,
     qualified: 0.4,
     presales_active: 0.6,
-    under_negotiation: 0.8,
+    quoting: 0.8,
     won: 1,
     converted: 1,
     lost: 0
@@ -100,7 +100,19 @@ const getLatestImportBatchId = async (type: "open_cases" | "kpi_revenue") => {
 
 const getOrCreateKpiPolicy = async (year: number) => {
     const policy = await KpiPolicyModel.findOne({ year }).lean();
-    if (policy) return policy as any;
+    if (policy) {
+        const pipelineWeights = {
+            ...defaultPipelineWeights,
+            ...((policy as any).pipelineWeights || {})
+        };
+        if ((policy as any).pipelineWeights?.quoting === undefined) {
+            await KpiPolicyModel.updateOne(
+                { _id: policy._id },
+                { $set: { pipelineWeights } }
+            );
+        }
+        return { ...policy, pipelineWeights } as any;
+    }
 
     const created = await KpiPolicyModel.create({
         year,
@@ -860,7 +872,7 @@ export const analyticsRouter = router({
                         pendingOpps: {
                             $sum: {
                                 $cond: [
-                                    { $in: ["$status", ["qualified", "presales_active", "new", "under_negotiation"]] },
+                                    { $in: ["$status", ["new", "qualified", "presales_active", "quoting"]] },
                                     1,
                                     0
                                 ]

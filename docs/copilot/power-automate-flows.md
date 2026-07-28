@@ -213,7 +213,7 @@
 
 [4] Select — 組成每筆摘要
     From: @{body('Parse_JSON')?['data']}
-    Map: "• @{item()?['opportunityName']}（@{item()?['customerName']}）合約金額：@{item()?['dealValue']}"
+    Map: "• @{item()?['opportunityName']}（@{item()?['customerName']}）商機金額：@{item()?['dealValue']}"
 
 [5] Join（換行合併）
 
