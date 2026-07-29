@@ -8,6 +8,7 @@ import { integrationsRouter } from "./routers/integrations";
 import { authRouter } from "./routers/auth";
 import { issuesRouter } from "./routers/issues";
 import { companiesRouter } from "./routers/companies";
+import { auditRouter } from "./routers/audit";
 
 export const appRouter = router({
     auth: authRouter,
@@ -18,7 +19,8 @@ export const appRouter = router({
     system: systemRouter,
     integrations: integrationsRouter,
     issues: issuesRouter,
-    companies: companiesRouter
+    companies: companiesRouter,
+    audit: auditRouter
 });
 
 export type AppRouter = typeof appRouter;

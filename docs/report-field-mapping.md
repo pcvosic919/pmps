@@ -32,7 +32,7 @@
 | 系統資料來源 | 用途 |
 |---|---|
 | `Company` | 公司主檔、客戶名稱、統編、聯絡資訊 |
-| `Opportunity` | 商機、協銷、業務、商機狀態、預估金額 |
+| `Opportunity` | 商機、協銷、業務、商機狀態、商機金額 |
 | `ServiceRequest` | 專案 / SR 主檔、客戶、業務、排程、狀態、認列、保固、外部案件編號 |
 | `ServiceRequest.externalAssignments` | 舊系統處理人員列資料、技術部門、角色、分配工時、個人狀態 |
 | `ServiceRequest.wbsVersions.items` | WBS 工作項目、指派人員、排程、狀態、完成率 |

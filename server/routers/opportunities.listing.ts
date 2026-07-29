@@ -49,8 +49,8 @@ export const getAccessibleOpportunityQuery = async (ctxUser: OpportunityListUser
         { "presalesAssignments.techId": userObjectId }
     ];
 
-    // Admin can see ALL records (no filter)
-    if (hasAnyRole(ctxUser as any, ["admin"])) {
+    // Admin and manager can see all opportunity records.
+    if (hasAnyRole(ctxUser as any, ["admin", "manager"])) {
         return {};
     }
 

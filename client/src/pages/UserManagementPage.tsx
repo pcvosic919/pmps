@@ -2,7 +2,7 @@ import { useState, useEffect, useRef } from "react";
 import { trpc } from "../lib/trpc";
 import { Users as UsersIcon, Edit, UserX, UserPlus, Search, Loader2, RefreshCw, Settings2, Trash2 } from "lucide-react";
 import { z } from "zod";
-import { roles, type Role } from "../../../shared/types";
+import { featurePermissions, roles, type FeaturePermission, type Role } from "../../../shared/types";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -31,8 +31,25 @@ const editUserSchema = z.object({
     managedDepartments: z.array(z.string()).optional(),
     role: z.enum(editableRoles),
     roles: z.array(z.enum(roles)).optional(),
+    permissionOverrides: z.object({
+        allow: z.array(z.enum(featurePermissions)),
+        deny: z.array(z.enum(featurePermissions))
+    }),
     isActive: z.boolean().default(true)
 });
+
+const permissionLabels: Record<FeaturePermission, string> = {
+    "module.opportunities.view": "檢視商機管理",
+    "module.projects.view": "檢視專案管理",
+    "module.calendar.view": "檢視排程行事曆",
+    "project.create_sr": "建立 SR",
+    "project.edit": "編輯專案",
+    "project.manage_members": "管理專案成員",
+    "project.archive": "封存／還原專案",
+    "project.delete": "永久刪除專案",
+    "wbs.submit": "編輯與送審 WBS",
+    "wbs.review": "審核 WBS"
+};
 
 export function UserManagementPage() {
     const [searchTerm, setSearchTerm] = useState("");
@@ -117,7 +134,14 @@ export function UserManagementPage() {
 
     const editForm = useForm<any>({
         resolver: zodResolver(editUserSchema) as any,
-        defaultValues: { department: "", managedDepartments: [], role: "user", isActive: true, roles: [] }
+        defaultValues: {
+            department: "",
+            managedDepartments: [],
+            role: "user",
+            isActive: true,
+            roles: [],
+            permissionOverrides: { allow: [], deny: [] }
+        }
     });
 
     const batchEditForm = useForm<any>({
@@ -132,6 +156,8 @@ export function UserManagementPage() {
                 role: editingUser.role,
                 isActive: editingUser.isActive,
                 roles: (editingUser.roles || []) as Role[]
+                ,
+                permissionOverrides: editingUser.permissionOverrides || { allow: [], deny: [] }
             });
         }
     }, [editingUser, editForm]);
@@ -151,6 +177,8 @@ export function UserManagementPage() {
             role: values.role,
             isActive: values.isActive,
             roles: (values.roles || []) as Role[]
+            ,
+            permissionOverrides: values.permissionOverrides
         });
     };
 
@@ -592,6 +620,56 @@ export function UserManagementPage() {
                                         </FormItem>
                                     )}
                                 />
+                                <div className="space-y-3 rounded-lg border border-border p-4">
+                                    <div>
+                                        <FormLabel>帳號功能權限覆寫</FormLabel>
+                                        <p className="mt-1 text-xs text-muted-foreground">未設定時沿用角色預設；拒絕優先於允許。</p>
+                                    </div>
+                                    <div className="space-y-2">
+                                        {featurePermissions.map(permission => {
+                                            const allow = editForm.watch("permissionOverrides.allow") || [];
+                                            const deny = editForm.watch("permissionOverrides.deny") || [];
+                                            const mode = deny.includes(permission) ? "deny" : allow.includes(permission) ? "allow" : "default";
+                                            return (
+                                                <div key={permission} className="grid grid-cols-[1fr_140px] items-center gap-3 rounded-md bg-muted/30 px-3 py-2">
+                                                    <span className="text-sm">{permissionLabels[permission]}</span>
+                                                    <select
+                                                        value={mode}
+                                                        onChange={event => {
+                                                            const nextMode = event.target.value;
+                                                            editForm.setValue(
+                                                                "permissionOverrides.allow",
+                                                                nextMode === "allow"
+                                                                    ? Array.from(new Set([...allow, permission]))
+                                                                    : allow.filter((item: FeaturePermission) => item !== permission),
+                                                                { shouldDirty: true }
+                                                            );
+                                                            editForm.setValue(
+                                                                "permissionOverrides.deny",
+                                                                nextMode === "deny"
+                                                                    ? Array.from(new Set([...deny, permission]))
+                                                                    : deny.filter((item: FeaturePermission) => item !== permission),
+                                                                { shouldDirty: true }
+                                                            );
+                                                        }}
+                                                        className="rounded-md border border-border bg-background px-2 py-1.5 text-xs"
+                                                    >
+                                                        <option value="default">角色預設</option>
+                                                        <option value="allow">明確允許</option>
+                                                        <option value="deny">明確拒絕</option>
+                                                    </select>
+                                                </div>
+                                            );
+                                        })}
+                                    </div>
+                                    <button
+                                        type="button"
+                                        onClick={() => editForm.setValue("permissionOverrides", { allow: [], deny: [] }, { shouldDirty: true })}
+                                        className="text-xs font-medium text-primary hover:underline"
+                                    >
+                                        恢復全部角色預設
+                                    </button>
+                                </div>
                                 <FormField
                                     control={editForm.control}
                                     name="isActive"

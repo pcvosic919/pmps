@@ -1,71 +1,95 @@
-import { useState, useEffect } from "react";
+import { useEffect, useState } from "react";
 import * as Dialog from "@radix-ui/react-dialog";
-import { Search, FileText, Building2, FolderKanban, Users, Activity, Settings, FileSpreadsheet } from "lucide-react";
+import { Activity, Building2, FileSpreadsheet, FileText, FolderKanban, Search, Settings, Users } from "lucide-react";
 import { useLocation } from "wouter";
 import { useCurrentUser } from "../lib/useCurrentUser";
+import type { FeaturePermission, Role } from "../../../shared/types";
 
-export function GlobalSearch() {
-    const [open, setOpen] = useState(false);
+type GlobalSearchProps = {
+    open: boolean;
+    onOpenChange: (open: boolean) => void;
+};
+
+const routes = [
+    { href: "/opportunities", icon: Building2, label: "商機管理 (Opportunities)", roles: ["admin", "manager", "business", "presales", "tech", "pm"], permission: "module.opportunities.view" as FeaturePermission },
+    { href: "/projects", icon: FolderKanban, label: "專案管理 (Projects)", roles: ["admin", "manager", "pm", "tech"], permission: "module.projects.view" as FeaturePermission },
+    { href: "/service-requests", icon: FileText, label: "服務請求管理 (SR/WBS)", roles: ["admin", "manager", "pm", "tech"] },
+    { href: "/resources", icon: Users, label: "服務資源與技能矩陣 (Resources)", roles: ["admin", "manager"] },
+    { href: "/kpi", icon: Activity, label: "KPI 達成率儀表板", roles: ["admin", "manager"] },
+    { href: "/reports", icon: FileText, label: "自訂報表 / Excel 匯出", roles: ["admin", "manager"] },
+    { href: "/settlements", icon: FileSpreadsheet, label: "月度結算與成本分攤", roles: ["admin", "manager"] },
+    { href: "/system-settings", icon: Settings, label: "系統設定與整合 (Settings)", roles: ["admin"] }
+];
+
+export function GlobalSearch({ open, onOpenChange }: GlobalSearchProps) {
+    const [query, setQuery] = useState("");
     const [, setLocation] = useLocation();
-    const { hasRole } = useCurrentUser();
-    
+    const { hasPermission, hasRole } = useCurrentUser();
+
     useEffect(() => {
-        const down = (e: KeyboardEvent) => {
-            if (e.key === "k" && (e.metaKey || e.ctrlKey)) {
-                e.preventDefault();
-                setOpen((open) => !open);
+        const handleShortcut = (event: KeyboardEvent) => {
+            if (event.key.toLocaleLowerCase() === "k" && (event.metaKey || event.ctrlKey)) {
+                event.preventDefault();
+                onOpenChange(!open);
             }
         };
+        document.addEventListener("keydown", handleShortcut);
+        return () => document.removeEventListener("keydown", handleShortcut);
+    }, [onOpenChange, open]);
 
-        document.addEventListener("keydown", down);
-        return () => document.removeEventListener("keydown", down);
-    }, []);
-
-    const routes = [
-        { href: "/opportunities", icon: Building2, label: "商機管理 (Opportunities)" },
-        { href: "/projects", icon: FolderKanban, label: "專案看板 (Projects)" },
-        { href: "/service-requests", icon: FileText, label: "查閱單號清單 (SR/WBS)" },
-        { href: "/resources", icon: Users, label: "查閱資源池與派工 (Resources)" },
-        { href: "/kpi", icon: Activity, label: "KPI 達成儀表板" },
-        { href: "/reports", icon: FileText, label: "自訂報表與 Excel 匯出" },
-        { href: "/settlements", icon: FileSpreadsheet, label: "月度結算與鎖定" },
-        { href: "/system-settings", icon: Settings, label: "系統與背景設定 (Settings)" }
-    ];
-
-    const visibleRoutes = routes.filter(
-        (route) => route.href !== "/system-settings" || hasRole("admin")
+    const normalizedQuery = query.trim().toLocaleLowerCase();
+    const visibleRoutes = routes.filter(route =>
+        (route.permission ? hasPermission(route.permission, route.roles as Role[]) : route.roles.some(hasRole)) &&
+        (!normalizedQuery || `${route.label} ${route.href}`.toLocaleLowerCase().includes(normalizedQuery))
     );
 
+    const handleOpenChange = (nextOpen: boolean) => {
+        onOpenChange(nextOpen);
+        if (!nextOpen) setQuery("");
+    };
+
     return (
-        <Dialog.Root open={open} onOpenChange={setOpen}>
+        <Dialog.Root open={open} onOpenChange={handleOpenChange}>
             <Dialog.Portal>
-                <Dialog.Overlay className="fixed inset-0 bg-black/60 backdrop-blur-sm z-[100] transition-opacity duration-300" />
-                <Dialog.Content className="fixed left-[50%] top-[15%] z-[110] w-[95vw] max-w-2xl translate-x-[-50%] rounded-xl bg-card border border-border shadow-2xl focus:outline-none overflow-hidden animate-in fade-in zoom-in-95 duration-200">
-                    <div className="flex items-center border-b border-border/50 px-4 bg-muted/20">
+                <Dialog.Overlay className="fixed inset-0 z-[100] bg-black/60 backdrop-blur-sm" />
+                <Dialog.Content
+                    aria-describedby={undefined}
+                    className="fixed left-1/2 top-[15%] z-[110] w-[95vw] max-w-2xl -translate-x-1/2 overflow-hidden rounded-xl border border-border bg-card shadow-2xl focus:outline-none"
+                >
+                    <Dialog.Title className="sr-only">全域功能搜尋</Dialog.Title>
+                    <div className="flex items-center border-b border-border/50 bg-muted/20 px-4">
                         <Search className="mr-3 h-5 w-5 shrink-0 text-primary opacity-60" />
-                        <input 
+                        <input
                             autoFocus
-                            placeholder="輸入關鍵字以全域導覽... (Type a command or search)"
-                            className="flex h-14 w-full rounded-md bg-transparent py-3 text-[15px] outline-none placeholder:text-muted-foreground disabled:cursor-not-allowed disabled:opacity-50 font-medium"
+                            value={query}
+                            onChange={event => setQuery(event.target.value)}
+                            placeholder="輸入功能名稱或路徑"
+                            className="flex h-14 w-full bg-transparent py-3 text-[15px] font-medium outline-none placeholder:text-muted-foreground"
                         />
-                        <div className="text-[10px] text-muted-foreground border border-border bg-background px-1.5 py-0.5 rounded shadow-sm opacity-60 ml-2 whitespace-nowrap">ESC 關閉</div>
+                        <div className="ml-2 whitespace-nowrap rounded border border-border bg-background px-1.5 py-0.5 text-[10px] text-muted-foreground shadow-sm">ESC 關閉</div>
                     </div>
                     <div className="max-h-[350px] overflow-y-auto p-2">
-                        <div className="px-3 py-2 text-xs font-semibold text-muted-foreground tracking-wider mb-1">快速導覽 Shortcuts</div>
-                        {visibleRoutes.map((r, i) => (
+                        <div className="mb-1 px-3 py-2 text-xs font-semibold tracking-wider text-muted-foreground">功能捷徑</div>
+                        {visibleRoutes.map(route => (
                             <button
-                                key={i}
-                                onClick={() => { setLocation(r.href); setOpen(false); }}
-                                className="relative flex w-full select-none items-center rounded-lg px-3 py-2.5 text-sm outline-none hover:bg-primary/10 hover:text-primary transition-colors text-left group"
+                                key={route.href}
+                                type="button"
+                                onClick={() => {
+                                    setLocation(route.href);
+                                    handleOpenChange(false);
+                                }}
+                                className="group flex w-full items-center rounded-lg px-3 py-2.5 text-left text-sm outline-none transition-colors hover:bg-primary/10 hover:text-primary"
                             >
-                                <r.icon className="mr-3 h-4 w-4 text-muted-foreground group-hover:text-primary" />
-                                <span className="font-medium text-foreground group-hover:text-primary">{r.label}</span>
-                                <span className="ml-auto text-xs text-muted-foreground opacity-0 group-hover:opacity-100 transition-opacity">跳轉 ↵</span>
+                                <route.icon className="mr-3 h-4 w-4 text-muted-foreground group-hover:text-primary" />
+                                <span className="font-medium text-foreground group-hover:text-primary">{route.label}</span>
                             </button>
                         ))}
+                        {visibleRoutes.length === 0 && (
+                            <div className="px-3 py-8 text-center text-sm text-muted-foreground">找不到可存取的功能</div>
+                        )}
                     </div>
                 </Dialog.Content>
             </Dialog.Portal>
         </Dialog.Root>
-    )
+    );
 }

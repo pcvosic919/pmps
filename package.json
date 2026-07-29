@@ -17,6 +17,7 @@
     "seed:local": "tsx scripts/seed-demo.ts",
     "lint": "pnpm -r lint",
     "db:prepare": "tsx scripts/prepare-db.ts",
+    "audit:opportunity-conversions": "tsx scripts/audit-opportunity-conversions.ts",
     "cosmos:shared-throughput": "bash scripts/prepare-cosmos-shared-throughput.sh"
   },
   "devDependencies": {

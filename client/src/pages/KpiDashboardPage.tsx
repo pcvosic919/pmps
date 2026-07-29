@@ -208,7 +208,7 @@ export function KpiDashboardPage() {
                     <div className="bg-card p-5 border border-border rounded-xl shadow-sm">
                         <div className="text-sm text-muted-foreground">Pipeline 預估</div>
                         <div className="text-2xl font-bold mt-1 text-blue-600">NT$ {importedRevenueData.totalPipeline.toLocaleString()}</div>
-                        <div className="text-xs text-muted-foreground mt-1">以商機預估金額口徑</div>
+                        <div className="text-xs text-muted-foreground mt-1">以商機金額口徑</div>
                     </div>
                     <div className="bg-card p-5 border border-border rounded-xl shadow-sm">
                         <div className="text-sm text-muted-foreground">加權預估達成率</div>
@@ -245,7 +245,15 @@ export function KpiDashboardPage() {
                     <div className="space-y-2">
                         {pipelineWeightEntries.map(([status, value]) => (
                             <div key={status} className="grid grid-cols-[1fr_90px] items-center gap-3 text-sm">
-                                <span className="text-muted-foreground">{status}</span>
+                                <span className="text-muted-foreground">{({
+                                    new: "待處理",
+                                    qualified: "已確認",
+                                    presales_active: "協銷中",
+                                    quoting: "報價中",
+                                    converted: "已轉案",
+                                    won: "已成交",
+                                    lost: "已失敗"
+                                } as Record<string, string>)[status] || status}</span>
                                 <span className="rounded-md bg-muted px-2 py-1 text-right font-semibold">{Math.round(Number(value) * 100)}%</span>
                             </div>
                         ))}

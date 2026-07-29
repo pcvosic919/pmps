@@ -1,9 +1,17 @@
 import { initTRPC, TRPCError } from "@trpc/server";
 import { CreateExpressContextOptions } from "@trpc/server/adapters/express";
+import { randomUUID } from "node:crypto";
 import { UserModel } from "../models/User";
-import { Role } from "../../shared/types";
+import { type FeaturePermission, type PermissionOverrides, type Role } from "../../shared/types";
 import { verifySessionToken } from "./tokens";
 import { BREAKGLASS_CONFIG, isBreakglassId } from "./breakglass";
+import {
+    categoryFromPath,
+    getAuditTarget,
+    queueAuditEvent,
+    summarizeAuditInput,
+    type AuditRequestContext
+} from "../services/AuditService";
 
 
 // User session type
@@ -15,6 +23,7 @@ export type UserSession = {
     managedDepartments: string[];
     role: Role;
     roles: Role[];
+    permissionOverrides: PermissionOverrides;
     isActive: boolean;
 };
 
@@ -40,6 +49,7 @@ export const createContext = async ({ req, res }: CreateExpressContextOptions) =
                     managedDepartments: [],
                     role: BREAKGLASS_CONFIG.user.role,
                     roles: BREAKGLASS_CONFIG.user.roles,
+                    permissionOverrides: { allow: [], deny: [] },
                     isActive: true
                 };
             } else {
@@ -56,6 +66,10 @@ export const createContext = async ({ req, res }: CreateExpressContextOptions) =
                             managedDepartments: (dbUser as any).managedDepartments || [],
                             role: dbUser.role as Role,
                             roles: (dbUser.roles || []) as Role[],
+                            permissionOverrides: {
+                                allow: ((dbUser as any).permissionOverrides?.allow || []) as FeaturePermission[],
+                                deny: ((dbUser as any).permissionOverrides?.deny || []) as FeaturePermission[]
+                            },
                             isActive: dbUser.isActive
                         };
                     }
@@ -71,10 +85,25 @@ export const createContext = async ({ req, res }: CreateExpressContextOptions) =
 
     }
 
+    const forwardedFor = req.headers["x-forwarded-for"];
+    const auditRequest: AuditRequestContext = {
+        requestId: typeof req.headers["x-request-id"] === "string"
+            ? req.headers["x-request-id"]
+            : randomUUID(),
+        sessionId: typeof req.headers["x-session-id"] === "string"
+            ? req.headers["x-session-id"]
+            : undefined,
+        ip: Array.isArray(forwardedFor)
+            ? forwardedFor[0]
+            : forwardedFor?.split(",")[0]?.trim() || req.ip || req.socket.remoteAddress,
+        userAgent: req.headers["user-agent"]
+    };
+
     return {
         req,
         res,
         user,
+        auditRequest,
     };
 };
 
@@ -100,12 +129,68 @@ const isAuthed = t.middleware(({ next, ctx }) => {
     }
     return next({
         ctx: {
+            ...ctx,
             user: ctx.user,
         },
     });
 });
 
-export const protectedProcedure = t.procedure.use(isAuthed);
+const auditProtectedInteraction = t.middleware(async ({ next, ctx, path, type, getRawInput }) => {
+    if (path.startsWith("audit.track")) {
+        return next();
+    }
+
+    const rawInput = await getRawInput().catch(() => undefined);
+    const target = getAuditTarget(rawInput);
+    const result = await next();
+    if (type === "query" && result.ok) {
+        return result;
+    }
+    const outcome = result.ok
+        ? "success"
+        : result.error.code === "FORBIDDEN"
+            ? "denied"
+            : "failed";
+
+    queueAuditEvent({
+        actor: ctx.user,
+        category: categoryFromPath(path),
+        action: path.split(".").pop() || "mutation",
+        outcome,
+        procedure: path,
+        request: ctx.auditRequest,
+        metadata: {
+            ...(summarizeAuditInput(rawInput) || {}),
+            ...(!result.ok ? { errorCode: result.error.code } : {})
+        },
+        ...target
+    });
+
+    return result;
+});
+
+export const protectedProcedure = t.procedure.use(isAuthed).use(auditProtectedInteraction);
+
+export const userHasPermission = (
+    user: UserSession,
+    permission: FeaturePermission,
+    defaultRoles: Role[]
+) => {
+    if (user.permissionOverrides.deny.includes(permission)) return false;
+    if (user.permissionOverrides.allow.includes(permission)) return true;
+    return defaultRoles.includes(user.role) || user.roles.some(role => defaultRoles.includes(role));
+};
+
+export const permissionProcedure = (permission: FeaturePermission, defaultRoles: Role[]) =>
+    protectedProcedure.use(({ next, ctx }) => {
+        if (!userHasPermission(ctx.user, permission, defaultRoles)) {
+            throw new TRPCError({
+                code: "FORBIDDEN",
+                message: "您沒有執行此功能的權限"
+            });
+        }
+        return next({ ctx });
+    });
 
 // Role-based authorization middleware
 export const roleProcedure = (allowedRoles: Role[]) =>

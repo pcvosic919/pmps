@@ -17,6 +17,7 @@ import { SettlementLockModel } from "../server/models/SettlementLock";
 import { SystemSettingModel } from "../server/models/Settings";
 import { TimesheetModel } from "../server/models/Timesheet";
 import { UserModel } from "../server/models/User";
+import { AuditEventModel } from "../server/models/AuditEvent";
 
 const envFile = process.env.NODE_ENV === "test" ? ".env.test" : ".env.local";
 const pathsToTry = [
@@ -46,6 +47,7 @@ const appModels = [
     ReportTemplateModel,
     SettlementSnapshotModel,
     SettlementAuditLogModel,
+    AuditEventModel,
 ];
 
 function shouldSyncIndexes() {

@@ -1,4 +1,5 @@
 import { useAuth } from "./auth";
+import type { FeaturePermission, Role } from "../../../shared/types";
 
 export function useCurrentUser() {
     const { user, isLoading } = useAuth();
@@ -6,9 +7,17 @@ export function useCurrentUser() {
     const hasRole = (role: string) =>
         !!user && (user.role === role || user.roles.includes(role as never));
 
+    const hasPermission = (permission: FeaturePermission, defaultRoles: Role[]) => {
+        if (!user) return false;
+        if (user.permissionOverrides?.deny.includes(permission)) return false;
+        if (user.permissionOverrides?.allow.includes(permission)) return true;
+        return defaultRoles.some(role => hasRole(role));
+    };
+
     return {
         user,
         hasRole,
+        hasPermission,
         isLoading,
     };
 }

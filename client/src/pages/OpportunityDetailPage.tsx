@@ -16,8 +16,9 @@ const OPP_STATUSES = [
     { value: "new", label: "待處理", color: "bg-blue-100 text-blue-800 border-blue-200" },
     { value: "qualified", label: "已確認", color: "bg-purple-100 text-purple-800 border-purple-200" },
     { value: "presales_active", label: "協銷中", color: "bg-amber-100 text-amber-800 border-amber-200" },
-    { value: "won", label: "已成交", color: "bg-green-100 text-green-800 border-green-200" },
+    { value: "quoting", label: "報價中", color: "bg-orange-100 text-orange-800 border-orange-200" },
     { value: "converted", label: "已轉案", color: "bg-indigo-100 text-indigo-800 border-indigo-200" },
+    { value: "won", label: "已成交", color: "bg-green-100 text-green-800 border-green-200" },
     { value: "lost", label: "已失敗", color: "bg-red-100 text-red-800 border-red-200" },
 ] as const;
 
@@ -146,7 +147,7 @@ export function OpportunityDetailPage() {
             setShowEditEstimatedValueModal(false);
             setEstimatedValueError("");
         },
-        onError: (err) => setEstimatedValueError(err.message || "更新預估金額失敗")
+        onError: (err) => setEstimatedValueError(err.message || "更新商機金額失敗")
     });
 
     const updateOpportunityTypeMutation = trpc.opportunities.updateOpportunityType.useMutation({
@@ -199,7 +200,7 @@ export function OpportunityDetailPage() {
     const handleCreateSR = () => {
         if (!srTitle.trim()) { setSrError("請輸入 SR 名稱"); return; }
         const amount = parseFloat(srAmount);
-        if (isNaN(amount) || amount <= 0) { setSrError("請輸入有效合約金額"); return; }
+        if (isNaN(amount) || amount <= 0) { setSrError("請輸入有效客戶預算金額"); return; }
 
         createSRMutation.mutate({
             opportunityId: id,
@@ -276,7 +277,8 @@ export function OpportunityDetailPage() {
     if (!opp) return <div className="p-8 text-center text-red-500">找不到商機</div>;
 
     const currentStatus = OPP_STATUSES.find(s => s.value === opp.status) ?? OPP_STATUSES[0];
-    const isConverted = opp.status === "converted";
+    const isTerminal = ["converted", "won", "lost"].includes(opp.status);
+    const canConvertOpportunity = !["converted", "lost"].includes(opp.status);
     const isBusinessOwner = hasRole("business") && opp.ownerId === user?.id;
     const canEditSalesOwner = hasRole("admin") || hasRole("manager") || hasRole("presales") || isBusinessOwner;
     const canEditOpportunityMembers = hasRole("admin") || hasRole("manager") || hasRole("presales") || user?.id === opp.ownerId;
@@ -309,10 +311,11 @@ export function OpportunityDetailPage() {
                                 case 'new': return 0;
                                 case 'qualified': return 1;
                                 case 'presales_active': return 2;
-                                case 'won': case 'lost': case 'converted': return 3;
+                                case 'quoting': return 3;
+                                case 'won': case 'lost': case 'converted': return 4;
                                 default: return 0;
                             }
-                        })() / 3) * 100}% - ${(() => {
+                        })() / 4) * 100}% - ${(() => {
                             const p = opp.status;
                             if (p === 'new') return '0%';
                             return '2rem'; // Offset for right aligns
@@ -324,6 +327,7 @@ export function OpportunityDetailPage() {
                     { value: "new", label: "待處理" },
                     { value: "qualified", label: "已確認" },
                     { value: "presales_active", label: "協銷中" },
+                    { value: "quoting", label: "報價中" },
                     { value: "final", label: "已結案" }
                 ].map((step, index) => {
                     const currentProgress = (() => {
@@ -331,7 +335,8 @@ export function OpportunityDetailPage() {
                             case 'new': return 0;
                             case 'qualified': return 1;
                             case 'presales_active': return 2;
-                            case 'won': case 'lost': case 'converted': return 3;
+                            case 'quoting': return 3;
+                            case 'won': case 'lost': case 'converted': return 4;
                             default: return 0;
                         }
                     })();
@@ -358,6 +363,12 @@ export function OpportunityDetailPage() {
                 })}
             </div>
 
+            {isTerminal && (
+                <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm font-medium text-amber-900">
+                    此商機目前為「{currentStatus.label}」，資料已鎖定為唯讀。
+                </div>
+            )}
+
             {/* Opp Info Card */}
             <div className="bg-card border border-border/50 rounded-xl shadow-sm p-6">
                 <div className="flex flex-wrap justify-between items-start gap-4 mb-6">
@@ -369,19 +380,28 @@ export function OpportunityDetailPage() {
                                 {!hasRole("business") ? (
                                     <>
                                         <button
-                                            onClick={() => !isConverted && setShowStatusDropdown(!showStatusDropdown)}
-                                            disabled={isConverted}
+                                            onClick={() => !isTerminal && setShowStatusDropdown(!showStatusDropdown)}
+                                            disabled={isTerminal}
                                             className={`px-3 py-1 rounded-full text-xs font-semibold border flex items-center gap-1 hover:opacity-80 transition-opacity ${currentStatus.color}`}
                                         >
                                             {currentStatus.label}
                                             <ChevronDown className="w-3 h-3" />
                                         </button>
-                                        {showStatusDropdown && !isConverted && (
+                                        {showStatusDropdown && !isTerminal && (
                                             <div className="absolute top-full mt-1 left-0 bg-card border border-border rounded-lg shadow-lg z-10 min-w-[140px] py-1">
                                                 {OPP_STATUSES.filter(s => s.value !== opp.status).map(s => (
                                                     <button
                                                         key={s.value}
-                                                        onClick={() => updateStatusMutation.mutate({ id, status: s.value })}
+                                                        onClick={() => {
+                                                            if (s.value === "quoting") {
+                                                                setEditedEstimatedValue(opp.estimatedValue.toString());
+                                                                setEstimatedValueError("");
+                                                                setShowEditEstimatedValueModal(true);
+                                                                setShowStatusDropdown(false);
+                                                                return;
+                                                            }
+                                                            updateStatusMutation.mutate({ id, status: s.value });
+                                                        }}
                                                         className={`w-full text-left px-3 py-1.5 text-xs font-medium hover:bg-muted transition-colors ${s.color.replace('border-', '')} rounded-none first:rounded-t-md last:rounded-b-md`}
                                                     >
                                                         {s.label}
@@ -405,24 +425,25 @@ export function OpportunityDetailPage() {
                         {!hasRole("business") && (
                             <button
                                 onClick={() => {
-                                    if (!isConverted) {
+                                    if (canConvertOpportunity) {
                                         setShowSRModal(true);
                                         setSrTitle(`${opp.title} ${opp.customerName} - SR`);
                                         setSrCustomerName(opp.customerName || "");
+                                        setSrAmount(opp.estimatedValue.toString());
                                         setSrSalesUserId((opp as any).salesUserId || "");
                                         setSrSalesDepartment((opp as any).salesDepartment || "");
                                         setSrSalesRep((opp as any).salesRep || "");
                                         setSrError("");
                                     }
                                 }}
-                                disabled={isConverted}
+                                disabled={!canConvertOpportunity}
                                 className="flex items-center gap-2 px-4 py-2 bg-primary text-primary-foreground rounded-lg hover:bg-primary/90 transition-colors text-sm font-medium shadow-sm disabled:opacity-50"
                             >
                                 <FileText className="w-4 h-4" />
-                                {isConverted ? "已轉案，請結案重建" : "一鍵建立 SR / 專案"}
+                                {opp.status === "converted" ? "已轉案" : opp.status === "lost" ? "已失敗，無法建立專案" : "一鍵建立報價單 / 專案"}
                             </button>
                         )}
-                        {canDelete && (
+                        {canDelete && !isTerminal && (
                             <button
                                 onClick={() => {
                                     if (confirm("確定要刪除此商機嗎？此操作無法復原。")) {
@@ -443,7 +464,7 @@ export function OpportunityDetailPage() {
                     </div>
                     <div className="space-y-1">
                         <span className="text-sm text-muted-foreground">商機類型</span>
-                        {(isBusinessOwner || hasRole("admin") || hasRole("manager") || hasRole("presales")) && !isConverted ? (
+                        {(isBusinessOwner || hasRole("admin") || hasRole("manager") || hasRole("presales")) && !isTerminal ? (
                             <select
                                 value={(opp as any).opportunityType || (Number(opp.estimatedValue || 0) > 0 ? "revenue" : "presales")}
                                 onChange={(event) => updateOpportunityTypeMutation.mutate({ id, opportunityType: event.target.value as "revenue" | "presales" })}
@@ -460,8 +481,8 @@ export function OpportunityDetailPage() {
                     </div>
                     <div className="space-y-1">
                         <div className="flex items-center justify-between gap-3">
-                            <span className="text-sm text-muted-foreground">預估金額</span>
-                            {(isBusinessOwner || hasRole("admin") || hasRole("manager") || hasRole("presales")) && !isConverted && (
+                            <span className="text-sm text-muted-foreground">商機金額</span>
+                            {(isBusinessOwner || hasRole("admin") || hasRole("manager") || hasRole("presales")) && !isTerminal && (
                                 <button
                                     onClick={() => {
                                         setEditedEstimatedValue(opp.estimatedValue.toString());
@@ -487,7 +508,7 @@ export function OpportunityDetailPage() {
                     <div className="space-y-1">
                         <div className="flex items-center justify-between gap-3">
                             <span className="text-sm text-muted-foreground">業務</span>
-                            {canEditSalesOwner && (
+                            {canEditSalesOwner && !isTerminal && (
                                 <button
                                     onClick={() => {
                                         setEditedSalesUserId((opp as any).salesUserId || "");
@@ -522,7 +543,7 @@ export function OpportunityDetailPage() {
                         <div className="space-y-2 md:col-span-2">
                             <div className="flex items-center justify-between gap-3">
                                 <span className="text-sm font-medium text-muted-foreground">商機描述</span>
-                                {isBusinessOwner && !isConverted && (
+                                {isBusinessOwner && !isTerminal && (
                                     <button
                                         onClick={() => {
                                             setEditedDescription(opp.description || "");
@@ -547,7 +568,7 @@ export function OpportunityDetailPage() {
                     <h3 className="font-semibold text-lg flex items-center">
                         <FileText className="w-5 h-5 mr-2 text-primary" /> 商機自訂欄位
                     </h3>
-                    {!isConverted && (hasRole("admin") || hasRole("manager") || user?.id === opp.ownerId) && !hasRole("business") && (
+                    {!isTerminal && (hasRole("admin") || hasRole("manager") || user?.id === opp.ownerId) && !hasRole("business") && (
                         <button
                             onClick={() => {
                                 setShowCustomFieldsModal(true);
@@ -586,8 +607,8 @@ export function OpportunityDetailPage() {
                     <div className="p-4 border-b border-border/50 bg-muted/30 flex justify-between items-center">
                         <h3 className="font-bold flex items-center"><Briefcase className="w-5 h-5 mr-2 text-primary" />協銷指派</h3>
                         {!hasRole("business") && (
-                            <button onClick={() => { if (!isConverted) { setShowAssignModal(true); setAssignError(""); } }}
-                                disabled={isConverted}
+                            <button onClick={() => { if (!isTerminal) { setShowAssignModal(true); setAssignError(""); } }}
+                                disabled={isTerminal}
                                 className="text-xs font-medium text-primary hover:text-primary/80 flex items-center px-2 py-1 rounded hover:bg-primary/10 transition-colors disabled:opacity-50">
                                 <Plus className="w-3 h-3 mr-1" /> 新增指派
                             </button>
@@ -619,8 +640,8 @@ export function OpportunityDetailPage() {
                     <div className="p-4 border-b border-border/50 bg-muted/30 flex justify-between items-center">
                         <h3 className="font-bold flex items-center"><Users className="w-5 h-5 mr-2 text-primary" />商機成員</h3>
                         {canEditOpportunityMembers && (
-                            <button onClick={() => { if (!isConverted) { setShowMemberModal(true); setMemberError(""); } }}
-                                disabled={isConverted}
+                            <button onClick={() => { if (!isTerminal) { setShowMemberModal(true); setMemberError(""); } }}
+                                disabled={isTerminal}
                                 className="text-xs font-medium text-primary hover:text-primary/80 flex items-center px-2 py-1 rounded hover:bg-primary/10 transition-colors disabled:opacity-50">
                                 <UserPlus className="w-3 h-3 mr-1" /> 新增成員
                             </button>
@@ -643,8 +664,8 @@ export function OpportunityDetailPage() {
                                             </div>
                                             {canEditOpportunityMembers && m.memberRole !== "owner" && (
                                                 <button
-                                                    onClick={() => !isConverted && removeMemberMutation.mutate({ memberId: m.id })}
-                                                    disabled={isConverted}
+                                                    onClick={() => !isTerminal && removeMemberMutation.mutate({ memberId: m.id })}
+                                                    disabled={isTerminal}
                                                     className="p-1 text-muted-foreground hover:text-red-500 opacity-0 group-hover:opacity-100 transition-all rounded disabled:opacity-40"
                                                     title="移除成員"
                                                 >
@@ -669,8 +690,8 @@ export function OpportunityDetailPage() {
                     <div className="p-4 border-b border-border/50 bg-muted/30 flex justify-between items-center">
                         <h3 className="font-bold flex items-center"><Clock className="w-5 h-5 mr-2 text-primary" />協銷工時紀錄</h3>
                         {canReportTime && (
-                            <button onClick={() => { if (!isConverted) { setShowTimesheetModal(true); setTsError(""); } }}
-                                disabled={isConverted}
+                            <button onClick={() => { if (!isTerminal) { setShowTimesheetModal(true); setTsError(""); } }}
+                                disabled={isTerminal}
                                 className="text-xs font-medium text-primary hover:text-primary/80 flex items-center px-2 py-1 rounded hover:bg-primary/10 transition-colors disabled:opacity-50">
                                 <Plus className="w-3 h-3 mr-1" /> 回報工時
                             </button>
@@ -707,8 +728,8 @@ export function OpportunityDetailPage() {
                                 <Clock className="w-8 h-8 opacity-20 mb-2" />
                                 <p className="text-sm">尚無工時紀錄</p>
                                 {canReportTime && (
-                                    <button onClick={() => { if (!isConverted) { setShowTimesheetModal(true); setTsError(""); } }}
-                                        disabled={isConverted}
+                                    <button onClick={() => { if (!isTerminal) { setShowTimesheetModal(true); setTsError(""); } }}
+                                        disabled={isTerminal}
                                         className="mt-3 text-xs text-primary hover:underline flex items-center disabled:opacity-50 disabled:hover:no-underline">
                                         <Plus className="w-3 h-3 mr-1" /> 立即回報工時
                                     </button>
@@ -726,25 +747,31 @@ export function OpportunityDetailPage() {
                             <Paperclip className="mr-2 h-4 w-4 text-primary" />
                             商機附件
                         </h3>
-                        <div
-                            onDragOver={(event) => { event.preventDefault(); setIsDraggingFile(true); }}
-                            onDragLeave={() => setIsDraggingFile(false)}
-                            onDrop={handleFileDrop}
-                            onClick={() => !isUploadingFile && document.getElementById("opportunity-file-input")?.click()}
-                            className={`cursor-pointer rounded-lg border-2 border-dashed p-4 text-center transition-colors ${isDraggingFile ? "border-primary bg-primary/5" : "border-border hover:border-primary/50 hover:bg-muted/30"} ${isUploadingFile ? "cursor-not-allowed opacity-50" : ""}`}
-                        >
-                            <Upload className={`mx-auto mb-2 h-7 w-7 ${isDraggingFile ? "text-primary" : "text-muted-foreground/50"}`} />
-                            <p className="text-xs text-muted-foreground">{isUploadingFile ? "上傳中..." : "拖曳或點擊上傳商機附件"}</p>
-                            <input
-                                id="opportunity-file-input"
-                                type="file"
-                                multiple
-                                className="hidden"
-                                accept=".pdf,.doc,.docx,.xls,.xlsx,.png,.jpg,.jpeg,.zip,.ppt,.pptx"
-                                disabled={isUploadingFile}
-                                onChange={(event) => void handleFileUpload(event.target.files)}
-                            />
-                        </div>
+                        {!isTerminal ? (
+                            <div
+                                onDragOver={(event) => { event.preventDefault(); setIsDraggingFile(true); }}
+                                onDragLeave={() => setIsDraggingFile(false)}
+                                onDrop={handleFileDrop}
+                                onClick={() => !isUploadingFile && document.getElementById("opportunity-file-input")?.click()}
+                                className={`cursor-pointer rounded-lg border-2 border-dashed p-4 text-center transition-colors ${isDraggingFile ? "border-primary bg-primary/5" : "border-border hover:border-primary/50 hover:bg-muted/30"} ${isUploadingFile ? "cursor-not-allowed opacity-50" : ""}`}
+                            >
+                                <Upload className={`mx-auto mb-2 h-7 w-7 ${isDraggingFile ? "text-primary" : "text-muted-foreground/50"}`} />
+                                <p className="text-xs text-muted-foreground">{isUploadingFile ? "上傳中..." : "拖曳或點擊上傳商機附件"}</p>
+                                <input
+                                    id="opportunity-file-input"
+                                    type="file"
+                                    multiple
+                                    className="hidden"
+                                    accept=".pdf,.doc,.docx,.xls,.xlsx,.png,.jpg,.jpeg,.zip,.ppt,.pptx"
+                                    disabled={isUploadingFile}
+                                    onChange={(event) => void handleFileUpload(event.target.files)}
+                                />
+                            </div>
+                        ) : (
+                            <div className="rounded-lg border border-dashed border-border bg-muted/30 p-4 text-center text-xs text-muted-foreground">
+                                此商機已鎖定，不可再上傳附件。
+                            </div>
+                        )}
                         {opp.attachments && opp.attachments.length > 0 && (
                             <div className="mt-3 space-y-2">
                                 {[...(opp.attachments || [])].sort((left: any, right: any) => new Date(right.uploadedAt).getTime() - new Date(left.uploadedAt).getTime()).map((attachment: any, index: number) => (
@@ -906,17 +933,17 @@ export function OpportunityDetailPage() {
                 </div>
             )}
 
-            {/* 編輯預估金額 Modal */}
+            {/* 編輯商機金額 Modal */}
             {showEditEstimatedValueModal && (
                 <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm">
                     <div className="bg-card border border-border rounded-xl shadow-xl w-full max-w-lg mx-4 p-6 space-y-5">
                         <div className="flex justify-between items-center">
-                            <h2 className="text-lg font-bold">編輯預估金額</h2>
+                            <h2 className="text-lg font-bold">輸入商機金額</h2>
                             <button onClick={() => setShowEditEstimatedValueModal(false)} className="p-1 rounded-full hover:bg-muted"><X className="w-5 h-5 text-muted-foreground" /></button>
                         </div>
                         <div className="space-y-4">
                             <div>
-                                <label className="block text-sm font-medium mb-1">預估金額</label>
+                                <label className="block text-sm font-medium mb-1">商機金額</label>
                                 <input
                                     type="number"
                                     min="0"
@@ -1010,12 +1037,12 @@ export function OpportunityDetailPage() {
                 </div>
             )}
 
-            {/* 建立 SR / 專案 Modal */}
+            {/* 建立報價單 / 專案 Modal */}
             {showSRModal && (
                 <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm">
                     <div className="bg-card border border-border rounded-xl shadow-xl w-full max-w-md mx-4 p-6 space-y-5">
                         <div className="flex justify-between items-center">
-                            <h2 className="text-lg font-bold flex items-center"><FileText className="w-5 h-5 mr-2 text-primary" />一鍵建立 SR / 專案</h2>
+                            <h2 className="text-lg font-bold flex items-center"><FileText className="w-5 h-5 mr-2 text-primary" />一鍵建立報價單 / 專案</h2>
                             <button onClick={() => setShowSRModal(false)} className="p-1 rounded-full hover:bg-muted"><X className="w-5 h-5 text-muted-foreground" /></button>
                         </div>
                         <p className="text-sm text-muted-foreground">將此商機轉換為服務請求，狀態將自動更新為「已轉案」。</p>
@@ -1026,7 +1053,7 @@ export function OpportunityDetailPage() {
                                     className="w-full border border-border rounded-lg px-3 py-2 bg-background text-sm focus:outline-none focus:ring-2 focus:ring-primary/50" />
                             </div>
                             <div>
-                                <label className="block text-sm font-medium mb-1">合約金額 (NT$)</label>
+                                <label className="block text-sm font-medium mb-1">客戶預算金額 (NT$)</label>
                                 <input type="number" min="0" step="1000" value={srAmount} onChange={e => setSrAmount(e.target.value)} placeholder="例：1500000"
                                     className="w-full border border-border rounded-lg px-3 py-2 bg-background text-sm focus:outline-none focus:ring-2 focus:ring-primary/50" />
                             </div>

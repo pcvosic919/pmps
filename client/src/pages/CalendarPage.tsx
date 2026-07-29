@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { trpc } from "../lib/trpc";
 import { format, startOfWeek, addDays, startOfMonth, isSameMonth, isSameDay } from "date-fns";
 import { ChevronLeft, ChevronRight, Calendar as CalendarIcon, Clock, X, AlertCircle, Plus, Search, Users } from "lucide-react";
@@ -7,7 +7,7 @@ import { useCurrentUser } from "../lib/useCurrentUser";
 
 export function CalendarPage() {
     const utils = trpc.useContext();
-    const { hasRole } = useCurrentUser();
+    const { hasRole, user } = useCurrentUser();
     const [currentDate, setCurrentDate] = useState(new Date());
     const [calendarScope, setCalendarScope] = useState<"mine" | "managed" | "all">("mine");
     
@@ -27,7 +27,23 @@ export function CalendarPage() {
     const [dayStatusFilter, setDayStatusFilter] = useState("");
 
     // Fetch WBS items assigned to current user
-    const { data: assignments, isLoading } = trpc.projects.getMyProjectAssignments.useQuery({ scope: calendarScope });
+    const { data: assignments, isLoading, isFetching } = trpc.projects.getMyProjectAssignments.useQuery(
+        { scope: calendarScope },
+        { placeholderData: undefined }
+    );
+
+    useEffect(() => {
+        if (!user?.id) return;
+        const savedScope = localStorage.getItem(`pmp_calendar_scope_${user.id}`);
+        if (savedScope === "mine" || (savedScope === "managed" && (hasRole("manager") || hasRole("admin"))) || (savedScope === "all" && hasRole("admin"))) {
+            setCalendarScope(savedScope);
+        }
+    }, [user?.id]);
+
+    const changeCalendarScope = (scope: "mine" | "managed" | "all") => {
+        setCalendarScope(scope);
+        if (user?.id) localStorage.setItem(`pmp_calendar_scope_${user.id}`, scope);
+    };
 
     const createCalendarTaskMutation = trpc.projects.createCalendarTask.useMutation({
         onSuccess: () => {
@@ -328,14 +344,15 @@ export function CalendarPage() {
                 <div>
                     <label className="block text-xs font-semibold text-muted-foreground mb-1">檢視範圍</label>
                     <div className="flex rounded-lg border border-border bg-muted/30 p-1 text-xs">
-                        <button type="button" onClick={() => setCalendarScope("mine")} className={`px-3 py-1.5 rounded-md font-semibold ${calendarScope === "mine" ? "bg-background shadow-sm" : "text-muted-foreground"}`}>我的</button>
+                        <button type="button" onClick={() => changeCalendarScope("mine")} className={`px-3 py-1.5 rounded-md font-semibold ${calendarScope === "mine" ? "bg-background shadow-sm" : "text-muted-foreground"}`}>我的</button>
                         {(hasRole("manager") || hasRole("admin")) && (
-                            <button type="button" onClick={() => setCalendarScope("managed")} className={`px-3 py-1.5 rounded-md font-semibold ${calendarScope === "managed" ? "bg-background shadow-sm" : "text-muted-foreground"}`}>管理部門</button>
+                            <button type="button" onClick={() => changeCalendarScope("managed")} className={`px-3 py-1.5 rounded-md font-semibold ${calendarScope === "managed" ? "bg-background shadow-sm" : "text-muted-foreground"}`}>管理部門</button>
                         )}
                         {hasRole("admin") && (
-                            <button type="button" onClick={() => setCalendarScope("all")} className={`px-3 py-1.5 rounded-md font-semibold ${calendarScope === "all" ? "bg-background shadow-sm" : "text-muted-foreground"}`}>全部</button>
+                            <button type="button" onClick={() => changeCalendarScope("all")} className={`px-3 py-1.5 rounded-md font-semibold ${calendarScope === "all" ? "bg-background shadow-sm" : "text-muted-foreground"}`}>全部</button>
                         )}
                     </div>
+                    {isFetching && !isLoading && <span className="ml-2 text-[11px] text-muted-foreground">更新中…</span>}
                 </div>
             </div>
 

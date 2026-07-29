@@ -4,15 +4,20 @@
 FROM node:22-alpine AS base
 ENV PNPM_HOME="/pnpm"
 ENV PATH="$PNPM_HOME:$PATH"
+ENV CI=true
 RUN corepack enable
 WORKDIR /app
-COPY . .
 
 # Stage 2: Build
 FROM base AS builder
-# Install all dependencies
+# Copy workspace manifests first so dependency installation can be cached and
+# never sees host node_modules or build output.
+COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
+COPY client/package.json ./client/package.json
+COPY server/package.json ./server/package.json
+COPY shared/package.json ./shared/package.json
 RUN pnpm install --frozen-lockfile
-# Build the whole monorepo
+COPY . .
 RUN pnpm build
 
 # Stage 3: Runner

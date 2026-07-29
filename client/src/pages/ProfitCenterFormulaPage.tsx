@@ -24,12 +24,23 @@ type KpiSourceDefinition = {
 };
 
 const defaultPipelineWeights: Record<string, number> = {
-    "lead": 0.2,
+    "new": 0.2,
     "qualified": 0.4,
-    "proposal": 0.6,
-    "negotiation": 0.8,
+    "presales_active": 0.6,
+    "quoting": 0.8,
+    "converted": 1,
     "won": 1,
     "lost": 0,
+};
+
+const opportunityStatusLabels: Record<string, string> = {
+    new: "待處理",
+    qualified: "已確認",
+    presales_active: "協銷中",
+    quoting: "報價中",
+    converted: "已轉案",
+    won: "已成交",
+    lost: "已失敗"
 };
 
 export default function ProfitCenterFormulaPage() {
@@ -307,7 +318,7 @@ export default function ProfitCenterFormulaPage() {
                                 <div className="grid gap-3 sm:grid-cols-2">
                                     {Object.entries(pipelineWeights).map(([status, weight]) => (
                                         <label key={status} className="grid grid-cols-[1fr_96px] items-center gap-3 rounded-lg border border-border/60 bg-muted/10 p-3 text-sm">
-                                            <span className="font-medium">{status}</span>
+                                            <span className="font-medium">{opportunityStatusLabels[status] || status}</span>
                                             <input
                                                 type="number"
                                                 min={0}
