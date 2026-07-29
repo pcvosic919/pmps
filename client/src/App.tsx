@@ -14,6 +14,10 @@ import { encryptPayload, decryptPayload } from "../../shared/crypto";
 import { ErrorBoundary } from "./components/ErrorBoundary";
 
 const ENTRA_CONFIG_CACHE_KEY = "pmp_entra_runtime_config";
+const createClientEventId = () =>
+  typeof crypto.randomUUID === "function"
+    ? crypto.randomUUID()
+    : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
 
 const LoginPage = lazy(() => import("./pages/LoginPage").then((module) => ({ default: module.LoginPage })));
 const UserManagementPage = lazy(() => import("./pages/UserManagementPage").then((module) => ({ default: module.UserManagementPage })));
@@ -40,6 +44,7 @@ const OpportunityDetailPage = lazy(() => import("./pages/OpportunityDetailPage")
 const ProjectManagementPage = lazy(() => import("./pages/ProjectManagementPage").then((module) => ({ default: module.ProjectManagementPage })));
 const ProfitCenterFormulaPage = lazy(() => import("./pages/ProfitCenterFormulaPage"));
 const ProfitCenterReportPage = lazy(() => import("./pages/ProfitCenterReportPage").then((module) => ({ default: module.ProfitCenterReportPage })));
+const AuditPage = lazy(() => import("./pages/AuditPage").then((module) => ({ default: module.AuditPage })));
 
 type ActiveRouteDefinition = {
   path: string;
@@ -132,6 +137,14 @@ function WbsRoute() {
     : <RestrictedPage message="您沒有權限存取專案管理。" />;
 }
 
+function AuditRoute() {
+  const { user, isLoading } = useCurrentUser();
+  if (isLoading) return <AppLoadingFallback />;
+  return user?.email?.trim().toLowerCase() === "demo@demo.com"
+    ? <AuditPage />
+    : <RestrictedPage message="只有 demo@demo.com 可以查看 Audit 使用者互動紀錄。" />;
+}
+
 const activeRoutes: ActiveRouteDefinition[] = [
   { path: "/", component: DashboardPage, pageFile: "DashboardPage.tsx", lifecycle: "保留 / 上線", notes: "主儀表板首頁。" },
   { path: "/resources", component: ResourcesPage, pageFile: "ResourcesPage.tsx", lifecycle: "保留 / 上線", notes: "資源池與人力配置視圖。" },
@@ -157,6 +170,7 @@ const activeRoutes: ActiveRouteDefinition[] = [
   { path: "/reports", component: ReportBuilderPage, pageFile: "ReportBuilderPage.tsx", lifecycle: "保留 / 上線", notes: "自訂報表產生與匯出。" },
   { path: "/formula/profit-center", component: ProfitCenterFormulaPage, pageFile: "ProfitCenterFormulaPage.tsx", lifecycle: "保留 / 上線", notes: "利潤中心公式專用頁面。" },
   { path: "/profit-center-report", component: ProfitCenterReportPage, pageFile: "ProfitCenterReportPage.tsx", lifecycle: "保留 / 上線", notes: "利潤中心業績結算儀表板" },
+  { path: "/audit", component: AuditRoute, pageFile: "AuditPage.tsx", lifecycle: "保留 / 上線", notes: "demo@demo.com 專用使用者互動稽核中心" },
 ];
 
 // `client/src/App.tsx` is the source of truth for routed pages; README and navigation
@@ -242,7 +256,10 @@ function createAppQueryClient(onUnauthorized: () => void) {
 function AppShell() {
   const [location, setLocation] = useLocation();
   const { isAuthenticated } = useAuth();
+  const { user } = useCurrentUser();
   const { inProgress } = useMsal();
+  const { mutate: trackPageView } = trpc.audit.trackPageView.useMutation();
+  const lastTrackedPage = useRef("");
 
   // While MSAL is processing a redirect, don't touch the route
   const msalBusy = inProgress !== InteractionStatus.None;
@@ -259,6 +276,14 @@ function AppShell() {
       setLocation("/");
     }
   }, [isAuthenticated, location, setLocation, msalBusy]);
+
+  useEffect(() => {
+    if (!isAuthenticated || !user || location === "/login") return;
+    const trackingKey = `${user.id}:${location}`;
+    if (lastTrackedPage.current === trackingKey) return;
+    lastTrackedPage.current = trackingKey;
+    trackPageView({ route: location });
+  }, [isAuthenticated, location, trackPageView, user]);
 
   // Show loading while MSAL is processing redirect
   if (msalBusy && !isAuthenticated) {
@@ -298,13 +323,20 @@ export default function App() {
         httpBatchLink({
           url: "/api/trpc",
           async headers() {
+            let sessionId = sessionStorage.getItem("pmp_audit_session_id");
+            if (!sessionId) {
+              sessionId = createClientEventId();
+              sessionStorage.setItem("pmp_audit_session_id", sessionId);
+            }
             return {
               authorization: `Bearer ${localStorage.getItem("pmp_auth_token") || ""}`,
+              "x-request-id": createClientEventId(),
+              "x-session-id": sessionId,
             };
           },
           fetch: async (url, options) => {
             const key = (import.meta as any).env.VITE_API_ENCRYPTION_KEY;
-            let modifiedOptions: any = { ...options };
+            const modifiedOptions: any = { ...options };
             if (key && modifiedOptions.body && typeof modifiedOptions.body === "string") {
               modifiedOptions.body = JSON.stringify({
                 encrypted: encryptPayload(JSON.parse(modifiedOptions.body), key)

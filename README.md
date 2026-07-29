@@ -190,6 +190,7 @@ docker compose run --rm web \
 | `MONGODB_URI` | **是** | MongoDB 完整連線字串。Docker compose 預設為 `mongodb://127.0.0.1:27018/pmp_system`；Cosmos DB 建議在路徑指定 database，例如 `/pmp_system` |
 | `MONGODB_DB_NAME` | 否 | 明確指定 MongoDB database；Cosmos DB 連線字串未包含 database 路徑時會預設使用 `pmp_system`，避免落到 `test` database |
 | `JWT_SECRET` | **是** | JWT 與通知 SSE 短效 Token 簽章密鑰，未設定時服務不會啟動 |
+| `AUDIT_IP_HASH_SALT` | 否 | Audit 使用者互動紀錄的 IP 雜湊 salt；正式環境建議設定獨立且穩定的高強度字串 |
 | `DEMO_LOGIN_ENABLED` | 否 | 設為 `true` 時允許登入頁顯示並使用 Demo 快速登入（建議僅測試環境） |
 | `API_ENCRYPTION_KEY` | 否 | 若設定，前後端 tRPC payload 會以此 key 加解密 |
 | `REQUEST_BODY_LIMIT` | 否 | Express JSON body 上限，預設 `50mb`，Excel/附件匯入較大時可調整 |

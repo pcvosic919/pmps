@@ -1,9 +1,17 @@
 import { initTRPC, TRPCError } from "@trpc/server";
 import { CreateExpressContextOptions } from "@trpc/server/adapters/express";
+import { randomUUID } from "node:crypto";
 import { UserModel } from "../models/User";
 import { type FeaturePermission, type PermissionOverrides, type Role } from "../../shared/types";
 import { verifySessionToken } from "./tokens";
 import { BREAKGLASS_CONFIG, isBreakglassId } from "./breakglass";
+import {
+    categoryFromPath,
+    getAuditTarget,
+    queueAuditEvent,
+    summarizeAuditInput,
+    type AuditRequestContext
+} from "../services/AuditService";
 
 
 // User session type
@@ -77,10 +85,25 @@ export const createContext = async ({ req, res }: CreateExpressContextOptions) =
 
     }
 
+    const forwardedFor = req.headers["x-forwarded-for"];
+    const auditRequest: AuditRequestContext = {
+        requestId: typeof req.headers["x-request-id"] === "string"
+            ? req.headers["x-request-id"]
+            : randomUUID(),
+        sessionId: typeof req.headers["x-session-id"] === "string"
+            ? req.headers["x-session-id"]
+            : undefined,
+        ip: Array.isArray(forwardedFor)
+            ? forwardedFor[0]
+            : forwardedFor?.split(",")[0]?.trim() || req.ip || req.socket.remoteAddress,
+        userAgent: req.headers["user-agent"]
+    };
+
     return {
         req,
         res,
         user,
+        auditRequest,
     };
 };
 
@@ -106,12 +129,47 @@ const isAuthed = t.middleware(({ next, ctx }) => {
     }
     return next({
         ctx: {
+            ...ctx,
             user: ctx.user,
         },
     });
 });
 
-export const protectedProcedure = t.procedure.use(isAuthed);
+const auditProtectedInteraction = t.middleware(async ({ next, ctx, path, type, getRawInput }) => {
+    if (path.startsWith("audit.track")) {
+        return next();
+    }
+
+    const rawInput = await getRawInput().catch(() => undefined);
+    const target = getAuditTarget(rawInput);
+    const result = await next();
+    if (type === "query" && result.ok) {
+        return result;
+    }
+    const outcome = result.ok
+        ? "success"
+        : result.error.code === "FORBIDDEN"
+            ? "denied"
+            : "failed";
+
+    queueAuditEvent({
+        actor: ctx.user,
+        category: categoryFromPath(path),
+        action: path.split(".").pop() || "mutation",
+        outcome,
+        procedure: path,
+        request: ctx.auditRequest,
+        metadata: {
+            ...(summarizeAuditInput(rawInput) || {}),
+            ...(!result.ok ? { errorCode: result.error.code } : {})
+        },
+        ...target
+    });
+
+    return result;
+});
+
+export const protectedProcedure = t.procedure.use(isAuthed).use(auditProtectedInteraction);
 
 export const userHasPermission = (
     user: UserSession,

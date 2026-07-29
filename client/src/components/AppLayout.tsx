@@ -22,6 +22,7 @@ import {
     Search,
     Settings,
     Settings2,
+    ShieldCheck,
     TrendingUp,
     Users,
     X,
@@ -51,6 +52,7 @@ type NavItem = {
     roles?: string[];
     permission?: FeaturePermission;
     badge?: "notifications";
+    auditOnly?: boolean;
 };
 
 type NavGroup = {
@@ -133,6 +135,7 @@ const navGroups: NavGroup[] = [
             { icon: Settings, label: "帳號管理", href: "/users", roles: ["admin"] },
             { icon: Building2, label: "公司管理", href: "/companies", roles: ["admin"] },
             { icon: Settings, label: "系統設定", href: "/system-settings", roles: ["admin"] },
+            { icon: ShieldCheck, label: "Audit 稽核中心", href: "/audit", auditOnly: true },
         ],
     },
 ];
@@ -161,6 +164,7 @@ export function AppLayout({ children }: AppLayoutProps) {
     const { data: settings } = trpc.system.getSettings.useQuery(undefined, {
         staleTime: 300_000,
     });
+    const trackLogout = trpc.audit.trackLogout.useMutation();
     const companyName = settings?.companyName || "PMP System";
     const unreadCount = notifications?.filter((item) => !item.isRead).length ?? 0;
 
@@ -171,7 +175,9 @@ export function AppLayout({ children }: AppLayoutProps) {
         .map((group) => ({
             ...group,
             items: group.items.filter((item) =>
-                item.permission
+                item.auditOnly && user?.email?.trim().toLowerCase() !== "demo@demo.com"
+                    ? false
+                    : item.permission
                     ? hasPermission(item.permission, (item.roles || []) as Role[])
                     : !item.roles || item.roles.length === 0 || item.roles.some(hasRole)
             )
@@ -206,6 +212,11 @@ export function AppLayout({ children }: AppLayoutProps) {
     }, [location]);
 
     const handleLogout = async () => {
+        try {
+            await trackLogout.mutateAsync();
+        } catch {
+            // Audit failure must not block logout.
+        }
         clearAuth();
         try {
             await instance.logoutPopup();
