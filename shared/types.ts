@@ -12,6 +12,26 @@ export const roles = [
 
 export type Role = typeof roles[number];
 
+export const featurePermissions = [
+    "module.opportunities.view",
+    "module.projects.view",
+    "module.calendar.view",
+    "project.create_sr",
+    "project.edit",
+    "project.manage_members",
+    "project.archive",
+    "project.delete",
+    "wbs.submit",
+    "wbs.review"
+] as const;
+
+export type FeaturePermission = typeof featurePermissions[number];
+
+export type PermissionOverrides = {
+    allow: FeaturePermission[];
+    deny: FeaturePermission[];
+};
+
 export const authProviders = ["manual", "oauth", "entra"] as const;
 export type AuthProvider = typeof authProviders[number];
 
@@ -276,5 +296,9 @@ export const profileUpdateSchema = z.object({
     title: z.string().optional(),
     role: z.enum(roles),
     roles: z.array(z.enum(roles)),
+    permissionOverrides: z.object({
+        allow: z.array(z.enum(featurePermissions)),
+        deny: z.array(z.enum(featurePermissions)),
+    }).optional(),
     isActive: z.boolean().optional(),
 });

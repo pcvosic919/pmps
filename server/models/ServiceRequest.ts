@@ -58,6 +58,14 @@ export interface IServiceRequestAttachment extends Omit<ServiceRequestAttachment
     uploadedById: mongoose.Types.ObjectId;
 }
 
+export interface IServiceRequestWbsDraft {
+    userId: mongoose.Types.ObjectId;
+    baseVersionNumber?: number;
+    items: IWbsItem[];
+    revision: number;
+    updatedAt: Date;
+}
+
 export interface IServiceRequest extends Document {
     opportunityId?: mongoose.Types.ObjectId;
     externalProjectCode?: string;
@@ -104,10 +112,14 @@ export interface IServiceRequest extends Document {
     externalAssignments: IServiceRequestExternalAssignment[];
     attachments: IServiceRequestAttachment[];
     wbsVersions: IWbsVersion[];
+    wbsDrafts: IServiceRequestWbsDraft[];
     changeRequests: IChangeRequest[];
     customFields?: Array<Omit<CustomFieldValue, "fieldId"> & { fieldId: mongoose.Types.ObjectId }>;
     sharePointFolderUrl?: string;
     localFolderPath?: string;
+    archivedAt?: Date;
+    archivedById?: mongoose.Types.ObjectId;
+    projectAuditLogs?: { action: string; userId: mongoose.Types.ObjectId; timestamp: Date; reason?: string }[];
     createdAt: Date;
     updatedAt: Date;
 }
@@ -154,6 +166,31 @@ const WbsVersionSchema = new Schema<IWbsVersion>({
     departmentApprovals: [DepartmentApprovalSchema],
     auditLogs: [AuditLogSchema],
     createdAt: { type: Date, default: Date.now }
+});
+
+const WbsDraftItemSchema = new Schema({
+    title: { type: String, default: "" },
+    estimatedHours: { type: Number, default: 0 },
+    actualHours: { type: Number, default: 0 },
+    startDate: { type: Date },
+    endDate: { type: Date },
+    assigneeId: { type: Schema.Types.ObjectId, ref: "User" },
+    assigneeIds: [{ type: Schema.Types.ObjectId, ref: "User" }],
+    completionPercentage: { type: Number, default: 0, min: 0, max: 100 },
+    status: { type: String, enum: wbsItemStatuses, default: "not_started" },
+    colorCode: { type: String, default: "#E2E8F0" },
+    level: { type: Number, default: 0 },
+    description: { type: String },
+    code: { type: String },
+    remarks: { type: String }
+});
+
+const WbsDraftSchema = new Schema({
+    userId: { type: Schema.Types.ObjectId, ref: "User", required: true },
+    baseVersionNumber: { type: Number },
+    items: [WbsDraftItemSchema],
+    revision: { type: Number, required: true, default: 1 },
+    updatedAt: { type: Date, default: Date.now }
 });
 
 const ChangeRequestSchema = new Schema<IChangeRequest>({
@@ -254,7 +291,11 @@ const ServiceRequestSchema = new Schema<IServiceRequest>({
     sharePointFolderUrl: { type: String },
     localFolderPath: { type: String },
     wbsVersions: [WbsVersionSchema],
+    wbsDrafts: [WbsDraftSchema],
     changeRequests: [ChangeRequestSchema],
+    archivedAt: { type: Date },
+    archivedById: { type: Schema.Types.ObjectId, ref: "User" },
+    projectAuditLogs: [AuditLogSchema],
     customFields: [{
         fieldId: { type: Schema.Types.ObjectId, ref: "CustomField" },
         value: { type: String }
@@ -262,7 +303,13 @@ const ServiceRequestSchema = new Schema<IServiceRequest>({
 }, { timestamps: true });
 
 ServiceRequestSchema.index({ pmId: 1, status: 1, createdAt: -1 });
-ServiceRequestSchema.index({ opportunityId: 1, createdAt: -1 });
+ServiceRequestSchema.index(
+    { opportunityId: 1 },
+    {
+        unique: true,
+        partialFilterExpression: { opportunityId: { $type: "objectId" } }
+    }
+);
 ServiceRequestSchema.index({ "members.userId": 1, createdAt: -1 });
 ServiceRequestSchema.index({ externalProjectCode: 1 }, { sparse: true });
 ServiceRequestSchema.index({ externalServiceType: 1, status: 1 });

@@ -8,7 +8,7 @@ import {
     type ReactNode,
 } from "react";
 import { trpc } from "./trpc";
-import type { Role } from "../../../shared/types";
+import type { PermissionOverrides, Role } from "../../../shared/types";
 
 const AUTH_TOKEN_KEY = "pmp_auth_token";
 const AUTH_EVENT = "pmp-auth-changed";
@@ -19,6 +19,7 @@ type AuthUser = {
     name: string;
     role: Role;
     roles: Role[];
+    permissionOverrides: PermissionOverrides;
     isActive: boolean;
 };
 

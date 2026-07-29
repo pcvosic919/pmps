@@ -3,7 +3,7 @@ import { trpc } from "../lib/trpc";
 import { Link } from "wouter";
 import {
     FolderKanban, ChevronRight, AlertTriangle, BarChart3,
-    CheckCircle2, Clock, XCircle, RefreshCw, Search, Plus
+    CheckCircle2, Clock, XCircle, RefreshCw, Search, Plus, Archive, RotateCcw, Trash2
 } from "lucide-react";
 import { useDebounce } from "../lib/useDebounce";
 import { useCurrentUser } from "../lib/useCurrentUser";
@@ -25,7 +25,8 @@ export function ProjectManagementPage() {
     );
     const canDelete = user?.email?.trim().toLowerCase() === "demo@demo.com";
 	    const [search, setSearch] = useState("");
-	    const [filterStatus, setFilterStatus] = useState<string>("all");
+    const [filterStatus, setFilterStatus] = useState<string>("all");
+    const [showArchived, setShowArchived] = useState(false);
 	    const [changingStatus, setChangingStatus] = useState<string | null>(null);
 	    const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null);
     const debouncedSearch = useDebounce(search, 300);
@@ -33,8 +34,9 @@ export function ProjectManagementPage() {
     const queryInput = useMemo(() => ({
         search: debouncedSearch || undefined,
         status: filterStatus === "all" ? undefined : filterStatus as SRStatus,
+        includeArchived: showArchived,
         limit: 200
-    }), [debouncedSearch, filterStatus]);
+    }), [debouncedSearch, filterStatus, showArchived]);
 
     const { data: srs, isLoading, refetch } = trpc.projects.srList.useQuery(queryInput);
     const { data: allSrs } = trpc.projects.srList.useQuery({ limit: 200 });
@@ -46,6 +48,8 @@ export function ProjectManagementPage() {
         onSuccess: () => refetch(),
         onError: (err) => alert(err.message || "刪除失敗")
     });
+    const archiveProject = trpc.projects.archiveProject.useMutation({ onSuccess: () => refetch(), onError: error => alert(error.message) });
+    const restoreProject = trpc.projects.restoreProject.useMutation({ onSuccess: () => refetch(), onError: error => alert(error.message) });
 
     const getStatusInfo = (status: string) =>
         SR_STATUSES.find(s => s.value === status) ?? { label: status, color: "bg-gray-100 text-gray-800 border-gray-200" };
@@ -90,7 +94,7 @@ export function ProjectManagementPage() {
                     </h2>
                     <p className="text-muted-foreground mt-1">集中查閱所有專案，並由 Admin / Manager / PM 持續追蹤進度與審核狀態</p>
                 </div>
-                {(hasRole("admin") || isManager) && (
+                {(hasRole("admin") || isManager || hasRole("pm")) && (
                     <Link href="/service-requests">
                         <a className="bg-primary text-primary-foreground hover:bg-primary/90 px-5 py-2.5 rounded-lg inline-flex items-center text-sm font-medium transition-all shadow-md hover:shadow-lg">
                             <Plus className="w-4 h-4 mr-2" />
@@ -162,6 +166,13 @@ export function ProjectManagementPage() {
                             {opt.label}
                         </button>
                     ))}
+                    <button
+                        type="button"
+                        onClick={() => setShowArchived(current => !current)}
+                        className={`px-3 py-2 text-sm rounded-lg border transition-colors ${showArchived ? "bg-slate-800 text-white border-slate-800" : "bg-background border-border text-muted-foreground hover:bg-muted"}`}
+                    >
+                        {showArchived ? "顯示使用中" : "查看已封存"}
+                    </button>
                 </div>
             </div>
 
@@ -244,6 +255,46 @@ export function ProjectManagementPage() {
 	                                </div>
 
                                 <div className="flex items-center gap-2 flex-shrink-0">
+                                    {(hasRole("admin") || hasRole("manager") || hasRole("pm")) && (
+                                        showArchived ? (
+                                            <button
+                                                type="button"
+                                                onClick={event => {
+                                                    event.stopPropagation();
+                                                    restoreProject.mutate({ id: sr.id });
+                                                }}
+                                                className="rounded-lg border border-border p-2 text-muted-foreground hover:bg-muted"
+                                                title="還原專案"
+                                            >
+                                                <RotateCcw className="h-4 w-4" />
+                                            </button>
+                                        ) : (
+                                            <button
+                                                type="button"
+                                                onClick={event => {
+                                                    event.stopPropagation();
+                                                    if (window.confirm(`封存專案「${sr.title}」？`)) archiveProject.mutate({ id: sr.id });
+                                                }}
+                                                className="rounded-lg border border-border p-2 text-muted-foreground hover:bg-muted"
+                                                title="封存專案"
+                                            >
+                                                <Archive className="h-4 w-4" />
+                                            </button>
+                                        )
+                                    )}
+                                    {(hasRole("admin") || user?.id === sr.createdById) && showArchived && (
+                                        <button
+                                            type="button"
+                                            onClick={event => {
+                                                event.stopPropagation();
+                                                if (window.confirm(`永久刪除專案「${sr.title}」？僅無關聯資料時可刪除。`)) deleteSr.mutate({ id: sr.id });
+                                            }}
+                                            className="rounded-lg border border-red-200 p-2 text-red-600 hover:bg-red-50"
+                                            title="永久刪除"
+                                        >
+                                            <Trash2 className="h-4 w-4" />
+                                        </button>
+                                    )}
                                     <div className="relative">
                                         {changingStatus === sr.id ? (
                                             <div className="flex gap-1 flex-wrap">

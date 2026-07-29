@@ -1,7 +1,7 @@
 import { initTRPC, TRPCError } from "@trpc/server";
 import { CreateExpressContextOptions } from "@trpc/server/adapters/express";
 import { UserModel } from "../models/User";
-import { Role } from "../../shared/types";
+import { type FeaturePermission, type PermissionOverrides, type Role } from "../../shared/types";
 import { verifySessionToken } from "./tokens";
 import { BREAKGLASS_CONFIG, isBreakglassId } from "./breakglass";
 
@@ -15,6 +15,7 @@ export type UserSession = {
     managedDepartments: string[];
     role: Role;
     roles: Role[];
+    permissionOverrides: PermissionOverrides;
     isActive: boolean;
 };
 
@@ -40,6 +41,7 @@ export const createContext = async ({ req, res }: CreateExpressContextOptions) =
                     managedDepartments: [],
                     role: BREAKGLASS_CONFIG.user.role,
                     roles: BREAKGLASS_CONFIG.user.roles,
+                    permissionOverrides: { allow: [], deny: [] },
                     isActive: true
                 };
             } else {
@@ -56,6 +58,10 @@ export const createContext = async ({ req, res }: CreateExpressContextOptions) =
                             managedDepartments: (dbUser as any).managedDepartments || [],
                             role: dbUser.role as Role,
                             roles: (dbUser.roles || []) as Role[],
+                            permissionOverrides: {
+                                allow: ((dbUser as any).permissionOverrides?.allow || []) as FeaturePermission[],
+                                deny: ((dbUser as any).permissionOverrides?.deny || []) as FeaturePermission[]
+                            },
                             isActive: dbUser.isActive
                         };
                     }
@@ -106,6 +112,27 @@ const isAuthed = t.middleware(({ next, ctx }) => {
 });
 
 export const protectedProcedure = t.procedure.use(isAuthed);
+
+export const userHasPermission = (
+    user: UserSession,
+    permission: FeaturePermission,
+    defaultRoles: Role[]
+) => {
+    if (user.permissionOverrides.deny.includes(permission)) return false;
+    if (user.permissionOverrides.allow.includes(permission)) return true;
+    return defaultRoles.includes(user.role) || user.roles.some(role => defaultRoles.includes(role));
+};
+
+export const permissionProcedure = (permission: FeaturePermission, defaultRoles: Role[]) =>
+    protectedProcedure.use(({ next, ctx }) => {
+        if (!userHasPermission(ctx.user, permission, defaultRoles)) {
+            throw new TRPCError({
+                code: "FORBIDDEN",
+                message: "您沒有執行此功能的權限"
+            });
+        }
+        return next({ ctx });
+    });
 
 // Role-based authorization middleware
 export const roleProcedure = (allowedRoles: Role[]) =>

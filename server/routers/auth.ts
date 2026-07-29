@@ -4,7 +4,7 @@ import { UserModel } from "../models/User";
 import { TRPCError } from "@trpc/server";
 import { isPasswordHash, verifyPassword, hashPassword } from "../_core/password";
 import { signNotificationStreamToken, signSessionToken } from "../_core/tokens";
-import { roles } from "../../shared/types";
+import { type PermissionOverrides, roles } from "../../shared/types";
 import { assertEntraSsoConfigured, fetchGraphUserProfile, getEntraSettings } from "../_core/entra";
 import { BREAKGLASS_CONFIG, isBreakglassEmail } from "../_core/breakglass";
 import { isDbConnected } from "../db";
@@ -18,6 +18,7 @@ const issueSession = (user: {
     name: string;
     role: (typeof roles)[number];
     roles?: (typeof roles)[number][];
+    permissionOverrides?: PermissionOverrides;
     isActive?: boolean;
 }) => {
     try {
@@ -37,6 +38,7 @@ const issueSession = (user: {
                 email: user.email,
                 role: user.role,
                 roles: user.roles || [],
+                permissionOverrides: user.permissionOverrides || { allow: [], deny: [] },
                 isActive: user.isActive ?? true
             }
         };
@@ -80,6 +82,7 @@ export const authRouter = router({
         name: ctx.user.name,
         role: ctx.user.role,
         roles: ctx.user.roles,
+        permissionOverrides: ctx.user.permissionOverrides,
         isActive: ctx.user.isActive
     })),
 

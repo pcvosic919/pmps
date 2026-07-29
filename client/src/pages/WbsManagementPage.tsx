@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { trpc } from "../lib/trpc";
 import { useRoute } from "wouter";
 import { ArrowLeft, Plus, FileText, Clock, Trash2, Save, X, CheckCircle2, XCircle, Upload, Paperclip, AlertCircle, Receipt, Download, ChevronDown, ChevronRight, Users, UserPlus } from "lucide-react";
@@ -50,6 +50,9 @@ export function WbsManagementPage() {
     const [draftItems, setDraftItems] = useState<WbsDraftItem[]>([]);
     const [expandedDraftItems, setExpandedDraftItems] = useState<Record<number, boolean>>({});
     const [pendingImport, setPendingImport] = useState<WbsImportPreview | null>(null);
+    const draftRevisionRef = useRef<number | undefined>(undefined);
+    const [lastDraftSavedAt, setLastDraftSavedAt] = useState<Date | null>(null);
+    const [draftHydrated, setDraftHydrated] = useState(false);
 
     // View settings
     const displayHours = (h: number) => h.toFixed(1) + ' 天';
@@ -83,8 +86,15 @@ export function WbsManagementPage() {
     const [editedSalesUserId, setEditedSalesUserId] = useState("");
     const [editedSalesRep, setEditedSalesRep] = useState("");
     const [editedSalesDepartment, setEditedSalesDepartment] = useState("");
+    const [editedTitle, setEditedTitle] = useState("");
+    const [editedCustomerName, setEditedCustomerName] = useState("");
+    const [editedPmId, setEditedPmId] = useState("");
+    const [editedPlannedStartDate, setEditedPlannedStartDate] = useState("");
+    const [editedPlannedEndDate, setEditedPlannedEndDate] = useState("");
+    const [editedSrType, setEditedSrType] = useState<"project" | "maintenance" | "other_activity">("project");
 
     const { data: sr, isLoading, error } = trpc.projects.srById.useQuery({ id: srId }, { enabled: !!srId });
+    const { data: savedDraft, isFetched: isDraftFetched } = trpc.projects.getWbsDraft.useQuery({ srId }, { enabled: !!srId });
     const { data: techs } = trpc.users.techList.useQuery();
     const { data: allUsers } = trpc.users.list.useQuery({ limit: 500 });
     const { data: attachments, refetch: refetchAttachments } = trpc.projects.srAttachmentsList.useQuery({ srId }, { enabled: !!srId });
@@ -112,11 +122,96 @@ export function WbsManagementPage() {
         }
     });
 
+    const saveDraftMutation = trpc.projects.saveWbsDraft.useMutation({
+        onSuccess: result => {
+            draftRevisionRef.current = result.revision;
+            setLastDraftSavedAt(new Date(result.updatedAt));
+        },
+        onError: error => toast.error(error.message || "WBS 草稿儲存失敗")
+    });
+
+    const discardDraftMutation = trpc.projects.discardWbsDraft.useMutation({
+        onSuccess: () => {
+            draftRevisionRef.current = undefined;
+            setLastDraftSavedAt(null);
+        }
+    });
+
+    useEffect(() => {
+        if (!isDraftFetched || draftHydrated) return;
+        if (savedDraft?.items?.length) {
+            setDraftItems(savedDraft.items.map((item: any) => ({
+                ...item,
+                startDate: item.startDate ? new Date(item.startDate) : undefined,
+                endDate: item.endDate ? new Date(item.endDate) : undefined
+            })));
+            draftRevisionRef.current = savedDraft.revision;
+            setLastDraftSavedAt(new Date(savedDraft.updatedAt));
+            setIsBuildingVersion(true);
+        }
+        setDraftHydrated(true);
+    }, [draftHydrated, isDraftFetched, savedDraft]);
+
+    useEffect(() => {
+        if (!draftHydrated || !isBuildingVersion) return;
+        const timer = window.setTimeout(() => {
+            saveDraftMutation.mutate({
+                srId,
+                baseVersionNumber: savedDraft?.baseVersionNumber,
+                revision: draftRevisionRef.current,
+                items: draftItems.map(item => ({
+                    ...item,
+                    startDate: item.startDate || undefined,
+                    endDate: item.endDate || undefined
+                }))
+            });
+        }, 2000);
+        return () => window.clearTimeout(timer);
+    }, [draftHydrated, draftItems, isBuildingVersion, srId]);
+
+    useEffect(() => {
+        const warnBeforeUnload = (event: BeforeUnloadEvent) => {
+            if (!saveDraftMutation.isPending) return;
+            event.preventDefault();
+        };
+        window.addEventListener("beforeunload", warnBeforeUnload);
+        return () => window.removeEventListener("beforeunload", warnBeforeUnload);
+    }, [saveDraftMutation.isPending]);
+
     const uploadMutation = trpc.projects.uploadSrAttachment.useMutation({
         onSuccess: () => {
             refetchAttachments();
             toast.success("檔案上傳成功");
         }
+    });
+
+    const downloadAttachmentMutation = trpc.projects.downloadSrAttachment.useMutation({
+        onSuccess: result => {
+            if ("externalUrl" in result && result.externalUrl) {
+                window.open(result.externalUrl, "_blank", "noopener,noreferrer");
+                return;
+            }
+            if (!("dataBase64" in result) || !result.dataBase64) {
+                toast.error("附件內容不存在");
+                return;
+            }
+            const bytes = Uint8Array.from(atob(result.dataBase64), character => character.charCodeAt(0));
+            const blobUrl = URL.createObjectURL(new Blob([bytes], { type: result.mimeType || "application/octet-stream" }));
+            const anchor = document.createElement("a");
+            anchor.href = blobUrl;
+            anchor.download = result.fileName;
+            anchor.click();
+            URL.revokeObjectURL(blobUrl);
+        },
+        onError: error => toast.error(error.message || "附件下載失敗")
+    });
+
+    const deleteAttachmentMutation = trpc.projects.deleteSrAttachment.useMutation({
+        onSuccess: () => {
+            refetchAttachments();
+            toast.success("附件已刪除");
+        },
+        onError: error => toast.error(error.message || "附件刪除失敗")
     });
 
     const { data: issues, refetch: refetchIssues } = trpc.issues.listBySr.useQuery({ srId }, { enabled: !!srId });
@@ -137,11 +232,11 @@ export function WbsManagementPage() {
         }
     });
 
-    const updateSalesOwnerMutation = trpc.projects.updateSalesOwner.useMutation({
+    const updateSalesOwnerMutation = trpc.projects.updateProjectBasics.useMutation({
         onSuccess: () => {
             utils.projects.srById.invalidate({ id: srId });
             setShowEditSalesModal(false);
-            toast.success("業務欄位已更新");
+            toast.success("專案基本資料已更新");
         },
         onError: (err) => toast.error(err.message || "更新業務欄位失敗")
     });
@@ -164,6 +259,18 @@ export function WbsManagementPage() {
             toast.success("專案參與人員已新增");
         },
         onError: (err) => toast.error(err.message || "新增專案參與人員失敗")
+    });
+
+    const transferOwnerMutation = trpc.projects.transferSrOwner.useMutation({
+        onSuccess: () => {
+            refetchProjectMembers();
+            utils.projects.srById.invalidate({ id: srId });
+            setShowProjectMemberModal(false);
+            setProjectMemberUserId("");
+            setProjectMemberRole("participant");
+            toast.success("專案擁有者已完成交接");
+        },
+        onError: error => toast.error(error.message || "專案擁有者交接失敗")
     });
 
     const removeProjectMemberMutation = trpc.projects.removeSrMember.useMutation({
@@ -395,7 +502,9 @@ export function WbsManagementPage() {
             const level = item.level || 0;
             counts[level]++;
             for (let i = level + 1; i < counts.length; i++) counts[i] = 0;
-            return counts.slice(0, level + 1).join('.');
+            const numberParts = counts.slice(0, level + 1);
+            while (numberParts.length > 1 && numberParts[0] === 0) numberParts.shift();
+            return numberParts.join('.');
         });
     };
 
@@ -428,6 +537,11 @@ export function WbsManagementPage() {
         const newItems = [...draftItems];
         newItems[index] = { ...newItems[index], [field]: value };
         setDraftItems(newItems);
+    };
+    const handleUpdateDraftItemFields = (index: number, changes: Partial<WbsDraftItem>) => {
+        setDraftItems(current => current.map((item, itemIndex) =>
+            itemIndex === index ? { ...item, ...changes } : item
+        ));
     };
     const handleSetPrimaryAssignee = (index: number, userId?: string) => {
         const item = draftItems[index];
@@ -481,6 +595,16 @@ export function WbsManagementPage() {
         setDraftItems(newItems);
     };
     const handleStartBuild = () => {
+        if (savedDraft?.items?.length) {
+            setDraftItems(savedDraft.items.map((item: any) => ({
+                ...item,
+                startDate: item.startDate ? new Date(item.startDate) : undefined,
+                endDate: item.endDate ? new Date(item.endDate) : undefined
+            })));
+            draftRevisionRef.current = savedDraft.revision;
+            setIsBuildingVersion(true);
+            return;
+        }
         if (latestVersion?.items?.length) {
             setDraftItems(latestVersion.items.map((item: any) => ({
                 title: item.title,
@@ -525,27 +649,69 @@ export function WbsManagementPage() {
     };
 
     const handleSaveVersion = () => {
-        if (draftItems.length === 0) { toast.error("請至少新增一項任務"); return; }
-        if (draftItems.some(i => !i.title || (!isHeadingItem(i) && i.estimatedHours <= 0))) { toast.error("請確實填寫項目名稱；階層 1 以上才需要工作天數"); return; }
+        if (draftItems.length === 0) { toast.error("請至少新增一項工作"); return; }
+        const invalidIndex = draftItems.findIndex(item =>
+            !item.title.trim() ||
+            (!isHeadingItem(item) && (
+                item.estimatedHours <= 0 ||
+                !item.startDate ||
+                !item.endDate ||
+                new Date(item.startDate).getTime() > new Date(item.endDate).getTime()
+            ))
+        );
+        if (invalidIndex >= 0) {
+            toast.error(`第 ${invalidIndex + 1} 筆工作請填寫名稱、工作天數及正確的起訖日期`);
+            return;
+        }
         const normalizedItems = draftItems.map(item => ({
             ...item,
             estimatedHours: isHeadingItem(item) ? 0 : item.estimatedHours,
+            startDate: item.startDate || undefined,
+            endDate: item.endDate || undefined,
             assigneeIds: Array.from(new Set([item.assigneeId, ...(item.assigneeIds || [])].filter(Boolean))) as string[]
         }));
         submitVersion.mutate({ srId: sr.id, versionNumber: nextVersionNumber, items: normalizedItems });
     };
 
+    const handleSaveDraft = () => {
+        saveDraftMutation.mutate({
+            srId,
+            baseVersionNumber: latestVersion?.version,
+            revision: draftRevisionRef.current,
+            items: draftItems.map(item => ({
+                ...item,
+                startDate: item.startDate || undefined,
+                endDate: item.endDate || undefined
+            }))
+        });
+    };
+
     const handleUpdateSalesOwner = () => {
-        if (!editedSalesUserId) {
-            toast.error("請選擇業務帳號");
+        if (!editedTitle.trim() || !editedCustomerName.trim()) {
+            toast.error("請填寫專案名稱及客戶名稱");
             return;
         }
-        updateSalesOwnerMutation.mutate({ id: sr.id, salesUserId: editedSalesUserId });
+        updateSalesOwnerMutation.mutate({
+            id: sr.id,
+            title: editedTitle,
+            customerName: editedCustomerName,
+            salesUserId: editedSalesUserId || undefined,
+            salesDepartment: editedSalesDepartment,
+            salesRep: editedSalesRep,
+            pmId: editedPmId || undefined,
+            srType: editedSrType,
+            plannedStartDate: editedPlannedStartDate || undefined,
+            plannedEndDate: editedPlannedEndDate || undefined
+        });
     };
 
     const handleAddProjectMember = () => {
         if (!projectMemberUserId) {
             toast.error("請選擇專案參與人員");
+            return;
+        }
+        if (projectMemberRole === "owner") {
+            transferOwnerMutation.mutate({ srId, newOwnerUserId: projectMemberUserId });
             return;
         }
         addProjectMemberMutation.mutate({ srId, userId: projectMemberUserId, memberRole: projectMemberRole });
@@ -865,11 +1031,17 @@ export function WbsManagementPage() {
                                         setEditedSalesUserId(sr.salesUserId || "");
                                         setEditedSalesRep(sr.salesRep || "");
                                         setEditedSalesDepartment(sr.salesDepartment || "");
+                                        setEditedTitle(sr.title || "");
+                                        setEditedCustomerName(sr.customerName || "");
+                                        setEditedPmId(sr.pmId || "");
+                                        setEditedPlannedStartDate(sr.plannedStartDate ? new Date(sr.plannedStartDate).toISOString().slice(0, 10) : "");
+                                        setEditedPlannedEndDate(sr.plannedEndDate ? new Date(sr.plannedEndDate).toISOString().slice(0, 10) : "");
+                                        setEditedSrType(sr.srType || "project");
                                         setShowEditSalesModal(true);
                                     }}
                                     className="w-full mt-2 px-3 py-2 rounded-lg border border-primary/20 bg-primary/5 text-primary text-sm font-semibold hover:bg-primary/10 transition-colors"
                                 >
-                                    編輯業務
+                                    編輯基本資料
                                 </button>
                             )}
                             {!hasRole("tech") && (
@@ -996,15 +1168,40 @@ export function WbsManagementPage() {
                                 {attachments.map((a: any) => (
                                     <div key={a.id} className="flex items-center gap-2 p-2 bg-muted/40 rounded-lg text-xs group">
                                         <FileText className="w-3.5 h-3.5 text-primary flex-shrink-0" />
-	                                        <a href={a.fileUrl} target="_blank" rel="noopener noreferrer" className="flex-1 truncate font-medium hover:text-primary transition-colors" title={a.fileName}>
+	                                        <button
+                                                type="button"
+                                                onClick={() => downloadAttachmentMutation.mutate({ srId, attachmentId: a.id })}
+                                                className="flex-1 truncate text-left font-medium transition-colors hover:text-primary"
+                                                title={`下載 ${a.fileName}`}
+                                            >
 	                                            {a.fileName}
-	                                        </a>
+	                                        </button>
                                             {a.category && a.category !== "general" && (
                                                 <span className="rounded-full border border-border bg-background px-2 py-0.5 text-[10px] text-muted-foreground whitespace-nowrap">
                                                     {a.category === "business_approval_email" ? "業務同意" : "服務內容"}
                                                 </span>
                                             )}
 	                                        <span className="text-muted-foreground whitespace-nowrap">{formatSize(a.fileSize)}</span>
+                                            <button
+                                                type="button"
+                                                onClick={() => downloadAttachmentMutation.mutate({ srId, attachmentId: a.id })}
+                                                className="rounded p-1 text-muted-foreground hover:bg-background hover:text-primary"
+                                                title="下載附件"
+                                            >
+                                                <Download className="h-3.5 w-3.5" />
+                                            </button>
+                                            <button
+                                                type="button"
+                                                onClick={() => {
+                                                    if (window.confirm(`確定刪除附件「${a.fileName}」？`)) {
+                                                        deleteAttachmentMutation.mutate({ srId, attachmentId: a.id });
+                                                    }
+                                                }}
+                                                className="rounded p-1 text-muted-foreground hover:bg-red-50 hover:text-red-600"
+                                                title="刪除附件"
+                                            >
+                                                <Trash2 className="h-3.5 w-3.5" />
+                                            </button>
 	                                    </div>
                                 ))}
                             </div>
@@ -1361,7 +1558,12 @@ export function WbsManagementPage() {
                                         className="hidden"
                                         onChange={handleExcelImport}
                                     />
-                                    <button onClick={() => { setIsBuildingVersion(false); setDraftItems([]); }}
+                                    <button onClick={() => {
+                                        if (!window.confirm("要放棄目前的 WBS 草稿嗎？")) return;
+                                        discardDraftMutation.mutate({ srId });
+                                        setIsBuildingVersion(false);
+                                        setDraftItems([]);
+                                    }}
                                         className="p-1 hover:bg-muted rounded text-muted-foreground hover:text-foreground transition-colors">
                                         <X className="w-5 h-5" />
                                     </button>
@@ -1509,7 +1711,7 @@ export function WbsManagementPage() {
                                                                                 const person = (allUsers?.items || []).find((user: any) => user.id === userId) || (techs || []).find((user: any) => user.id === userId);
                                                                                 return (
                                                                                     <span key={userId} className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[10px] ${item.assigneeId === userId ? "border-primary/30 bg-primary/10 text-primary" : "border-border bg-muted text-muted-foreground"}`}>
-                                                                                        {person?.name || userId}
+                                                                                        {person?.name || "找不到使用者"}
                                                                                         {item.assigneeId !== userId && (
                                                                                             <button type="button" onClick={() => handleRemoveDraftAssignee(idx, userId)} className="hover:text-red-500">×</button>
                                                                                         )}
@@ -1564,8 +1766,10 @@ export function WbsManagementPage() {
                                                                         value={item.status || "not_started"}
                                                                         onChange={(e) => {
                                                                             const status = e.target.value as WbsDraftItem["status"];
-                                                                            handleUpdateDraftItem(idx, "status", status);
-                                                                            handleUpdateDraftItem(idx, "completionPercentage", status === "completed" ? 100 : status === "not_started" ? 0 : Math.max(item.completionPercentage || 0, 50));
+                                                                            handleUpdateDraftItemFields(idx, {
+                                                                                status,
+                                                                                completionPercentage: status === "completed" ? 100 : status === "not_started" ? 0 : Math.max(item.completionPercentage || 0, 50)
+                                                                            });
                                                                         }}
                                                                         className="rounded border border-transparent bg-muted px-2 py-2 outline-none focus:border-primary focus:bg-background"
                                                                     >
@@ -1633,11 +1837,24 @@ export function WbsManagementPage() {
                                 <div className="text-sm">
                                     <span className="text-muted-foreground mr-2">總計天數:</span>
                                     <span className="font-bold text-lg">{draftItems.reduce((sum, i) => sum + i.estimatedHours, 0)} 天</span>
+                                    <div className="mt-1 text-xs text-muted-foreground">
+                                        {saveDraftMutation.isPending
+                                            ? "草稿儲存中…"
+                                            : lastDraftSavedAt
+                                                ? `上次儲存：${lastDraftSavedAt.toLocaleTimeString()}`
+                                                : "尚未儲存草稿"}
+                                    </div>
                                 </div>
-                                <button onClick={handleSaveVersion} disabled={submitVersion.isPending || draftItems.length === 0}
-                                    className="bg-primary text-primary-foreground hover:bg-primary/90 px-6 py-2 rounded-md font-medium transition-colors flex items-center gap-2 disabled:opacity-50">
-                                    {submitVersion.isPending ? "儲存中..." : <><Save className="w-4 h-4" /> 送出版本審核</>}
-                                </button>
+                                <div className="flex items-center gap-2">
+                                    <button onClick={handleSaveDraft} disabled={saveDraftMutation.isPending}
+                                        className="border border-border bg-background px-4 py-2 rounded-md text-sm font-medium hover:bg-muted disabled:opacity-50">
+                                        手動存草稿
+                                    </button>
+                                    <button onClick={handleSaveVersion} disabled={submitVersion.isPending || draftItems.length === 0}
+                                        className="bg-primary text-primary-foreground hover:bg-primary/90 px-6 py-2 rounded-md font-medium transition-colors flex items-center gap-2 disabled:opacity-50">
+                                        {submitVersion.isPending ? "儲存中..." : <><Save className="w-4 h-4" /> 送出版本審核</>}
+                                    </button>
+                                </div>
                             </div>
                         </div>
                     )}
@@ -1698,8 +1915,43 @@ export function WbsManagementPage() {
                 <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm">
                     <div className="bg-card border border-border rounded-xl shadow-xl w-full max-w-lg mx-4 p-6 space-y-5">
                         <div className="flex justify-between items-center">
-                            <h2 className="text-lg font-bold">編輯業務</h2>
+                            <h2 className="text-lg font-bold">編輯專案基本資料</h2>
                             <button onClick={() => setShowEditSalesModal(false)} className="p-1 rounded-full hover:bg-muted"><X className="w-5 h-5 text-muted-foreground" /></button>
+                        </div>
+                        <div className="grid grid-cols-2 gap-3">
+                            <label className="text-sm font-medium">
+                                專案名稱
+                                <input value={editedTitle} onChange={event => setEditedTitle(event.target.value)} className="mt-1 w-full rounded-lg border border-border bg-background px-3 py-2 font-normal" />
+                            </label>
+                            <label className="text-sm font-medium">
+                                客戶名稱
+                                <input value={editedCustomerName} onChange={event => setEditedCustomerName(event.target.value)} className="mt-1 w-full rounded-lg border border-border bg-background px-3 py-2 font-normal" />
+                            </label>
+                            <label className="text-sm font-medium">
+                                專案類型
+                                <select value={editedSrType} onChange={event => setEditedSrType(event.target.value as typeof editedSrType)} className="mt-1 w-full rounded-lg border border-border bg-background px-3 py-2 font-normal">
+                                    <option value="project">專案</option>
+                                    <option value="maintenance">維運</option>
+                                    <option value="other_activity">其他活動</option>
+                                </select>
+                            </label>
+                            <label className="text-sm font-medium">
+                                PM
+                                <select value={editedPmId} onChange={event => setEditedPmId(event.target.value)} className="mt-1 w-full rounded-lg border border-border bg-background px-3 py-2 font-normal">
+                                    <option value="">未指派</option>
+                                    {(allUsers?.items || []).filter((item: any) => item.role === "pm" || item.roles?.includes("pm")).map((item: any) => (
+                                        <option key={item.id} value={item.id}>{item.name}</option>
+                                    ))}
+                                </select>
+                            </label>
+                            <label className="text-sm font-medium">
+                                預計開始日
+                                <input type="date" value={editedPlannedStartDate} onChange={event => setEditedPlannedStartDate(event.target.value)} className="mt-1 w-full rounded-lg border border-border bg-background px-3 py-2 font-normal" />
+                            </label>
+                            <label className="text-sm font-medium">
+                                預計結束日
+                                <input type="date" value={editedPlannedEndDate} onChange={event => setEditedPlannedEndDate(event.target.value)} className="mt-1 w-full rounded-lg border border-border bg-background px-3 py-2 font-normal" />
+                            </label>
                         </div>
                         <div className="space-y-2">
                             <label className="block text-sm font-medium mb-1">業務帳號</label>
@@ -1724,10 +1976,10 @@ export function WbsManagementPage() {
                             <button onClick={() => setShowEditSalesModal(false)} className="px-4 py-2 text-sm border border-border rounded-lg hover:bg-muted">取消</button>
                             <button
                                 onClick={handleUpdateSalesOwner}
-                                disabled={updateSalesOwnerMutation.isPending || !editedSalesUserId}
+                                disabled={updateSalesOwnerMutation.isPending || !editedTitle.trim() || !editedCustomerName.trim()}
                                 className="px-4 py-2 text-sm bg-primary text-primary-foreground rounded-lg hover:bg-primary/90 disabled:opacity-50"
                             >
-                                {updateSalesOwnerMutation.isPending ? "儲存中..." : "儲存業務"}
+                                {updateSalesOwnerMutation.isPending ? "儲存中..." : "儲存基本資料"}
                             </button>
                         </div>
                     </div>

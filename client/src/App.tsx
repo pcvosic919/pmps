@@ -82,17 +82,54 @@ function RestrictedPage({ message = "您沒有權限檢視此頁面" }: { messag
 }
 
 function ProjectManagementRoute() {
-  const { user, isLoading } = useCurrentUser();
+  const { hasPermission, isLoading } = useCurrentUser();
 
   if (isLoading) {
     return <AppLoadingFallback />;
   }
 
-  const canAccess = !!user && (
-    user.role === "admin" || user.role === "manager" || user.role === "pm" || user.role === "tech" ||
-    user.roles.includes("admin") || user.roles.includes("manager") || user.roles.includes("pm") || user.roles.includes("tech")
-  );
+  const canAccess = hasPermission("module.projects.view", ["admin", "manager", "pm", "tech"]);
   return canAccess ? <ProjectManagementPage /> : <RestrictedPage message="只有 Admin、Manager、PM 與 Tech 可以檢視專案管理。" />;
+}
+
+function CalendarRoute() {
+  const { hasPermission, isLoading } = useCurrentUser();
+  if (isLoading) return <AppLoadingFallback />;
+  return hasPermission("module.calendar.view", ["admin", "manager", "pm", "tech"])
+    ? <CalendarPage />
+    : <RestrictedPage message="您沒有權限存取排程行事曆。" />;
+}
+
+function OpportunitiesRoute() {
+  const { hasPermission, isLoading } = useCurrentUser();
+  if (isLoading) return <AppLoadingFallback />;
+  return hasPermission("module.opportunities.view", ["admin", "manager", "business", "presales", "tech", "pm"])
+    ? <OpportunitiesPage />
+    : <RestrictedPage message="您沒有權限存取商機管理。" />;
+}
+
+function OpportunityDetailRoute() {
+  const { hasPermission, isLoading } = useCurrentUser();
+  if (isLoading) return <AppLoadingFallback />;
+  return hasPermission("module.opportunities.view", ["admin", "manager", "business", "presales", "tech", "pm"])
+    ? <OpportunityDetailPage />
+    : <RestrictedPage message="您沒有權限存取商機管理。" />;
+}
+
+function ServiceRequestsRoute() {
+  const { hasPermission, isLoading } = useCurrentUser();
+  if (isLoading) return <AppLoadingFallback />;
+  return hasPermission("module.projects.view", ["admin", "manager", "pm", "tech"])
+    ? <ServiceRequestsPage />
+    : <RestrictedPage message="您沒有權限存取專案管理。" />;
+}
+
+function WbsRoute() {
+  const { hasPermission, isLoading } = useCurrentUser();
+  if (isLoading) return <AppLoadingFallback />;
+  return hasPermission("module.projects.view", ["admin", "manager", "pm", "tech"])
+    ? <WbsManagementPage />
+    : <RestrictedPage message="您沒有權限存取專案管理。" />;
 }
 
 const activeRoutes: ActiveRouteDefinition[] = [
@@ -106,13 +143,13 @@ const activeRoutes: ActiveRouteDefinition[] = [
   { path: "/system-settings", component: SystemSettingsPage, pageFile: "SystemSettingsPage.tsx", lifecycle: "保留 / 上線", notes: "系統設定。" },
   { path: "/custom-fields", component: CustomFieldsPage, pageFile: "CustomFieldsPage.tsx", lifecycle: "保留 / 上線", notes: "自訂欄位管理。" },
   { path: "/companies", component: CompanyManagementPage, pageFile: "CompanyManagementPage.tsx", lifecycle: "保留 / 上線", notes: "公司主檔管理與商機客戶選擇來源。" },
-  { path: "/opportunities", component: OpportunitiesPage, pageFile: "OpportunitiesPage.tsx", lifecycle: "保留 / 上線", notes: "商機清單。" },
-  { path: "/opportunities/:id", component: OpportunityDetailPage, pageFile: "OpportunityDetailPage.tsx", lifecycle: "保留 / 上線", notes: "商機詳情。" },
+  { path: "/opportunities", component: OpportunitiesRoute, pageFile: "OpportunitiesPage.tsx", lifecycle: "保留 / 上線", notes: "商機清單。" },
+  { path: "/opportunities/:id", component: OpportunityDetailRoute, pageFile: "OpportunityDetailPage.tsx", lifecycle: "保留 / 上線", notes: "商機詳情。" },
   { path: "/projects", component: ProjectManagementRoute, pageFile: "ProjectManagementPage.tsx", lifecycle: "保留 / 上線（權限控管）", notes: "正式專案管理入口，僅 Manager / PM 可見。" },
   { path: "/pm-dashboard", component: PmDashboardPage, pageFile: "PmDashboardPage.tsx", lifecycle: "保留 / 上線", notes: "專案高階儀表板與卡片看板" },
-  { path: "/calendar", component: CalendarPage, pageFile: "CalendarPage.tsx", lifecycle: "保留 / 上線", notes: "技服人員的行事曆排程" },
-  { path: "/service-requests", component: ServiceRequestsPage, pageFile: "ServiceRequestsPage.tsx", lifecycle: "保留 / 上線", notes: "SR 清單。" },
-  { path: "/service-requests/:id", component: WbsManagementPage, pageFile: "WbsManagementPage.tsx", lifecycle: "保留 / 上線", notes: "SR 對應 WBS 管理。" },
+  { path: "/calendar", component: CalendarRoute, pageFile: "CalendarPage.tsx", lifecycle: "保留 / 上線", notes: "技服人員的行事曆排程" },
+  { path: "/service-requests", component: ServiceRequestsRoute, pageFile: "ServiceRequestsPage.tsx", lifecycle: "保留 / 上線", notes: "SR 清單。" },
+  { path: "/service-requests/:id", component: WbsRoute, pageFile: "WbsManagementPage.tsx", lifecycle: "保留 / 上線", notes: "SR 對應 WBS 管理。" },
   { path: "/change-requests", component: ChangeRequestsPage, pageFile: "ChangeRequestsPage.tsx", lifecycle: "保留 / 上線", notes: "CR 清單與審核。" },
   { path: "/presales-timesheets", component: PresalesTimesheetsPage, pageFile: "PresalesTimesheetsPage.tsx", lifecycle: "保留 / 上線", notes: "協銷工時填報。" },
   { path: "/project-timesheets", component: ProjectTimesheetsPage, pageFile: "ProjectTimesheetsPage.tsx", lifecycle: "保留 / 上線", notes: "專案工時填報。" },

@@ -4,7 +4,7 @@ import { useMsal } from "@azure/msal-react";
 import { loginRequest } from "../lib/msal";
 import { LogIn, Mail, Lock, ShieldAlert } from "lucide-react";
 import { useAuth } from "../lib/auth";
-import type { Role } from "../../../shared/types";
+import type { PermissionOverrides, Role } from "../../../shared/types";
 
 const toFriendlyErrorMessage = (message: string) => {
     if (!message) {
@@ -52,8 +52,14 @@ export function LoginPage() {
     const loginMutation = trpc.auth.login.useMutation();
     const entraLoginMutation = trpc.auth.entraLogin.useMutation();
 
-    const handleLoginSuccess = (payload: { token: string; user?: { id: string; email: string; name: string; role: Role; roles: Role[]; isActive: boolean } | null }) => {
-        setAuthSession(payload.token, payload.user ?? null);
+    const handleLoginSuccess = (payload: { token: string; user?: { id: string; email: string; name: string; role: Role; roles: Role[]; permissionOverrides?: PermissionOverrides; isActive: boolean } | null }) => {
+        setAuthSession(
+            payload.token,
+            payload.user ? {
+                ...payload.user,
+                permissionOverrides: payload.user.permissionOverrides || { allow: [], deny: [] }
+            } : null
+        );
         window.location.href = "/";
     };
 

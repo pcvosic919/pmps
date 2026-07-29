@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { router, protectedProcedure, roleProcedure } from "../_core/trpc";
+import { permissionProcedure, router, protectedProcedure, roleProcedure } from "../_core/trpc";
 import { sharePointService } from "../services/SharePointService";
 import { folderStorageService } from "../services/FolderStorageService";
 import { OpportunityModel } from "../models/Opportunity";
@@ -35,6 +35,7 @@ import {
     getStatusAfterPresalesAssignment,
     isTerminalOpportunityStatus
 } from "./opportunity-workflow";
+import { createProjectForOpportunityOnce, finalizeOpportunityConversion, findProjectByOpportunityId } from "../services/OpportunityConversionService";
 
 const listInput = z.object({
     limit: z.number().min(1).max(100).nullish(),
@@ -132,7 +133,7 @@ const ensureOpportunityOwnerMember = async (opportunity: any) => {
 };
 
 export const opportunitiesRouter = router({
-    list: protectedProcedure
+    list: permissionProcedure("module.opportunities.view", ["admin", "manager", "business", "presales", "tech", "pm"])
         .input(listInput)
         .query(async ({ input, ctx }) => {
             const limit = input?.limit ?? 50;
@@ -257,7 +258,7 @@ export const opportunitiesRouter = router({
             return { success: true, id: result._id.toString() };
         }),
 
-    getById: protectedProcedure
+    getById: permissionProcedure("module.opportunities.view", ["admin", "manager", "business", "presales", "tech", "pm"])
         .input(z.object({ id: z.string() }))
         .query(async ({ input, ctx }) => {
             const opp = assertFound(
@@ -306,6 +307,11 @@ export const opportunitiesRouter = router({
             memberRole: z.enum(memberRoles).default("watcher")
         }))
         .mutation(async ({ input, ctx }) => {
+            const existingProject = await findProjectByOpportunityId(input.opportunityId);
+            if (existingProject) {
+                await finalizeOpportunityConversion(input.opportunityId);
+                return { id: existingProject._id.toString(), reused: true };
+            }
             const opportunity = assertFound(
                 await OpportunityModel.findById(input.opportunityId)
                     .select("ownerId members presalesAssignments status")
@@ -570,7 +576,7 @@ export const opportunitiesRouter = router({
             assertOpportunityConvertible(opportunity);
             const salesUserFields = await getSalesUserFields(input.salesUserId);
 
-            const result = await ServiceRequestModel.create({
+            const conversionResult = await createProjectForOpportunityOnce(input.opportunityId, {
                 title: input.title,
                 customerName: input.customerName || opportunity.customerName,
                 salesUserId: salesUserFields?.salesUserId || opportunity.salesUserId,
@@ -587,6 +593,7 @@ export const opportunitiesRouter = router({
                 members: buildSrMembers(ctx.user.id, input.pmId, input.techId, opportunity.presalesAssignments),
                 status: "new"
             });
+            const result = conversionResult.project;
 
             // Document folder hook
             try {
@@ -602,26 +609,23 @@ export const opportunitiesRouter = router({
                 console.error("[FolderStorage Hook] SR creation folder failed:", err);
             }
 
-            await OpportunityModel.updateOne(
-                { _id: input.opportunityId },
-                { $set: { status: "converted" } }
-            );
+            await finalizeOpportunityConversion(input.opportunityId);
 
-            if (input.pmId) {
+            if (input.pmId && conversionResult.created) {
                 await createNotification({
                     userId: input.pmId,
                     type: "approval",
                     message: `商機「${opportunity.title}」已轉為專案「${input.title}」，您已被指派為 PM。`,
-                    actionUrl: "/projects"
+                    actionUrl: `/service-requests/${result._id.toString()}`
                 });
             }
 
-            if (input.techId) {
+            if (input.techId && conversionResult.created) {
                 await createNotification({
                     userId: input.techId,
                     type: "todo",
                     message: `您已被選中為專案「${input.title}」的技術人員，請開始您的工作。`,
-                    actionUrl: "/projects"
+                    actionUrl: `/service-requests/${result._id.toString()}`
                 });
             }
 

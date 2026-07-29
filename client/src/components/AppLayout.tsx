@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { createPortal } from "react-dom";
 import { Link, useLocation } from "wouter";
 import { useTranslation } from "react-i18next";
 import { GlobalSearch } from "./GlobalSearch";
@@ -30,6 +31,7 @@ import { useMsal } from "@azure/msal-react";
 import { useCurrentUser } from "../lib/useCurrentUser";
 import { useAuth } from "../lib/auth";
 import { trpc } from "../lib/trpc";
+import type { FeaturePermission, Role } from "../../../shared/types";
 
 interface AppLayoutProps {
     children: React.ReactNode;
@@ -47,6 +49,7 @@ type NavItem = {
     label: string;
     href: string;
     roles?: string[];
+    permission?: FeaturePermission;
     badge?: "notifications";
 };
 
@@ -70,7 +73,7 @@ const navGroups: NavGroup[] = [
         label: "商機 / 售前",
         items: [
             // Business 只能看到商機管理? Business 可以看協銷工時嗎?
-            { icon: Building2, label: "商機管理", href: "/opportunities", roles: ["admin", "manager", "business", "presales", "tech", "pm"] },
+            { icon: Building2, label: "商機管理", href: "/opportunities", roles: ["admin", "manager", "business", "presales", "tech", "pm"], permission: "module.opportunities.view" },
             { icon: Clock, label: "協銷工時", href: "/presales-timesheets", roles: ["admin", "manager", "presales", "tech", "pm"] },
         ],
     },
@@ -79,7 +82,7 @@ const navGroups: NavGroup[] = [
         label: "專案 / 工時",
         items: [
             { icon: LayoutDashboard, label: "專案總表", href: "/pm-dashboard", roles: ["admin", "manager", "pm"] },
-            { icon: FolderKanban, label: "專案管理", href: "/projects", roles: ["admin", "manager", "pm", "tech"] },
+            { icon: FolderKanban, label: "專案管理", href: "/projects", roles: ["admin", "manager", "pm", "tech"], permission: "module.projects.view" },
             { icon: Clock, label: "專案工時", href: "/project-timesheets", roles: ["admin", "manager", "pm", "tech"] },
             { icon: FileCheck, label: "變更單 (CR)", href: "/change-requests", roles: ["admin", "manager", "pm", "tech"] },
         ],
@@ -88,7 +91,7 @@ const navGroups: NavGroup[] = [
         key: "schedule",
         label: "排程",
         items: [
-            { icon: CalendarDays, label: "排程行事曆", href: "/calendar", roles: ["admin", "manager", "pm", "tech"] },
+            { icon: CalendarDays, label: "排程行事曆", href: "/calendar", roles: ["admin", "manager", "pm", "tech"], permission: "module.calendar.view" },
         ],
     },
     {
@@ -141,17 +144,15 @@ const topNavItems: TopNavItem[] = [
     { label: "公司資訊", helper: "內容建置中，暫不提供頁面", disabled: true },
 ];
 
-const isNavItemVisible = (item: NavItem, roleMatcher: (role: string) => boolean) =>
-    !item.roles || item.roles.length === 0 || item.roles.some(roleMatcher);
-
 export function AppLayout({ children }: AppLayoutProps) {
     const [sidebarOpen, setSidebarOpen] = useState(true);
+    const [globalSearchOpen, setGlobalSearchOpen] = useState(false);
     const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
     const [profileMenuOpen, setProfileMenuOpen] = useState(false);
     const [location] = useLocation();
     const { instance } = useMsal();
     const { clearAuth } = useAuth();
-    const { user } = useCurrentUser();
+    const { user, hasPermission } = useCurrentUser();
     const { i18n } = useTranslation();
     const { data: notifications } = trpc.analytics.getNotifications.useQuery(
         { limit: 20 },
@@ -169,7 +170,11 @@ export function AppLayout({ children }: AppLayoutProps) {
     const visibleNavGroups = navGroups
         .map((group) => ({
             ...group,
-            items: group.items.filter((item) => isNavItemVisible(item, hasRole))
+            items: group.items.filter((item) =>
+                item.permission
+                    ? hasPermission(item.permission, (item.roles || []) as Role[])
+                    : !item.roles || item.roles.length === 0 || item.roles.some(hasRole)
+            )
         }))
         .filter((group) => group.items.length > 0);
 
@@ -383,7 +388,7 @@ export function AppLayout({ children }: AppLayoutProps) {
                             <Globe className="h-4 w-4" />
                             <span className="hidden sm:inline font-bold">{i18n.language.startsWith('en') ? 'EN' : '中文'}</span>
                         </button>
-                        <button onClick={() => document.dispatchEvent(new KeyboardEvent('keydown', { key: 'k', metaKey: true }))} className="hidden sm:flex items-center gap-2 rounded-full border border-border px-3 py-1.5 text-sm text-muted-foreground hover:bg-muted font-medium bg-muted/30">
+                        <button type="button" onClick={() => setGlobalSearchOpen(true)} className="hidden sm:flex items-center gap-2 rounded-full border border-border px-3 py-1.5 text-sm text-muted-foreground hover:bg-muted font-medium bg-muted/30">
                             <Search className="h-4 w-4" />
                             <span className="text-xs border border-border/60 bg-background px-1 py-0.5 rounded shadow-sm opacity-80">⌘K</span>
                         </button>
@@ -415,8 +420,15 @@ export function AppLayout({ children }: AppLayoutProps) {
                                 <ChevronDown className="h-4 w-4 text-muted-foreground" />
                             </button>
 
-                            {profileMenuOpen && (
-                                <div className="absolute right-0 top-[calc(100%+0.5rem)] z-50 w-64 rounded-xl border border-border bg-popover p-2 shadow-xl">
+                            {profileMenuOpen && createPortal(
+                                <>
+                                <button
+                                    type="button"
+                                    aria-label="關閉使用者選單"
+                                    className="fixed inset-0 z-[190] cursor-default"
+                                    onClick={() => setProfileMenuOpen(false)}
+                                />
+                                <div className="fixed right-4 top-16 z-[200] w-64 rounded-xl border border-border bg-popover p-2 shadow-xl">
                                     <div className="rounded-lg px-3 py-2 bg-muted/50">
                                         <div className="text-sm font-semibold">{user?.name || "使用者"}</div>
                                         <div className="text-xs text-muted-foreground mt-1 break-all">{user?.email || "載入中..."}</div>
@@ -447,6 +459,8 @@ export function AppLayout({ children }: AppLayoutProps) {
                                         </button>
                                     </div>
                                 </div>
+                                </>,
+                                document.body
                             )}
                         </div>
                     </div>
@@ -456,7 +470,7 @@ export function AppLayout({ children }: AppLayoutProps) {
                     {children}
                 </main>
             </div>
-            <GlobalSearch />
+            <GlobalSearch open={globalSearchOpen} onOpenChange={setGlobalSearchOpen} />
         </div>
     );
 }

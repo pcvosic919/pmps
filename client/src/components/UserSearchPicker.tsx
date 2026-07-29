@@ -96,6 +96,7 @@ export function UserSearchPicker({
     const [searchTerm, setSearchTerm] = useState("");
     const [isOpen, setIsOpen] = useState(false);
     const [hasInteracted, setHasInteracted] = useState(false);
+    const [selectedUserSnapshot, setSelectedUserSnapshot] = useState<PickerUser | undefined>();
     const debouncedSearchTerm = useDebounce(searchTerm, 250);
     const shouldSearchServer = normalizeSearchText(debouncedSearchTerm).length >= 2;
 
@@ -115,11 +116,10 @@ export function UserSearchPicker({
         () => mergedUsers.filter((user) => user.isActive !== false && (!filterUser || filterUser(user))),
         [filterUser, mergedUsers]
     );
-    const selectedUser = activeUsers.find((user) => user.id === selectedUserId);
-    const selectedLabel = useMemo(
-        () => buildUserLabel(selectedUser, legacyName || ""),
-        [legacyName, selectedUser?.department, selectedUser?.email, selectedUser?.id, selectedUser?.name]
-    );
+    const selectedUserFromList = activeUsers.find((user) => user.id === selectedUserId);
+    const selectedUser = selectedUserFromList ||
+        (selectedUserSnapshot?.id === selectedUserId ? selectedUserSnapshot : undefined);
+    const selectedLabel = buildUserLabel(selectedUser, legacyName || "");
 
     useEffect(() => {
         if (isOpen || hasInteracted) return;
@@ -127,7 +127,12 @@ export function UserSearchPicker({
     }, [hasInteracted, isOpen, selectedLabel]);
 
     useEffect(() => {
+        if (selectedUserFromList) setSelectedUserSnapshot(selectedUserFromList);
+    }, [selectedUserFromList]);
+
+    useEffect(() => {
         if (selectedUserId) return;
+        setSelectedUserSnapshot(undefined);
         if (!legacyName && !isOpen) {
             setSearchTerm("");
             setHasInteracted(false);
@@ -177,7 +182,7 @@ export function UserSearchPicker({
                 </button>
             )}
             {isOpen && !disabled && (
-                <div className="absolute z-50 mt-1 w-full bg-card border border-border rounded-lg shadow-lg max-h-64 overflow-y-auto">
+                <div className="absolute z-[210] mt-1 w-full max-h-[min(16rem,calc(100vh-8rem))] overflow-y-auto rounded-lg border border-border bg-card shadow-lg">
                     {filteredUsers.length === 0 ? (
                         <div className="px-3 py-2 text-sm text-muted-foreground">
                             {isSearching ? "搜尋帳號中..." : "找不到符合的帳號"}
@@ -190,6 +195,7 @@ export function UserSearchPicker({
                                 onMouseDown={(event) => event.preventDefault()}
                                 onClick={() => {
                                     onSelect(user);
+                                    setSelectedUserSnapshot(user);
                                     setSearchTerm(buildUserLabel(user));
                                     setHasInteracted(false);
                                     setIsOpen(false);

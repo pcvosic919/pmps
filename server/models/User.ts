@@ -1,5 +1,5 @@
 import mongoose, { Schema, Document } from "mongoose";
-import { authProviders, roles, skillLevels, type AuthProvider, type Role, type UserCostRate, type UserCostRateHistory, type UserSkill } from "../../shared/types";
+import { authProviders, featurePermissions, roles, skillLevels, type AuthProvider, type PermissionOverrides, type Role, type UserCostRate, type UserCostRateHistory, type UserSkill } from "../../shared/types";
 
 export interface IUser extends Document {
     email: string;
@@ -10,6 +10,7 @@ export interface IUser extends Document {
     title?: string;
     role: Role;
     roles: Role[];
+    permissionOverrides: PermissionOverrides;
     provider: AuthProvider;
     providerId?: string;
     isActive: boolean;
@@ -30,6 +31,10 @@ const UserSchema = new Schema<IUser>({
     title: { type: String },
     role: { type: String, enum: roles, default: "user", required: true },
     roles: { type: [String], enum: roles, default: [] },
+    permissionOverrides: {
+        allow: { type: [String], enum: featurePermissions, default: [] },
+        deny: { type: [String], enum: featurePermissions, default: [] }
+    },
     provider: { type: String, enum: authProviders, default: "manual", required: true },
     providerId: { type: String },
     isActive: { type: Boolean, default: true, required: true },

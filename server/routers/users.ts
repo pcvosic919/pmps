@@ -2,7 +2,7 @@ import { z } from "zod";
 import { router, protectedProcedure, roleProcedure } from "../_core/trpc";
 import { UserModel } from "../models/User";
 import { TRPCError } from "@trpc/server";
-import { roles } from "../../shared/types";
+import { featurePermissions, roles } from "../../shared/types";
 import { decodeCursor, encodeCursor, toObjectId } from "../_core/cursor";
 import { assertEntraSyncConfigured, getEntraSettings, pruneStaleEntraUsersJob, syncEntraUsersJob } from "../_core/entra";
 import { hashPassword } from "../_core/password";
@@ -68,7 +68,7 @@ export const usersRouter = router({
             }
 
             const items = await UserModel.find(query)
-                .select("name email department managedDepartments title role roles isActive provider costRate createdAt")
+                .select("name email department managedDepartments title role roles permissionOverrides isActive provider costRate createdAt")
                 .sort({ [sortBy]: direction })
                 .limit(limit + 1)
                 .lean();
@@ -87,6 +87,7 @@ export const usersRouter = router({
                     title: u.title,
                     role: u.role,
                     roles: u.roles,
+                    permissionOverrides: (u as any).permissionOverrides || { allow: [], deny: [] },
                     isActive: u.isActive,
                     provider: u.provider,
                     costRate: (u as any).costRate,
@@ -344,6 +345,10 @@ export const usersRouter = router({
             title: z.string().optional(),
             role: z.enum(roles).optional(),
             roles: z.array(z.enum(roles)).optional(),
+            permissionOverrides: z.object({
+                allow: z.array(z.enum(featurePermissions)),
+                deny: z.array(z.enum(featurePermissions))
+            }).optional(),
             isActive: z.boolean().optional()
         }))
         .mutation(async ({ input }) => {
