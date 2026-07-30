@@ -526,7 +526,7 @@ export function UserManagementPage() {
 
             {/* Edit Modal */}
             <Dialog open={!!editingUser} onOpenChange={(open) => !open && setEditingUser(null)}>
-                <DialogContent className="sm:max-w-lg">
+                <DialogContent className="max-h-[calc(100dvh-2rem)] overflow-y-auto overscroll-contain sm:max-w-lg">
                     <DialogHeader>
                         <DialogTitle className="flex items-center space-x-2">
                             <UsersIcon className="w-5 h-5 text-primary" />
