@@ -622,7 +622,7 @@ export function UserManagementPage() {
                                 />
                                 <div className="space-y-3 rounded-lg border border-border p-4">
                                     <div>
-                                        <FormLabel>帳號功能權限覆寫</FormLabel>
+                                        <p className="text-sm font-medium">帳號功能權限覆寫</p>
                                         <p className="mt-1 text-xs text-muted-foreground">未設定時沿用角色預設；拒絕優先於允許。</p>
                                     </div>
                                     <div className="space-y-2">
