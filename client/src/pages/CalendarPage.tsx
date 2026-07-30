@@ -412,8 +412,8 @@ export function CalendarPage() {
             </div>
 
             {editingEvent && (
-                <div className="fixed inset-0 bg-background/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-                    <div className="bg-card w-full max-w-md rounded-xl shadow-2xl border border-border overflow-hidden">
+                <div className="fixed inset-0 z-50 flex items-center justify-center bg-background/80 p-4 backdrop-blur-sm">
+                    <div className="max-h-[calc(100dvh-2rem)] w-full max-w-md overflow-y-auto overscroll-contain rounded-xl border border-border bg-card shadow-2xl">
                         <div className="p-4 border-b border-border flex justify-between items-center bg-muted/30">
                             <h3 className="font-bold">設定任務排程</h3>
                             <button onClick={() => setEditingEvent(null)} className="p-1 hover:bg-muted rounded text-muted-foreground">

@@ -1863,8 +1863,8 @@ export function WbsManagementPage() {
 
             {/* Edit Sales Owner Modal */}
             {showProjectMemberModal && (
-                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm">
-                    <div className="bg-card border border-border rounded-xl shadow-xl w-full max-w-md mx-4 p-6 space-y-5">
+                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4 backdrop-blur-sm">
+                    <div className="max-h-[calc(100dvh-2rem)] w-full max-w-md space-y-5 overflow-y-auto overscroll-contain rounded-xl border border-border bg-card p-6 shadow-xl">
                         <div className="flex justify-between items-center">
                             <h2 className="text-lg font-bold flex items-center"><UserPlus className="w-5 h-5 mr-2 text-primary" />新增專案參與人員</h2>
                             <button onClick={() => setShowProjectMemberModal(false)} className="p-1 rounded-full hover:bg-muted"><X className="w-5 h-5 text-muted-foreground" /></button>
@@ -1912,8 +1912,8 @@ export function WbsManagementPage() {
 
             {/* Edit Sales Owner Modal */}
             {showEditSalesModal && (
-                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm">
-                    <div className="bg-card border border-border rounded-xl shadow-xl w-full max-w-lg mx-4 p-6 space-y-5">
+                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4 backdrop-blur-sm">
+                    <div className="max-h-[calc(100dvh-2rem)] w-full max-w-lg space-y-5 overflow-y-auto overscroll-contain rounded-xl border border-border bg-card p-6 shadow-xl">
                         <div className="flex justify-between items-center">
                             <h2 className="text-lg font-bold">編輯專案基本資料</h2>
                             <button onClick={() => setShowEditSalesModal(false)} className="p-1 rounded-full hover:bg-muted"><X className="w-5 h-5 text-muted-foreground" /></button>
@@ -1988,8 +1988,8 @@ export function WbsManagementPage() {
 
             {/* Reject Modal */}
             {showRejectModal && (
-                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm">
-                    <div className="bg-card border border-border rounded-xl shadow-xl w-full max-w-md mx-4 p-6 space-y-4">
+                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4 backdrop-blur-sm">
+                    <div className="max-h-[calc(100dvh-2rem)] w-full max-w-md space-y-4 overflow-y-auto overscroll-contain rounded-xl border border-border bg-card p-6 shadow-xl">
                         <div className="flex justify-between items-center">
                             <h2 className="text-lg font-bold flex items-center"><XCircle className="w-5 h-5 mr-2 text-red-500" />退回 WBS 版本</h2>
                             <button onClick={() => setShowRejectModal(false)} className="p-1 rounded-full hover:bg-muted"><X className="w-5 h-5 text-muted-foreground" /></button>
@@ -2020,8 +2020,8 @@ export function WbsManagementPage() {
 
             {/* Create Issue Modal */}
             {isCreatingIssue && (
-                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm shadow-2xl transition-opacity animate-in fade-in">
-                    <div className="bg-card border border-border rounded-xl shadow-2xl w-full max-w-lg mx-4 p-6 space-y-5 animate-in zoom-in-95">
+                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4 shadow-2xl backdrop-blur-sm transition-opacity animate-in fade-in">
+                    <div className="max-h-[calc(100dvh-2rem)] w-full max-w-lg space-y-5 overflow-y-auto overscroll-contain rounded-xl border border-border bg-card p-6 shadow-2xl animate-in zoom-in-95">
                         <div className="flex justify-between items-center border-b border-border/50 pb-3">
                             <h2 className="text-xl font-bold flex items-center tracking-tight"><AlertCircle className="w-5 h-5 mr-2 text-primary" />建立專案追蹤議題</h2>
                             <button onClick={() => setIsCreatingIssue(false)} className="p-1.5 rounded-full hover:bg-muted bg-muted/50 transition-colors"><X className="w-5 h-5 text-muted-foreground" /></button>

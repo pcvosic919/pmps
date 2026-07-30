@@ -329,7 +329,7 @@ export function OpportunitiesPage() {
 
             {/* Create Modal */}
             <Dialog open={isCreating} onOpenChange={setIsCreating}>
-                <DialogContent className="max-h-[88vh] overflow-y-auto sm:max-w-5xl">
+                <DialogContent className="sm:max-w-5xl">
                     <DialogHeader>
                         <DialogTitle className="flex items-center space-x-2">
                             <Briefcase className="w-5 h-5 text-primary" />

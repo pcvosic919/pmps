@@ -143,8 +143,8 @@ export function CustomFieldsPage() {
             </div>
 
             {isModalOpen && (
-                <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 animate-in fade-in duration-200">
-                    <div className="bg-card w-full max-w-md rounded-xl shadow-lg border p-6">
+                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4 animate-in fade-in duration-200">
+                    <div className="max-h-[calc(100dvh-2rem)] w-full max-w-md overflow-y-auto overscroll-contain rounded-xl border bg-card p-6 shadow-lg">
                         <h3 className="text-xl font-bold mb-4">{editingId ? "編輯自訂欄位" : "新增自訂欄位"}</h3>
                         <div className="space-y-4">
                             <div>

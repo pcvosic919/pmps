@@ -809,8 +809,8 @@ export function OpportunityDetailPage() {
             {/* ====== Modals ====== */}
             {/* 協銷指派 Modal */}
             {showAssignModal && (
-                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm">
-                    <div className="bg-card border border-border rounded-xl shadow-xl w-full max-w-md mx-4 p-6 space-y-5">
+                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4 backdrop-blur-sm">
+                    <div className="max-h-[calc(100dvh-2rem)] w-full max-w-md space-y-5 overflow-y-auto overscroll-contain rounded-xl border border-border bg-card p-6 shadow-xl">
                         <div className="flex justify-between items-center">
                             <h2 className="text-lg font-bold flex items-center"><Briefcase className="w-5 h-5 mr-2 text-primary" />新增協銷指派</h2>
                             <button onClick={() => setShowAssignModal(false)} className="p-1 rounded-full hover:bg-muted"><X className="w-5 h-5 text-muted-foreground" /></button>
@@ -850,8 +850,8 @@ export function OpportunityDetailPage() {
 
             {/* 新增成員 Modal */}
             {showMemberModal && (
-                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm">
-                    <div className="bg-card border border-border rounded-xl shadow-xl w-full max-w-md mx-4 p-6 space-y-5">
+                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4 backdrop-blur-sm">
+                    <div className="max-h-[calc(100dvh-2rem)] w-full max-w-md space-y-5 overflow-y-auto overscroll-contain rounded-xl border border-border bg-card p-6 shadow-xl">
                         <div className="flex justify-between items-center">
                             <h2 className="text-lg font-bold flex items-center"><UserPlus className="w-5 h-5 mr-2 text-primary" />新增商機成員</h2>
                             <button onClick={() => setShowMemberModal(false)} className="p-1 rounded-full hover:bg-muted"><X className="w-5 h-5 text-muted-foreground" /></button>
@@ -894,8 +894,8 @@ export function OpportunityDetailPage() {
 
             {/* 編輯業務 Modal */}
             {showEditSalesModal && (
-                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm">
-                    <div className="bg-card border border-border rounded-xl shadow-xl w-full max-w-lg mx-4 p-6 space-y-5">
+                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4 backdrop-blur-sm">
+                    <div className="max-h-[calc(100dvh-2rem)] w-full max-w-lg space-y-5 overflow-y-auto overscroll-contain rounded-xl border border-border bg-card p-6 shadow-xl">
                         <div className="flex justify-between items-center">
                             <h2 className="text-lg font-bold">編輯業務</h2>
                             <button onClick={() => setShowEditSalesModal(false)} className="p-1 rounded-full hover:bg-muted"><X className="w-5 h-5 text-muted-foreground" /></button>
@@ -935,8 +935,8 @@ export function OpportunityDetailPage() {
 
             {/* 編輯商機金額 Modal */}
             {showEditEstimatedValueModal && (
-                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm">
-                    <div className="bg-card border border-border rounded-xl shadow-xl w-full max-w-lg mx-4 p-6 space-y-5">
+                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4 backdrop-blur-sm">
+                    <div className="max-h-[calc(100dvh-2rem)] w-full max-w-lg space-y-5 overflow-y-auto overscroll-contain rounded-xl border border-border bg-card p-6 shadow-xl">
                         <div className="flex justify-between items-center">
                             <h2 className="text-lg font-bold">輸入商機金額</h2>
                             <button onClick={() => setShowEditEstimatedValueModal(false)} className="p-1 rounded-full hover:bg-muted"><X className="w-5 h-5 text-muted-foreground" /></button>
@@ -968,8 +968,8 @@ export function OpportunityDetailPage() {
 
             {/* 編輯描述 Modal */}
             {showEditDescriptionModal && (
-                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm">
-                    <div className="bg-card border border-border rounded-xl shadow-xl w-full max-w-lg mx-4 p-6 space-y-5">
+                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4 backdrop-blur-sm">
+                    <div className="max-h-[calc(100dvh-2rem)] w-full max-w-lg space-y-5 overflow-y-auto overscroll-contain rounded-xl border border-border bg-card p-6 shadow-xl">
                         <div className="flex justify-between items-center">
                             <h2 className="text-lg font-bold flex items-center"><FileText className="w-5 h-5 mr-2 text-primary" />編輯商機描述</h2>
                             <button onClick={() => setShowEditDescriptionModal(false)} className="p-1 rounded-full hover:bg-muted"><X className="w-5 h-5 text-muted-foreground" /></button>
@@ -1002,8 +1002,8 @@ export function OpportunityDetailPage() {
 
             {/* 回報工時 Modal */}
             {showTimesheetModal && (
-                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm">
-                    <div className="bg-card border border-border rounded-xl shadow-xl w-full max-w-md mx-4 p-6 space-y-5">
+                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4 backdrop-blur-sm">
+                    <div className="max-h-[calc(100dvh-2rem)] w-full max-w-md space-y-5 overflow-y-auto overscroll-contain rounded-xl border border-border bg-card p-6 shadow-xl">
                         <div className="flex justify-between items-center">
                             <h2 className="text-lg font-bold flex items-center"><Clock className="w-5 h-5 mr-2 text-primary" />回報協銷工時</h2>
                             <button onClick={() => setShowTimesheetModal(false)} className="p-1 rounded-full hover:bg-muted"><X className="w-5 h-5 text-muted-foreground" /></button>
@@ -1039,8 +1039,8 @@ export function OpportunityDetailPage() {
 
             {/* 建立報價單 / 專案 Modal */}
             {showSRModal && (
-                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm">
-                    <div className="bg-card border border-border rounded-xl shadow-xl w-full max-w-md mx-4 p-6 space-y-5">
+                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4 backdrop-blur-sm">
+                    <div className="max-h-[calc(100dvh-2rem)] w-full max-w-md space-y-5 overflow-y-auto overscroll-contain rounded-xl border border-border bg-card p-6 shadow-xl">
                         <div className="flex justify-between items-center">
                             <h2 className="text-lg font-bold flex items-center"><FileText className="w-5 h-5 mr-2 text-primary" />一鍵建立報價單 / 專案</h2>
                             <button onClick={() => setShowSRModal(false)} className="p-1 rounded-full hover:bg-muted"><X className="w-5 h-5 text-muted-foreground" /></button>
@@ -1110,8 +1110,8 @@ export function OpportunityDetailPage() {
             )}
 
             {showCustomFieldsModal && (
-                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm shadow-2xl transition-opacity animate-in fade-in">
-                    <div className="bg-card border border-border rounded-xl shadow-2xl w-full max-w-2xl mx-4 p-6 space-y-5 animate-in zoom-in-95 max-h-[85vh] flex flex-col">
+                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4 shadow-2xl backdrop-blur-sm transition-opacity animate-in fade-in">
+                    <div className="flex max-h-[calc(100dvh-2rem)] w-full max-w-2xl flex-col space-y-5 rounded-xl border border-border bg-card p-6 shadow-2xl animate-in zoom-in-95">
                         <div className="flex justify-between items-center border-b border-border/50 pb-3">
                             <h2 className="text-xl font-bold flex items-center tracking-tight"><FileText className="w-5 h-5 mr-2 text-primary" />編輯商機細節欄位</h2>
                             <button onClick={() => setShowCustomFieldsModal(false)} className="p-1.5 rounded-full hover:bg-muted bg-muted/50 transition-colors"><X className="w-5 h-5 text-muted-foreground" /></button>
