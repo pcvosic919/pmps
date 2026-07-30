@@ -61,7 +61,11 @@ export const canViewAudit = (user?: { email?: string } | null) =>
 
 export const hashAuditIp = (value?: string) => {
     if (!value) return undefined;
-    const salt = process.env.AUDIT_IP_HASH_SALT || process.env.SESSION_SECRET || "pmps-audit";
+    const salt =
+        process.env.AUDIT_IP_HASH_SALT ||
+        process.env.JWT_SECRET ||
+        process.env.SESSION_SECRET ||
+        "pmps-audit";
     return createHash("sha256").update(`${salt}:${value}`).digest("hex").slice(0, 24);
 };
 
