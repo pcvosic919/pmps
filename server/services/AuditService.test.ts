@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
     canViewAudit,
     getAuditTarget,
@@ -8,6 +8,10 @@ import {
 } from "./AuditService";
 
 describe("AuditService", () => {
+    afterEach(() => {
+        vi.unstubAllEnvs();
+    });
+
     it("only grants Audit viewer access to demo@demo.com", () => {
         expect(canViewAudit({ email: " DEMO@demo.com " })).toBe(true);
         expect(canViewAudit({ email: "admin@example.com" })).toBe(false);
@@ -49,6 +53,16 @@ describe("AuditService", () => {
         expect(hash).toBe(hashAuditIp("192.0.2.10"));
         expect(hash).not.toContain("192.0.2.10");
         expect(hash).toHaveLength(24);
+    });
+
+    it("uses JWT_SECRET as the Docker-safe IP hash fallback", () => {
+        vi.stubEnv("AUDIT_IP_HASH_SALT", "");
+        vi.stubEnv("SESSION_SECRET", "");
+        vi.stubEnv("JWT_SECRET", "first-secret");
+        const firstHash = hashAuditIp("192.0.2.10");
+
+        vi.stubEnv("JWT_SECRET", "second-secret");
+        expect(hashAuditIp("192.0.2.10")).not.toBe(firstHash);
     });
 
     it("maps application routes to business categories", () => {
