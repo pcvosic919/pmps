@@ -364,7 +364,7 @@ export function AuditPage() {
 
             {selectedEvent && (
                 <div className="fixed inset-0 z-[220] flex items-center justify-center bg-black/50 p-4" onClick={() => setSelectedEvent(null)}>
-                    <div className="max-h-[85vh] w-full max-w-2xl overflow-y-auto rounded-xl border border-border bg-card p-5 shadow-2xl" onClick={event => event.stopPropagation()}>
+                    <div className="max-h-[calc(100dvh-2rem)] w-full max-w-2xl overflow-y-auto overscroll-contain rounded-xl border border-border bg-card p-5 shadow-2xl" onClick={event => event.stopPropagation()}>
                         <div className="flex items-start justify-between gap-4">
                             <div>
                                 <h2 className="text-lg font-bold">互動紀錄詳細資料</h2>

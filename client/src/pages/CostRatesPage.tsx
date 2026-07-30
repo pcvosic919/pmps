@@ -200,8 +200,8 @@ export function CostRatesPage() {
 
             {/* Edit Modal */}
             {editingUser && (
-                <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
-                    <div className="bg-card w-full max-w-md rounded-xl shadow-lg border p-6">
+                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+                    <div className="max-h-[calc(100dvh-2rem)] w-full max-w-md overflow-y-auto overscroll-contain rounded-xl border bg-card p-6 shadow-lg">
                         <div className="flex items-center space-x-2 mb-4">
                             <CreditCard className="w-5 h-5 text-primary" />
                             <h3 className="text-xl font-bold">費率設定 - {editingUser.name}</h3>
@@ -258,8 +258,8 @@ export function CostRatesPage() {
 
             {/* Batch Edit Modal */}
             {isBatchEditing && (
-                <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
-                    <div className="bg-card w-full max-w-md rounded-xl shadow-lg border p-6">
+                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+                    <div className="max-h-[calc(100dvh-2rem)] w-full max-w-md overflow-y-auto overscroll-contain rounded-xl border bg-card p-6 shadow-lg">
                         <div className="flex items-center space-x-2 mb-4">
                             <CreditCard className="w-5 h-5 text-indigo-600" />
                             <h3 className="text-xl font-bold">批次修改費率 ({selectedUserIds.length} 人)</h3>
@@ -316,8 +316,8 @@ export function CostRatesPage() {
 
             {/* History Modal */}
             {historyUser && (
-                <div className="fixed inset-0 bg-black/40 backdrop-blur-sm flex items-center justify-center z-50">
-                    <div className="bg-card w-full max-w-lg rounded-xl shadow-lg border p-6 max-h-[80vh] overflow-y-auto">
+                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4 backdrop-blur-sm">
+                    <div className="max-h-[calc(100dvh-2rem)] w-full max-w-lg overflow-y-auto overscroll-contain rounded-xl border bg-card p-6 shadow-lg">
                         <div className="flex justify-between items-center mb-5">
                             <h3 className="text-xl font-bold flex items-center gap-2">
                                 📋 費率歷史 - {historyUser.name}

@@ -54,7 +54,7 @@ export function GlobalSearch({ open, onOpenChange }: GlobalSearchProps) {
                 <Dialog.Overlay className="fixed inset-0 z-[100] bg-black/60 backdrop-blur-sm" />
                 <Dialog.Content
                     aria-describedby={undefined}
-                    className="fixed left-1/2 top-[15%] z-[110] w-[95vw] max-w-2xl -translate-x-1/2 overflow-hidden rounded-xl border border-border bg-card shadow-2xl focus:outline-none"
+                    className="fixed left-1/2 top-4 z-[110] flex max-h-[calc(100dvh-2rem)] w-[95vw] max-w-2xl -translate-x-1/2 flex-col overflow-hidden rounded-xl border border-border bg-card shadow-2xl focus:outline-none sm:top-[15%]"
                 >
                     <Dialog.Title className="sr-only">全域功能搜尋</Dialog.Title>
                     <div className="flex items-center border-b border-border/50 bg-muted/20 px-4">
@@ -68,7 +68,7 @@ export function GlobalSearch({ open, onOpenChange }: GlobalSearchProps) {
                         />
                         <div className="ml-2 whitespace-nowrap rounded border border-border bg-background px-1.5 py-0.5 text-[10px] text-muted-foreground shadow-sm">ESC 關閉</div>
                     </div>
-                    <div className="max-h-[350px] overflow-y-auto p-2">
+                    <div className="min-h-0 flex-1 overflow-y-auto p-2 sm:max-h-[350px]">
                         <div className="mb-1 px-3 py-2 text-xs font-semibold tracking-wider text-muted-foreground">功能捷徑</div>
                         {visibleRoutes.map(route => (
                             <button

@@ -199,8 +199,8 @@ export function ResourcesPage() {
                 const user = resources?.find((u: any) => u.id === editingId);
                 if (!user) return null;
                 return (
-                    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm">
-                        <div className="bg-card border border-border rounded-xl shadow-xl w-full max-w-lg mx-4 p-6 space-y-5 max-h-[90vh] overflow-y-auto">
+                    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4 backdrop-blur-sm">
+                        <div className="max-h-[calc(100dvh-2rem)] w-full max-w-lg space-y-5 overflow-y-auto overscroll-contain rounded-xl border border-border bg-card p-6 shadow-xl">
                             <div className="flex justify-between items-center">
                                 <h2 className="text-lg font-bold flex items-center">
                                     <Pencil className="w-5 h-5 mr-2 text-primary" />
