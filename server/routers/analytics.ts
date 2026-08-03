@@ -271,7 +271,7 @@ const buildSettlementSnapshotPayload = async (month: string, type: "project" | "
 
     if (type === "project") {
         const [srs, timesheets] = await Promise.all([
-            ServiceRequestModel.find({}, { _id: 1, title: 1, pmId: 1, contractAmount: 1, finalPrice: 1, status: 1 }).populate("pmId", "name department").lean(),
+            ServiceRequestModel.find({}, { _id: 1, title: 1, pmId: 1, contractAmount: 1, finalPrice: 1, status: 1, salesDepartment: 1, salesRep: 1 }).populate("pmId", "name department").lean(),
             TimesheetModel.find({ type: "project", workDate: { $gte: startDate, $lte: endDate } }).populate("techId", "name department costRate").lean()
         ]);
         const costMap = new Map<string, { cost: number; hours: number }>();
@@ -291,6 +291,8 @@ const buildSettlementSnapshotPayload = async (month: string, type: "project" | "
                 title: sr.title,
                 owner: sr.pmId?.name || "",
                 department: sr.pmId?.department || "",
+                salesDepartment: sr.salesDepartment || "",
+                salesRep: sr.salesRep || "",
                 status: sr.status,
                 revenue,
                 hours: cost.hours,
@@ -313,7 +315,7 @@ const buildSettlementSnapshotPayload = async (month: string, type: "project" | "
     }
 
     const [opps, timesheets] = await Promise.all([
-        OpportunityModel.find({}, { _id: 1, title: 1, customerName: 1, ownerId: 1, status: 1 }).populate("ownerId", "name department").lean(),
+        OpportunityModel.find({}, { _id: 1, title: 1, customerName: 1, ownerId: 1, status: 1, salesDepartment: 1, salesRep: 1 }).populate("ownerId", "name department").lean(),
         TimesheetModel.find({ type: "presales", workDate: { $gte: startDate, $lte: endDate } }).populate("techId", "name department costRate").lean()
     ]);
     const costMap = new Map<string, { cost: number; hours: number }>();
@@ -332,6 +334,8 @@ const buildSettlementSnapshotPayload = async (month: string, type: "project" | "
             customerName: opp.customerName,
             owner: opp.ownerId?.name || "",
             department: opp.ownerId?.department || "",
+            salesDepartment: opp.salesDepartment || "",
+            salesRep: opp.salesRep || "",
             status: opp.status,
             revenue: cost.cost,
             hours: cost.hours,
@@ -495,8 +499,8 @@ export const analyticsRouter = router({
 
             // Fetch timesheets and users to calculate REVENUE (hours * rate)
             const [srs, opps, timesheets, locks] = await Promise.all([
-                ServiceRequestModel.find(srQuery, { _id: 1, title: 1, pmId: 1, contractAmount: 1, finalPrice: 1, status: 1 }).lean(),
-                OpportunityModel.find(oppQuery, { _id: 1, title: 1, customerName: 1, status: 1 }).lean(),
+                ServiceRequestModel.find(srQuery, { _id: 1, title: 1, pmId: 1, contractAmount: 1, finalPrice: 1, status: 1, salesDepartment: 1, salesRep: 1 }).lean(),
+                OpportunityModel.find(oppQuery, { _id: 1, title: 1, customerName: 1, status: 1, salesDepartment: 1, salesRep: 1 }).lean(),
                 TimesheetModel.find(tsMatch).populate("techId").lean(),
                 SettlementLockModel.find({ month: currentMonth }).lean()
             ]);
@@ -543,6 +547,8 @@ export const analyticsRouter = router({
                         contractAmount: statisticAmount,
                         quotedContractAmount: sr.contractAmount,
                         finalPrice: sr.finalPrice,
+                        salesDepartment: sr.salesDepartment || "",
+                        salesRep: sr.salesRep || "",
                         totalHours,      // 本月時數
                         totalCost,       // 本月收入費用 (時數×時薪)
                         margin,
@@ -554,6 +560,8 @@ export const analyticsRouter = router({
                     id: opp._id.toString(),
                     title: opp.title,
                     customerName: opp.customerName,
+                    salesDepartment: opp.salesDepartment || "",
+                    salesRep: opp.salesRep || "",
                     totalCost: presalesRevMap.get(opp._id.toString()) ?? 0,
                     status: opp.status
                 }))

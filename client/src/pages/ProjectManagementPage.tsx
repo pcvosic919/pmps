@@ -3,7 +3,8 @@ import { trpc } from "../lib/trpc";
 import { Link } from "wouter";
 import {
     FolderKanban, ChevronRight, AlertTriangle, BarChart3,
-    CheckCircle2, Clock, XCircle, RefreshCw, Search, Plus, Archive, RotateCcw, Trash2
+    CheckCircle2, Clock, XCircle, RefreshCw, Search, Plus, Archive, RotateCcw, Trash2,
+    List, LayoutGrid
 } from "lucide-react";
 import { useDebounce } from "../lib/useDebounce";
 import { useCurrentUser } from "../lib/useCurrentUser";
@@ -12,10 +13,11 @@ const SR_STATUSES = [
     { value: "new", label: "待指派", color: "bg-blue-100 text-blue-800 border-blue-200" },
     { value: "in_progress", label: "執行中", color: "bg-amber-100 text-amber-800 border-amber-200" },
     { value: "completed", label: "已結案", color: "bg-green-100 text-green-800 border-green-200" },
-    { value: "cancelled", label: "已取消", color: "bg-gray-100 text-gray-800 border-gray-200" },
+    { value: "cancelled", label: "已取消", color: "bg-red-100 text-red-800 border-red-200" },
 ] as const;
 
 type SRStatus = typeof SR_STATUSES[number]["value"];
+type ProjectViewMode = "list" | "grid";
 
 export function ProjectManagementPage() {
     const { user, hasRole } = useCurrentUser();
@@ -27,6 +29,7 @@ export function ProjectManagementPage() {
 	    const [search, setSearch] = useState("");
     const [filterStatus, setFilterStatus] = useState<string>("all");
     const [showArchived, setShowArchived] = useState(false);
+	    const [viewMode, setViewMode] = useState<ProjectViewMode>("list");
 	    const [changingStatus, setChangingStatus] = useState<string | null>(null);
 	    const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null);
     const debouncedSearch = useDebounce(search, 300);
@@ -174,8 +177,70 @@ export function ProjectManagementPage() {
                         {showArchived ? "顯示使用中" : "查看已封存"}
                     </button>
                 </div>
+                <div className="inline-flex self-start rounded-lg border border-border bg-background p-1">
+                    <button
+                        type="button"
+                        onClick={() => setViewMode("list")}
+                        className={`inline-flex items-center gap-1.5 rounded-md px-3 py-1.5 text-sm transition-colors ${viewMode === "list" ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:bg-muted hover:text-foreground"}`}
+                        aria-pressed={viewMode === "list"}
+                    >
+                        <List className="h-4 w-4" /> 清單
+                    </button>
+                    <button
+                        type="button"
+                        onClick={() => setViewMode("grid")}
+                        className={`inline-flex items-center gap-1.5 rounded-md px-3 py-1.5 text-sm transition-colors ${viewMode === "grid" ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:bg-muted hover:text-foreground"}`}
+                        aria-pressed={viewMode === "grid"}
+                    >
+                        <LayoutGrid className="h-4 w-4" /> 磚塊
+                    </button>
+                </div>
             </div>
 
+                {viewMode === "list" ? (
+                    <div className="overflow-hidden rounded-xl border border-border/50 bg-card shadow-sm">
+                        <div className="overflow-x-auto">
+                            <table className="w-full min-w-[760px] text-left text-sm">
+                                <thead className="bg-muted/50 text-muted-foreground">
+                                    <tr>
+                                        <th className="px-5 py-3 font-medium">專案名稱</th>
+                                        <th className="px-5 py-3 font-medium">客戶名稱</th>
+                                        <th className="px-5 py-3 font-medium">業務</th>
+                                        <th className="px-5 py-3 text-right font-medium">最終成交金額</th>
+                                        <th className="px-5 py-3 text-right font-medium">操作</th>
+                                    </tr>
+                                </thead>
+                                <tbody className="divide-y divide-border">
+                                    {(srs ?? []).length === 0 ? (
+                                        <tr>
+                                            <td colSpan={5} className="px-5 py-12 text-center text-muted-foreground">
+                                                {search || filterStatus !== "all" ? "找不到符合條件的專案" : "尚無服務請求 (SR)"}
+                                            </td>
+                                        </tr>
+                                    ) : (
+                                        (srs ?? []).map((sr: any) => (
+                                            <tr key={sr.id} className="transition-colors hover:bg-muted/30">
+                                                <td className="px-5 py-4 font-semibold text-foreground">{sr.title || "—"}</td>
+                                                <td className="px-5 py-4 text-muted-foreground">{sr.customerName || "—"}</td>
+                                                <td className="px-5 py-4 text-muted-foreground">{sr.salesRep || "—"}</td>
+                                                <td className="px-5 py-4 text-right font-semibold text-foreground">
+                                                    {hasRole("tech") ? "—" : `NT$ ${Number(sr.finalPrice ?? sr.contractAmount ?? 0).toLocaleString()}`}
+                                                </td>
+                                                <td className="px-5 py-4 text-right">
+                                                    <Link href={`/service-requests/${sr.id}`}>
+                                                        <a className="inline-flex items-center gap-1 rounded-lg bg-primary px-3 py-1.5 text-xs text-primary-foreground transition-colors hover:bg-primary/90">
+                                                            管理 WBS <ChevronRight className="h-3.5 w-3.5" />
+                                                        </a>
+                                                    </Link>
+                                                </td>
+                                            </tr>
+                                        ))
+                                    )}
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                ) : (
 	            <div className="grid xl:grid-cols-[1fr_360px] gap-4 items-start">
 	                <div className="space-y-3">
 	                {(srs ?? []).map((sr: any) => {
@@ -420,6 +485,7 @@ export function ProjectManagementPage() {
 	                    </aside>
 	                )}
 	            </div>
+                )}
         </div>
     );
 }
