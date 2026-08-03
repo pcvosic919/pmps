@@ -96,6 +96,8 @@ export function SettlementsPage() {
             rows = currentData.map((r: any) => ({
                 "SR單號": `SR-${r.id.slice(-6)}`,
                 "名稱": r.title,
+                "業務部門": r.salesDepartment || "—",
+                "業務人員": r.salesRep || "—",
                 "金額": r.contractAmount,
                 "本月時數": r.totalHours?.toFixed(1) || 0,
                 "收入費用": r.totalCost,
@@ -107,6 +109,8 @@ export function SettlementsPage() {
                 "商機單號": `OPP-${r.id.slice(-6)}`,
                 "名稱": r.title,
                 "客戶": r.customerName,
+                "業務部門": r.salesDepartment || "—",
+                "業務人員": r.salesRep || "—",
                 "本月協銷營收": r.totalCost,
                 "狀態": getStatusLabel(r.status)
             }));
@@ -326,6 +330,8 @@ export function SettlementsPage() {
                                 <tr>
                                     <th className="px-6 py-3 font-medium">SR 單號 / 名稱</th>
                                     <th className="px-6 py-3 font-medium">PM ID</th>
+                                    <th className="px-6 py-3 font-medium">業務部門</th>
+                                    <th className="px-6 py-3 font-medium">業務人員</th>
                                     {!hasRole("tech") && <th className="px-6 py-3 font-medium text-right">合約金額 (Revenue)</th>}
                                     <th className="px-6 py-3 font-medium text-right">本月時數 (hrs)</th>
                                     <th className="px-6 py-3 font-medium text-right">本月收入費用 (時數×時薪)</th>
@@ -336,6 +342,8 @@ export function SettlementsPage() {
                                 <tr>
                                     <th className="px-6 py-3 font-medium">商機單號 / 名稱</th>
                                     <th className="px-6 py-3 font-medium">客戶名稱</th>
+                                    <th className="px-6 py-3 font-medium">業務部門</th>
+                                    <th className="px-6 py-3 font-medium">業務人員</th>
                                     <th className="px-6 py-3 font-medium text-right">本月協銷營收</th>
                                     <th className="px-6 py-3 font-medium text-center">狀態</th>
                                 </tr>
@@ -344,7 +352,7 @@ export function SettlementsPage() {
                         <tbody className="divide-y divide-border">
                             {currentData.length === 0 ? (
                                 <tr>
-                                    <td colSpan={6} className="px-6 py-8 text-center text-muted-foreground">此月份無任何結算資料</td>
+                                    <td colSpan={activeTab === "project" ? (hasRole("tech") ? 8 : 9) : 6} className="px-6 py-8 text-center text-muted-foreground">此月份無任何結算資料</td>
                                 </tr>
                             ) : (
                                 activeTab === "project" ? (
@@ -358,6 +366,8 @@ export function SettlementsPage() {
                                                 <div className="text-muted-foreground mt-1 truncate max-w-xs">{sr.title}</div>
                                             </td>
                                             <td className="px-6 py-4 text-muted-foreground">#{sr.pmId ? sr.pmId.slice(-6) : "-"}</td>
+                                            <td className="px-6 py-4 text-muted-foreground">{sr.salesDepartment || "—"}</td>
+                                            <td className="px-6 py-4 text-muted-foreground">{sr.salesRep || "—"}</td>
                                             {!hasRole("tech") && (
                                                 <td className="px-6 py-4 text-right font-medium">${sr.contractAmount?.toLocaleString() || "0"}</td>
                                             )}
@@ -392,6 +402,8 @@ export function SettlementsPage() {
                                                 <div className="text-muted-foreground mt-1 truncate max-w-xs">{opp.title}</div>
                                             </td>
                                             <td className="px-6 py-4">{opp.customerName}</td>
+                                            <td className="px-6 py-4 text-muted-foreground">{opp.salesDepartment || "—"}</td>
+                                            <td className="px-6 py-4 text-muted-foreground">{opp.salesRep || "—"}</td>
                                             <td className="px-6 py-4 text-right text-emerald-600 font-medium">${opp.totalCost?.toLocaleString() || "0"}</td>
                                             <td className="px-6 py-4 text-center">
                                                 <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-semibold border ${getStatusColor(opp.status)}`}>
