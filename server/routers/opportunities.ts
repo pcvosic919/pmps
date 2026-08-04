@@ -7,7 +7,9 @@ import { SettlementLockModel } from "../models/SettlementLock";
 import { TimesheetModel } from "../models/Timesheet";
 import { ServiceRequestModel } from "../models/ServiceRequest";
 import { UserModel } from "../models/User";
+import { ImportBatchModel } from "../models/ImportBatch";
 import { TRPCError } from "@trpc/server";
+import mongoose from "mongoose";
 import { memberRoles, opportunityStatuses, opportunityTypes } from "../../shared/types";
 import {
     assertAuthorized,
@@ -45,6 +47,24 @@ const listInput = z.object({
     sortOrder: z.enum(["asc", "desc"]).optional()
 }).optional();
 
+const opportunityImportRowSchema = z.object({
+    rowNumber: z.number().int().min(2),
+    id: z.string().trim().optional(),
+    title: z.string().trim().min(1, "商機名稱不可為空"),
+    customerName: z.string().trim().min(1, "客戶名稱不可為空"),
+    salesEmail: z.string().trim().optional(),
+    salesDepartment: z.string().trim().optional(),
+    salesRep: z.string().trim().optional(),
+    estimatedValue: z.number().min(0, "商機金額不能為負數"),
+    opportunityType: z.enum(opportunityTypes),
+    expectedCloseDate: z.string().trim().optional(),
+    productNames: z.array(z.string().trim().min(1)).max(100).default([]),
+    description: z.string().max(10000).optional(),
+    approvedM365: z.boolean().default(false),
+    approvedAzure: z.boolean().default(false),
+    approvedSecurity: z.boolean().default(false)
+});
+
 const assertOpportunityEditable = (opportunity: { status?: string }) => {
     if (isTerminalOpportunityStatus(opportunity.status)) {
         throw new TRPCError({ code: "BAD_REQUEST", message: "已轉案、已成交或已失敗的商機不可編輯" });
@@ -80,6 +100,41 @@ const getSalesUserFields = async (salesUserId?: string) => {
         salesRep: salesUser.name || "",
         salesDepartment: salesUser.department || ""
     };
+};
+
+const createOpportunityFolder = async (input: {
+    opportunityId: string;
+    title: string;
+    customerName: string;
+    ownerName: string;
+}) => {
+    const folder = await folderStorageService.createRecordFolder(
+        input.title,
+        "商機",
+        input.customerName || "未知公司",
+        input.ownerName || "Owner"
+    );
+    if (!folder) return;
+    await OpportunityModel.updateOne(
+        { _id: input.opportunityId },
+        { $set: { sharePointFolderUrl: folder.sharePointFolderUrl || "", localFolderPath: folder.localFolderPath || "" } }
+    );
+};
+
+const parseImportDate = (value?: string) => {
+    if (!value) return undefined;
+    const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value);
+    if (!match) {
+        throw new Error("預計成交日格式必須為 YYYY-MM-DD");
+    }
+    const year = Number(match[1]);
+    const month = Number(match[2]);
+    const day = Number(match[3]);
+    const date = new Date(Date.UTC(year, month - 1, day));
+    if (date.getUTCFullYear() !== year || date.getUTCMonth() !== month - 1 || date.getUTCDate() !== day) {
+        throw new Error("預計成交日不是有效日期");
+    }
+    return date;
 };
 
 const getMonthKey = (value: Date) => value.toISOString().slice(0, 7);
@@ -187,6 +242,262 @@ export const opportunitiesRouter = router({
             };
         }),
 
+    exportRows: permissionProcedure("module.opportunities.view", ["admin", "manager", "business", "presales", "tech", "pm"])
+        .input(z.object({
+            search: z.string().trim().optional(),
+            sortBy: z.enum(opportunitySortFields).optional(),
+            sortOrder: z.enum(["asc", "desc"]).optional()
+        }).optional())
+        .query(async ({ input, ctx }) => {
+            const sortBy = input?.sortBy || "createdAt";
+            const sortOrder = input?.sortOrder || "desc";
+            const query = await buildOpportunityListQuery({
+                search: input?.search,
+                sortBy,
+                sortOrder,
+                user: ctx.user
+            });
+            const exportLimit = 10_000;
+            const items = await OpportunityModel.find(query)
+                .select("title customerName salesUserId salesDepartment salesRep estimatedValue opportunityType status expectedCloseDate ownerId createdAt productNames description approvedM365 approvedAzure approvedSecurity")
+                .populate("salesUserId", "name email department")
+                .populate("ownerId", "name")
+                .sort({ [sortBy]: sortOrder === "desc" ? -1 : 1 })
+                .limit(exportLimit + 1)
+                .lean();
+
+            const truncated = items.length > exportLimit;
+            return {
+                truncated,
+                limit: exportLimit,
+                items: items.slice(0, exportLimit).map((opportunity: any) => ({
+                    id: opportunity._id.toString(),
+                    title: opportunity.title,
+                    customerName: opportunity.customerName,
+                    salesEmail: opportunity.salesUserId?.email || "",
+                    salesDepartment: opportunity.salesDepartment || opportunity.salesUserId?.department || "",
+                    salesRep: opportunity.salesRep || opportunity.salesUserId?.name || "",
+                    estimatedValue: Number(opportunity.estimatedValue || 0),
+                    opportunityType: getEffectiveOpportunityType(opportunity),
+                    status: opportunity.status,
+                    expectedCloseDate: opportunity.expectedCloseDate,
+                    productNames: opportunity.productNames || [],
+                    description: opportunity.description || "",
+                    approvedM365: opportunity.approvedM365 === true,
+                    approvedAzure: opportunity.approvedAzure === true,
+                    approvedSecurity: opportunity.approvedSecurity === true,
+                    ownerName: opportunity.ownerId?.name || "",
+                    createdAt: opportunity.createdAt
+                }))
+            };
+        }),
+
+    bulkImport: roleProcedure(["admin", "business", "manager", "presales"])
+        .input(z.object({
+            sourceFileName: z.string().trim().min(1).max(255),
+            rows: z.array(opportunityImportRowSchema).min(1).max(1000)
+        }))
+        .mutation(async ({ input, ctx }) => {
+            const batch = await ImportBatchModel.create({
+                type: "opportunities",
+                sourceFileName: input.sourceFileName,
+                status: "processing",
+                importedBy: toObjectId(ctx.user.id),
+                totalRows: input.rows.length,
+                successRows: 0,
+                failedRows: 0,
+                warnings: [],
+                errorMessages: []
+            });
+            const results: Array<{
+                rowNumber: number;
+                id?: string;
+                action: "inserted" | "updated" | "failed";
+                message?: string;
+                warnings: string[];
+            }> = [];
+            const folderTasks: Array<{
+                result: (typeof results)[number];
+                opportunityId: string;
+                title: string;
+                customerName: string;
+            }> = [];
+
+            try {
+                const normalizedEmails = Array.from(new Set(input.rows
+                    .map((row) => row.salesEmail?.trim().toLowerCase())
+                    .filter((email): email is string => Boolean(email))));
+                const salesUsers = normalizedEmails.length > 0
+                    ? await UserModel.find({ email: { $in: normalizedEmails }, isActive: true })
+                        .select("email name department")
+                        .lean()
+                    : [];
+                const salesUsersByEmail = new Map(salesUsers.map((user: any) => [
+                    String(user.email || "").trim().toLowerCase(),
+                    user
+                ]));
+                const seenIds = new Set<string>();
+                const seenCreateKeys = new Set<string>();
+
+                for (const row of input.rows) {
+                    const result: (typeof results)[number] = {
+                        rowNumber: row.rowNumber,
+                        action: "failed",
+                        warnings: []
+                    };
+                    results.push(result);
+
+                    try {
+                        const salesEmail = row.salesEmail?.trim().toLowerCase();
+                        const salesUser = salesEmail ? salesUsersByEmail.get(salesEmail) : undefined;
+                        if (salesEmail && !salesUser) {
+                            throw new Error(`找不到啟用中的業務帳號：${row.salesEmail}`);
+                        }
+                        const expectedCloseDate = parseImportDate(row.expectedCloseDate);
+
+                        if (row.id) {
+                            if (!mongoose.isValidObjectId(row.id)) {
+                                throw new Error("商機 ID 格式不正確");
+                            }
+                            if (seenIds.has(row.id)) {
+                                throw new Error("檔案內商機 ID 重複");
+                            }
+                            seenIds.add(row.id);
+                            const opportunity = assertFound(
+                                await OpportunityModel.findById(row.id)
+                                    .select("ownerId members presalesAssignments status salesUserId salesDepartment salesRep")
+                                    .lean(),
+                                "找不到指定的商機 ID"
+                            );
+                            const canUpdate = hasAnyRole(ctx.user, ["admin", "manager", "presales"]) ||
+                                isOpportunityBusinessOwner(ctx.user, opportunity);
+                            assertAuthorized(canUpdate, "您沒有權限更新此商機");
+                            assertOpportunityEditable(opportunity);
+                            await ensureCompanyByName(row.customerName, ctx.user.id);
+
+                            const salesFields = salesUser ? {
+                                salesUserId: salesUser._id,
+                                salesRep: salesUser.name || "",
+                                salesDepartment: salesUser.department || ""
+                            } : {
+                                salesUserId: opportunity.salesUserId,
+                                salesRep: row.salesRep || opportunity.salesRep || "",
+                                salesDepartment: row.salesDepartment || opportunity.salesDepartment || ""
+                            };
+                            await OpportunityModel.updateOne(
+                                { _id: row.id },
+                                {
+                                    $set: {
+                                        title: row.title,
+                                        customerName: row.customerName,
+                                        ...salesFields,
+                                        estimatedValue: row.estimatedValue,
+                                        opportunityType: row.opportunityType,
+                                        productNames: row.productNames,
+                                        description: row.description || "",
+                                        approvedM365: row.approvedM365,
+                                        approvedAzure: row.approvedAzure,
+                                        approvedSecurity: row.approvedSecurity,
+                                        ...(expectedCloseDate ? { expectedCloseDate } : {})
+                                    },
+                                    ...(!expectedCloseDate ? { $unset: { expectedCloseDate: 1 } } : {})
+                                }
+                            );
+                            result.id = row.id;
+                            result.action = "updated";
+                            continue;
+                        }
+
+                        const createKey = [row.title, row.customerName, row.expectedCloseDate || ""]
+                            .map((value) => value.trim().toLocaleLowerCase("zh-TW"))
+                            .join("|");
+                        if (seenCreateKeys.has(createKey)) {
+                            throw new Error("檔案內出現相同商機名稱、客戶及預計成交日");
+                        }
+                        seenCreateKeys.add(createKey);
+                        await ensureCompanyByName(row.customerName, ctx.user.id);
+                        const created = await OpportunityModel.create({
+                            title: row.title,
+                            customerName: row.customerName,
+                            salesUserId: salesUser?._id,
+                            salesRep: salesUser?.name || row.salesRep || "",
+                            salesDepartment: salesUser?.department || row.salesDepartment || "",
+                            estimatedValue: row.estimatedValue,
+                            opportunityType: row.opportunityType,
+                            expectedCloseDate,
+                            productNames: row.productNames,
+                            description: row.description || "",
+                            approvedM365: row.approvedM365,
+                            approvedAzure: row.approvedAzure,
+                            approvedSecurity: row.approvedSecurity,
+                            status: getInitialOpportunityStatus(hasAnyRole(ctx.user, ["presales"])),
+                            ownerId: toObjectId(ctx.user.id),
+                            members: [{ userId: toObjectId(ctx.user.id), memberRole: "owner" }]
+                        });
+                        result.id = created._id.toString();
+                        result.action = "inserted";
+                        folderTasks.push({
+                            result,
+                            opportunityId: created._id.toString(),
+                            title: row.title,
+                            customerName: row.customerName
+                        });
+                    } catch (error) {
+                        result.message = error instanceof Error ? error.message : "匯入失敗";
+                    }
+                }
+
+                const folderConcurrency = 5;
+                for (let index = 0; index < folderTasks.length; index += folderConcurrency) {
+                    await Promise.all(folderTasks.slice(index, index + folderConcurrency).map(async (task) => {
+                        try {
+                            await createOpportunityFolder({
+                                opportunityId: task.opportunityId,
+                                title: task.title,
+                                customerName: task.customerName,
+                                ownerName: ctx.user.name || ctx.user.email || "Owner"
+                            });
+                        } catch (error) {
+                            const warning = error instanceof Error ? error.message : "資料夾建立失敗";
+                            task.result.warnings.push(`商機已建立，但資料夾建立失敗：${warning}`);
+                        }
+                    }));
+                }
+
+                const successRows = results.filter((result) => result.action !== "failed").length;
+                const failedResults = results.filter((result) => result.action === "failed");
+                const warnings = results.flatMap((result) => result.warnings.map((warning) => `第 ${result.rowNumber} 列：${warning}`));
+                const errorMessages = failedResults.map((result) => `第 ${result.rowNumber} 列：${result.message || "匯入失敗"}`);
+                await ImportBatchModel.updateOne(
+                    { _id: batch._id },
+                    {
+                        $set: {
+                            status: "completed",
+                            successRows,
+                            failedRows: failedResults.length,
+                            warnings,
+                            errorMessages
+                        }
+                    }
+                );
+                return {
+                    success: true,
+                    batchId: batch._id.toString(),
+                    inserted: results.filter((result) => result.action === "inserted").length,
+                    updated: results.filter((result) => result.action === "updated").length,
+                    failed: failedResults.length,
+                    results
+                };
+            } catch (error) {
+                const message = error instanceof Error ? error.message : "商機匯入失敗";
+                await ImportBatchModel.updateOne(
+                    { _id: batch._id },
+                    { $set: { status: "failed", failedRows: input.rows.length, errorMessages: [message] } }
+                );
+                throw error;
+            }
+        }),
+
     getActiveOpportunityCount: protectedProcedure.query(async ({ ctx }) => {
         const query = await buildOpportunityListQuery({ 
             user: ctx.user as any,
@@ -244,13 +555,12 @@ export const opportunitiesRouter = router({
             // Document folder hook
             try {
                 const owner = await UserModel.findById(ownerId).select("name").lean();
-                const folder = await folderStorageService.createRecordFolder(input.title, "商機", input.customerName || "未知公司", owner?.name || "Owner");
-                if (folder) {
-                    await OpportunityModel.updateOne(
-                        { _id: result._id },
-                        { $set: { sharePointFolderUrl: folder.sharePointFolderUrl || "", localFolderPath: folder.localFolderPath || "" } }
-                    );
-                }
+                await createOpportunityFolder({
+                    opportunityId: result._id.toString(),
+                    title: input.title,
+                    customerName: input.customerName,
+                    ownerName: owner?.name || "Owner"
+                });
             } catch (err) {
                 console.error("[FolderStorage Hook] Opportunity creation folder failed:", err);
             }
