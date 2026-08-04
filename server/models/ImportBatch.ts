@@ -1,6 +1,6 @@
 import mongoose, { Schema, Document } from "mongoose";
 
-export const importBatchTypes = ["open_cases", "kpi_revenue"] as const;
+export const importBatchTypes = ["open_cases", "kpi_revenue", "opportunities"] as const;
 export type ImportBatchType = typeof importBatchTypes[number];
 
 export interface IImportBatch extends Document {

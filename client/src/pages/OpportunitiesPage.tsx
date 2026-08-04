@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from "react";
 import { trpc } from "../lib/trpc";
 import { Link } from "wouter";
-import { Plus, Briefcase, ChevronRight, Building2, Search, Loader2, Trash2 } from "lucide-react";
+import { Plus, Briefcase, ChevronRight, Building2, Search, Loader2, Trash2, Download, Upload } from "lucide-react";
 import { useDebounce } from "../lib/useDebounce";
 import { useCurrentUser } from "../lib/useCurrentUser";
 import { z } from "zod";
@@ -14,6 +14,8 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { BusinessUserPicker } from "../components/BusinessUserPicker";
 import { CompanySearchPicker } from "../components/CompanySearchPicker";
 import { FormSection, FormSummaryPanel, StickyFormActions } from "../components/FormLayout";
+import { OpportunityImportDialog } from "../components/opportunities/OpportunityImportDialog";
+import { exportOpportunitiesToXlsx } from "../lib/opportunityExcel";
 
 const oppSchema = z.object({
     title: z.string().min(1, "商機名稱不可為空"),
@@ -40,8 +42,9 @@ const opportunityTypeLabels: Record<string, string> = {
 export function OpportunitiesPage() {
     const [searchTerm, setSearchTerm] = useState("");
     const [companySearch, setCompanySearch] = useState("");
-    const [sortBy] = useState("createdAt");
+    const [sortBy] = useState<"createdAt" | "estimatedValue" | "status">("createdAt");
     const [sortOrder] = useState<"asc" | "desc">("desc");
+    const [isImportOpen, setIsImportOpen] = useState(false);
 
     const debouncedSearchTerm = useDebounce(searchTerm, 500);
     const debouncedCompanySearch = useDebounce(companySearch, 300);
@@ -56,6 +59,10 @@ export function OpportunitiesPage() {
     } = trpc.opportunities.list.useInfiniteQuery(
         { limit: 12, search: debouncedSearchTerm, sortBy, sortOrder },
         { getNextPageParam: (lastPage) => lastPage.nextCursor }
+    );
+    const exportQuery = trpc.opportunities.exportRows.useQuery(
+        { search: debouncedSearchTerm, sortBy, sortOrder },
+        { enabled: false }
     );
 
     // Flatten the infinite pages into a single array
@@ -72,8 +79,9 @@ export function OpportunitiesPage() {
     const businessUsers = usersData?.items || [];
     const companies = companiesData?.items || [];
     const oppFields = customFieldDefs?.filter((f: any) => f.entityType === "opportunity") || [];
-    const { user } = useCurrentUser();
+    const { user, hasRole } = useCurrentUser();
     const canDelete = user?.email?.trim().toLowerCase() === "demo@demo.com";
+    const canImport = ["admin", "manager", "business", "presales"].some(hasRole);
     const utils = trpc.useUtils();
 
     const observerRef = useRef<HTMLDivElement>(null);
@@ -154,6 +162,23 @@ export function OpportunitiesPage() {
         });
     };
 
+    const handleExport = async () => {
+        const result = await exportQuery.refetch();
+        if (result.error) {
+            alert(result.error.message || "商機匯出失敗");
+            return;
+        }
+        const exportData = result.data;
+        if (!exportData || exportData.items.length === 0) {
+            alert("目前查詢條件沒有可匯出的商機資料");
+            return;
+        }
+        exportOpportunitiesToXlsx(exportData.items);
+        if (exportData.truncated) {
+            alert(`符合條件的資料超過 ${exportData.limit.toLocaleString()} 筆，本次僅匯出前 ${exportData.limit.toLocaleString()} 筆。`);
+        }
+    };
+
     if (isLoading) {
         return <div className="p-8 text-center">載入中...</div>;
     }
@@ -192,17 +217,38 @@ export function OpportunitiesPage() {
 
     return (
         <div className="space-y-6">
-            <div className="flex justify-between items-center bg-card p-6 rounded-xl shadow-sm border border-border/50">
+            <div className="flex flex-col gap-4 bg-card p-6 rounded-xl shadow-sm border border-border/50 lg:flex-row lg:items-center lg:justify-between">
                 <div>
                     <h2 className="text-3xl font-bold tracking-tight bg-clip-text text-transparent bg-gradient-to-r from-primary to-primary/60">商機管理</h2>
                     <p className="text-muted-foreground mt-1">追蹤業務商機、指派協銷與轉換 SR 狀態</p>
                 </div>
-                <button
-                    onClick={() => setIsCreating(true)}
-                    className="bg-primary text-primary-foreground hover:bg-primary/90 px-5 py-2.5 rounded-lg inline-flex items-center text-sm font-medium transition-all shadow-md hover:shadow-lg">
-                    <Plus className="w-4 h-4 mr-2" />
-                    新增商機
-                </button>
+                <div className="flex flex-wrap gap-2">
+                    <button
+                        type="button"
+                        onClick={() => void handleExport()}
+                        disabled={exportQuery.isFetching}
+                        className="inline-flex items-center rounded-lg border border-border px-4 py-2.5 text-sm font-medium transition-colors hover:bg-muted disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                        {exportQuery.isFetching ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Download className="mr-2 h-4 w-4" />}
+                        {exportQuery.isFetching ? "匯出中..." : "匯出 Excel"}
+                    </button>
+                    {canImport && (
+                        <button
+                            type="button"
+                            onClick={() => setIsImportOpen(true)}
+                            className="inline-flex items-center rounded-lg border border-border px-4 py-2.5 text-sm font-medium transition-colors hover:bg-muted"
+                        >
+                            <Upload className="mr-2 h-4 w-4" />
+                            匯入 Excel
+                        </button>
+                    )}
+                    <button
+                        onClick={() => setIsCreating(true)}
+                        className="bg-primary text-primary-foreground hover:bg-primary/90 px-5 py-2.5 rounded-lg inline-flex items-center text-sm font-medium transition-all shadow-md hover:shadow-lg">
+                        <Plus className="w-4 h-4 mr-2" />
+                        新增商機
+                    </button>
+                </div>
             </div>
 
             <div className="bg-card border rounded-xl shadow-sm p-4 flex justify-between items-center flex-wrap gap-4">
@@ -326,6 +372,15 @@ export function OpportunitiesPage() {
                     </div>
                 )}
             </div>
+
+            <OpportunityImportDialog
+                open={isImportOpen}
+                onOpenChange={setIsImportOpen}
+                onImported={async () => {
+                    await utils.opportunities.list.invalidate();
+                    await refetch();
+                }}
+            />
 
             {/* Create Modal */}
             <Dialog open={isCreating} onOpenChange={setIsCreating}>
