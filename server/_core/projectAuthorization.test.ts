@@ -6,8 +6,12 @@ import {
 } from "./authorization";
 import {
     buildManagerProjectScopeQuery,
+    canEditProjectWbs,
+    canEditProjectFinancials,
     canOperateProject,
+    canViewProjectFinancials,
     canViewProject,
+    directProjectClauses,
     type ProjectAccessUser,
 } from "./projectAuthorization";
 import { UserModel } from "../models/User";
@@ -112,5 +116,41 @@ describe("project authorization policy", () => {
         await expect(canOperateProject(pm, {
             members: [{ userId: otherUserId, memberRole: "participant" }],
         })).resolves.toBe(false);
+    });
+
+    it("keeps the immutable creator in list and detail view scope after owner transfer", async () => {
+        const creator = makeUser("tech");
+        const transferredProject = {
+            createdById: userId,
+            members: [{ userId: otherUserId, memberRole: "owner" }],
+        };
+
+        expect(directProjectClauses(userId)).toEqual(expect.arrayContaining([
+            expect.objectContaining({ createdById: expect.anything() }),
+        ]));
+        await expect(canViewProject(creator, transferredProject)).resolves.toBe(true);
+        await expect(canOperateProject(creator, transferredProject)).resolves.toBe(false);
+        await expect(canEditProjectWbs(creator, transferredProject)).resolves.toBe(false);
+    });
+
+    it("lets a Tech project owner view and edit financials", async () => {
+        const techOwner = makeUser("tech");
+        const project = { members: [{ userId, memberRole: "owner" }] };
+
+        await expect(canViewProjectFinancials(techOwner, project)).resolves.toBe(true);
+        await expect(canEditProjectFinancials(techOwner, project)).resolves.toBe(true);
+    });
+
+    it("keeps financials hidden from a non-owner Tech unless explicitly granted", async () => {
+        const project = { members: [{ userId, memberRole: "participant" }] };
+
+        await expect(canViewProjectFinancials(makeUser("tech"), project)).resolves.toBe(false);
+        await expect(canEditProjectFinancials(makeUser("tech"), project)).resolves.toBe(false);
+
+        const grantedTech = makeUser("tech", {
+            permissionOverrides: { allow: ["project.financials.view"], deny: [] },
+        });
+        await expect(canViewProjectFinancials(grantedTech, project)).resolves.toBe(true);
+        await expect(canEditProjectFinancials(grantedTech, project)).resolves.toBe(false);
     });
 });

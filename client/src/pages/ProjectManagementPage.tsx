@@ -224,7 +224,9 @@ export function ProjectManagementPage() {
                                                 <td className="px-5 py-4 text-muted-foreground">{sr.customerName || "—"}</td>
                                                 <td className="px-5 py-4 text-muted-foreground">{sr.salesRep || "—"}</td>
                                                 <td className="px-5 py-4 text-right font-semibold text-foreground">
-                                                    {hasRole("tech") ? "—" : `NT$ ${Number(sr.finalPrice ?? sr.contractAmount ?? 0).toLocaleString()}`}
+                                                    {sr.permissions?.canViewFinancials
+                                                        ? `NT$ ${Number(sr.finalPrice ?? sr.contractAmount ?? 0).toLocaleString()}`
+                                                        : "—"}
                                                 </td>
                                                 <td className="px-5 py-4 text-right">
                                                     <Link href={`/service-requests/${sr.id}`}>
@@ -274,8 +276,8 @@ export function ProjectManagementPage() {
 	                                    <div className="flex items-center gap-6 text-sm text-muted-foreground flex-wrap">
                                         {sr.customerName && <span>客戶: <span className="font-semibold text-foreground">{sr.customerName}</span></span>}
                                         {sr.externalServiceType && <span>服務類型: <span className="font-semibold text-foreground">{sr.externalServiceType}</span></span>}
-	                                        {!hasRole("tech") && <span>合約報價: <span className="font-semibold text-foreground">NT$ {sr.contractAmount?.toLocaleString()}</span></span>}
-                                            {!hasRole("tech") && <span>最終成交金額: <span className="font-semibold text-foreground">NT$ {(sr.finalPrice ?? sr.contractAmount ?? 0).toLocaleString()}</span></span>}
+	                                        {sr.permissions?.canViewFinancials && <span>合約報價: <span className="font-semibold text-foreground">NT$ {sr.contractAmount?.toLocaleString()}</span></span>}
+                                            {sr.permissions?.canViewFinancials && <span>最終成交金額: <span className="font-semibold text-foreground">NT$ {(sr.finalPrice ?? sr.contractAmount ?? 0).toLocaleString()}</span></span>}
                                         {sr.externalAssignments?.length > 0 && (
                                             <span>匯入工時: <span className="font-semibold text-foreground">
                                                 {sr.externalAssignments.reduce((sum: number, a: any) => sum + (a.actualHours || 0), 0).toLocaleString()}
@@ -410,7 +412,7 @@ export function ProjectManagementPage() {
                                             刪除專案
                                         </button>
 	                                    )}
-                                        {canOperateProject(sr) && !hasRole("tech") && (
+                                        {sr.permissions?.canEditFinancials && (
                                             <button
                                                 onClick={(event) => {
                                                     event.stopPropagation();

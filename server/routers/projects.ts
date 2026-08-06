@@ -29,6 +29,7 @@ import {
 import {
     buildManagerProjectScopeQuery,
     canArchiveProject,
+    canEditProjectFinancials,
     canEditProjectWbs,
     canManageProjectMembers,
     canOperateProject,
@@ -288,10 +289,7 @@ const buildServiceRequestQuery = async ({
     if (hasAnyRole(user as any, ["manager"])) {
         clauses.push(await buildManagerProjectScopeQuery(user));
     } else {
-        const accessClauses: Record<string, unknown>[] = directProjectClauses(
-            user.id,
-            hasAnyRole(user as any, ["presales"])
-        );
+        const accessClauses: Record<string, unknown>[] = directProjectClauses(user.id);
         if (hasAnyRole(user as any, ["tech", "presales", "business"])) {
             const accessibleOpportunities = await OpportunityModel.find(
                 await getAccessibleOpportunityQuery(user as any),
@@ -431,6 +429,9 @@ export const projectsRouter = router({
                 customerName: 1,
                 contractAmount: 1,
                 finalPrice: 1,
+                finalPriceUpdatedAt: 1,
+                totalPoints: 1,
+                pointValue: 1,
                 recognizedRevenueAmount: 1,
                 recognitionMonth: 1,
                 srType: 1,
@@ -464,15 +465,23 @@ export const projectsRouter = router({
             .limit(input?.limit ?? 200)
             .lean();
 
-	        return Promise.all(items.map(async item => ({
-	            ...item,
-	            id: item._id.toString(),
-	            opportunityId: item.opportunityId?.toString(),
-	            salesUserId: item.salesUserId?.toString() || "",
-	            pmId: item.pmId?.toString() || "",
-	            projectSummary: getProjectWbsSummary(item),
-                permissions: await getProjectCapabilities(ctx.user, item, undefined, { knownVisible: true })
-	        })));
+	        return Promise.all(items.map(async item => {
+                const permissions = await getProjectCapabilities(ctx.user, item, undefined, { knownVisible: true });
+                return {
+	                ...item,
+	                id: item._id.toString(),
+	                opportunityId: item.opportunityId?.toString(),
+	                salesUserId: item.salesUserId?.toString() || "",
+	                pmId: item.pmId?.toString() || "",
+	                projectSummary: getProjectWbsSummary(item),
+                    contractAmount: permissions.canViewFinancials ? item.contractAmount : undefined,
+                    finalPrice: permissions.canViewFinancials ? item.finalPrice : undefined,
+                    totalPoints: permissions.canViewFinancials ? item.totalPoints : undefined,
+                    pointValue: permissions.canViewFinancials ? item.pointValue : undefined,
+                    finalPriceUpdatedAt: permissions.canViewFinancials ? item.finalPriceUpdatedAt : undefined,
+                    permissions
+                };
+	        }));
 	    }),
 
     getActiveProjectCount: protectedProcedure.query(async ({ ctx }) => {
@@ -493,6 +502,7 @@ export const projectsRouter = router({
             title: z.string(),
             customerName: z.string().optional(),
             contractAmount: z.number(),
+            finalPrice: z.number().min(0).optional(),
             srType: z.enum(srTypes).default("project"),
             totalPoints: z.number().optional(),
             pointValue: z.number().optional(),
@@ -557,7 +567,7 @@ export const projectsRouter = router({
                 salesRep: salesUserFields?.salesRep || input.salesRep || oppSalesRep,
                 externalServiceType: input.externalServiceType || input.srType,
                 contractAmount: input.contractAmount,
-                finalPrice: input.contractAmount,
+                finalPrice: input.finalPrice ?? input.contractAmount,
                 recognitionMonth: input.recognitionMonth || undefined,
                 srType: input.srType,
                 totalPoints: input.totalPoints,
@@ -885,7 +895,7 @@ export const projectsRouter = router({
         .query(async ({ input, ctx }) => {
             const sr: any = assertFound(
                 await ServiceRequestModel.findById(input.srId)
-                    .select("attachments pmId members wbsVersions.items.assigneeId changeRequests opportunityId")
+                    .select("attachments createdById pmId members wbsVersions.items.assigneeId changeRequests opportunityId")
                     .lean(),
                 "找不到該服務請求"
             );
@@ -967,7 +977,7 @@ export const projectsRouter = router({
         .mutation(async ({ input, ctx }) => {
             const sr: any = assertFound(
                 await ServiceRequestModel.findById(input.srId)
-                    .select("attachments pmId members wbsVersions.items.assigneeId changeRequests opportunityId localFolderPath")
+                    .select("attachments createdById pmId members wbsVersions.items.assigneeId changeRequests opportunityId localFolderPath")
                     .lean(),
                 "找不到該專案"
             );
@@ -1096,6 +1106,12 @@ export const projectsRouter = router({
 
             return {
                 ...sr,
+                contractAmount: permissions.canViewFinancials ? sr.contractAmount : undefined,
+                finalPrice: permissions.canViewFinancials ? sr.finalPrice : undefined,
+                totalPoints: permissions.canViewFinancials ? sr.totalPoints : undefined,
+                pointValue: permissions.canViewFinancials ? sr.pointValue : undefined,
+                finalPriceUpdatedAt: permissions.canViewFinancials ? sr.finalPriceUpdatedAt : undefined,
+                finalPriceUpdatedById: permissions.canViewFinancials ? sr.finalPriceUpdatedById : undefined,
                 id: sr._id.toString(),
                 opportunityId: sr.opportunityId?.toString(),
                 salesUserId: sr.salesUserId?.toString() || "",
@@ -1255,7 +1271,7 @@ export const projectsRouter = router({
             return { success: true };
         }),
 
-    updateFinalPrice: permissionProcedure("project.edit", ["admin", "manager", "pm", "presales", "business"])
+    updateFinalPrice: permissionProcedure("project.financials.edit", ["admin", "manager", "pm", "presales", "business", "tech"])
         .input(z.object({
             id: z.string(),
             finalPrice: z.number().min(0)
@@ -1263,7 +1279,7 @@ export const projectsRouter = router({
         .mutation(async ({ input, ctx }) => {
             const sr = assertFound(
                 await ServiceRequestModel.findById(input.id)
-                    .select("pmId members wbsVersions.items.assigneeId changeRequests opportunityId")
+                    .select("pmId members createdById wbsVersions.items.assigneeId changeRequests opportunityId")
                     .lean(),
                 "找不到該服務請求"
             );
@@ -1272,7 +1288,7 @@ export const projectsRouter = router({
                     .select("ownerId members presalesAssignments")
                     .lean()
                 : null;
-            assertAuthorized(await canOperateProject(ctx.user, sr, opportunity), "您沒有權限更新最終成交金額");
+            assertAuthorized(await canEditProjectFinancials(ctx.user, sr, opportunity), "您沒有權限更新最終成交金額");
 
             await ServiceRequestModel.updateOne(
                 { _id: input.id },
@@ -1287,12 +1303,79 @@ export const projectsRouter = router({
             return { success: true };
         }),
 
+    updateProjectFinancials: permissionProcedure("project.financials.edit", ["admin", "manager", "pm", "presales", "business", "tech"])
+        .input(z.object({
+            id: z.string(),
+            contractAmount: z.number().min(0),
+            finalPrice: z.number().min(0),
+            totalPoints: z.number().min(0).optional(),
+            pointValue: z.number().min(0).optional()
+        }))
+        .mutation(async ({ input, ctx }) => {
+            const sr: any = assertFound(
+                await ServiceRequestModel.findById(input.id)
+                    .select("pmId members createdById wbsVersions.items.assigneeId changeRequests opportunityId srType contractAmount finalPrice totalPoints pointValue")
+                    .lean(),
+                "找不到該服務請求"
+            );
+            const opportunity = sr.opportunityId
+                ? await OpportunityModel.findById(sr.opportunityId)
+                    .select("ownerId members presalesAssignments")
+                    .lean()
+                : null;
+            assertAuthorized(
+                await canEditProjectFinancials(ctx.user, sr, opportunity),
+                "您沒有權限編輯專案財務資訊"
+            );
+
+            const updatedAt = new Date();
+            const financialFields: Record<string, unknown> = {
+                contractAmount: input.contractAmount,
+                finalPrice: input.finalPrice,
+                finalPriceUpdatedAt: updatedAt,
+                finalPriceUpdatedById: toObjectId(ctx.user.id)
+            };
+            if (sr.srType === "maintenance") {
+                financialFields.totalPoints = input.totalPoints ?? 0;
+                financialFields.pointValue = input.pointValue ?? 0;
+            }
+
+            await ServiceRequestModel.updateOne(
+                { _id: input.id },
+                {
+                    $set: financialFields,
+                    $push: {
+                        projectAuditLogs: {
+                            action: "project_financials_updated",
+                            userId: toObjectId(ctx.user.id),
+                            timestamp: updatedAt,
+                            reason: JSON.stringify({
+                                previous: {
+                                    contractAmount: sr.contractAmount,
+                                    finalPrice: sr.finalPrice,
+                                    totalPoints: sr.totalPoints,
+                                    pointValue: sr.pointValue
+                                },
+                                next: {
+                                    contractAmount: input.contractAmount,
+                                    finalPrice: input.finalPrice,
+                                    totalPoints: input.totalPoints,
+                                    pointValue: input.pointValue
+                                }
+                            })
+                        }
+                    }
+                }
+            );
+            return { success: true };
+        }),
+
     getWbsDraft: protectedProcedure
         .input(z.object({ srId: z.string() }))
         .query(async ({ input, ctx }) => {
             const sr: any = assertFound(
                 await ServiceRequestModel.findById(input.srId)
-                    .select("pmId members wbsVersions.items.assigneeId changeRequests opportunityId wbsDrafts")
+                    .select("createdById pmId members wbsVersions.items.assigneeId changeRequests opportunityId wbsDrafts")
                     .lean(),
                 "找不到該專案"
             );
@@ -2107,7 +2190,7 @@ export const projectsRouter = router({
             );
             const srAccessView = assertFound(
                 await ServiceRequestModel.findById(input.srId)
-                    .select("pmId members srType wbsVersions.items.assigneeId changeRequests opportunityId")
+                    .select("createdById pmId members srType wbsVersions.items.assigneeId changeRequests opportunityId")
                     .lean(),
                 "找不到該服務請求"
             );
