@@ -1,15 +1,18 @@
 import mongoose from "mongoose";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { decodeCursor, encodeCursor, type CursorValue } from "../_core/cursor";
 import {
     buildOpportunityListQuery,
+    getAccessibleOpportunityQuery,
     type OpportunitySortField,
     type OpportunitySortOrder,
 } from "./opportunities.listing";
+import { UserModel } from "../models/User";
 
 type TestUser = {
     id: string;
     role: string;
+    department?: string;
 };
 
 type TestOpportunity = {
@@ -31,6 +34,11 @@ const searchableFields = ["title", "customerName"] as const;
 const managerUser: TestUser = {
     id: new mongoose.Types.ObjectId().toString(),
     role: "manager",
+};
+
+const adminUser: TestUser = {
+    id: new mongoose.Types.ObjectId().toString(),
+    role: "admin",
 };
 
 const memberUser: TestUser = {
@@ -274,6 +282,8 @@ const paginate = async ({
 };
 
 describe("buildOpportunityListQuery", () => {
+    afterEach(() => vi.restoreAllMocks());
+
     it("將搜尋、權限、游標條件合併成單一 query", async () => {
         const cursor = encodeCursor("000000000000000000000006", 400);
         const query = await buildOpportunityListQuery({
@@ -294,6 +304,7 @@ describe("buildOpportunityListQuery", () => {
                 {
                     $or: [
                         { ownerId: memberObjectId },
+                        { salesUserId: memberObjectId },
                         { "members.userId": memberObjectId },
                         { "presalesAssignments.techId": memberObjectId },
                     ],
@@ -308,12 +319,53 @@ describe("buildOpportunityListQuery", () => {
         });
     });
 
-    it("admin / manager 不額外帶入權限過濾", async () => {
+    it("只有 admin 不額外帶入權限過濾，manager 仍限制本人資料", async () => {
+        expect(await buildOpportunityListQuery({
+            sortBy: "createdAt",
+            sortOrder: "desc",
+            user: adminUser,
+        })).toEqual({});
+
         expect(await buildOpportunityListQuery({
             sortBy: "createdAt",
             sortOrder: "desc",
             user: managerUser,
-        })).toEqual({});
+        })).toEqual({
+            $and: [{
+                $or: [
+                    { ownerId: new mongoose.Types.ObjectId(managerUser.id) },
+                    { salesUserId: new mongoose.Types.ObjectId(managerUser.id) },
+                    { "members.userId": new mongoose.Types.ObjectId(managerUser.id) },
+                    { "presalesAssignments.techId": new mongoose.Types.ObjectId(managerUser.id) },
+                ]
+            }]
+        });
+    });
+
+    it("非 admin 可查看本人部門的 owner、業務、成員與協銷商機", async () => {
+        const departmentUserId = new mongoose.Types.ObjectId();
+        vi.spyOn(UserModel, "find").mockReturnValue({
+            lean: vi.fn().mockResolvedValue([{ _id: departmentUserId }]),
+        } as any);
+
+        const query = await getAccessibleOpportunityQuery({
+            ...managerUser,
+            department: "Delivery",
+        });
+
+        expect(query).toEqual({
+            $or: [
+                { ownerId: new mongoose.Types.ObjectId(managerUser.id) },
+                { salesUserId: new mongoose.Types.ObjectId(managerUser.id) },
+                { "members.userId": new mongoose.Types.ObjectId(managerUser.id) },
+                { "presalesAssignments.techId": new mongoose.Types.ObjectId(managerUser.id) },
+                { salesDepartment: "Delivery" },
+                { ownerId: { $in: [departmentUserId] } },
+                { salesUserId: { $in: [departmentUserId] } },
+                { "members.userId": { $in: [departmentUserId] } },
+                { "presalesAssignments.techId": { $in: [departmentUserId] } },
+            ]
+        });
     });
 
     it("建立時間排序的游標會轉回 Date，避免 Mongo 查詢抓不到商機", async () => {
@@ -330,6 +382,7 @@ describe("buildOpportunityListQuery", () => {
                 {
                     $or: [
                         { ownerId: memberObjectId },
+                        { salesUserId: memberObjectId },
                         { "members.userId": memberObjectId },
                         { "presalesAssignments.techId": memberObjectId },
                     ],

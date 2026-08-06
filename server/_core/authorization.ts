@@ -6,6 +6,7 @@ type IdLike = string | { toString(): string } | null | undefined;
 
 type OpportunityLike = {
     ownerId?: IdLike;
+    salesUserId?: IdLike;
     members?: Array<{ userId?: IdLike; memberRole?: string }>;
     presalesAssignments?: Array<{ techId?: IdLike }>;
 };
@@ -82,6 +83,7 @@ export const isOpportunityBusinessOwner = (user: UserSession, opportunity: Oppor
 export const canAccessOpportunity = (user: UserSession, opportunity: OpportunityLike) =>
     isAdminOrManager(user) ||
     isOpportunityOwner(user, opportunity) ||
+    idsMatch(opportunity.salesUserId, user.id) ||
     (opportunity.members || []).some(member => idsMatch(member.userId, user.id)) ||
     (opportunity.presalesAssignments || []).some(assignment => idsMatch(assignment.techId, user.id));
 

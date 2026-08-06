@@ -42,7 +42,7 @@ import {
     type ProjectAccessUser,
 } from "../_core/projectAuthorization";
 import { createNotification, createNotifications } from "../_core/notifications";
-import { getAccessibleOpportunityQuery } from "./opportunities.listing";
+import { getAccessibleOpportunityQuery, getDirectAccessibleOpportunityQuery } from "./opportunities.listing";
 import { toObjectId } from "../_core/cursor";
 import { ensureCompanyByName } from "../_core/companies";
 import { writeLocalAttachment } from "../_core/attachments";
@@ -292,7 +292,7 @@ const buildServiceRequestQuery = async ({
         const accessClauses: Record<string, unknown>[] = directProjectClauses(user.id);
         if (hasAnyRole(user as any, ["tech", "presales", "business"])) {
             const accessibleOpportunities = await OpportunityModel.find(
-                await getAccessibleOpportunityQuery(user as any),
+                getDirectAccessibleOpportunityQuery(user as any),
                 { _id: 1 }
             ).lean();
             const accessibleOpportunityIds = accessibleOpportunities.map((item) => item._id);
@@ -521,13 +521,9 @@ export const projectsRouter = router({
             opportunityId: z.string().optional()
         }))
         .mutation(async ({ input, ctx }) => {
-            if (input.opportunityId) {
-                const existingProject = await findProjectByOpportunityId(input.opportunityId);
-                if (existingProject) {
-                    await finalizeOpportunityConversion(input.opportunityId);
-                    return { id: existingProject._id.toString(), reused: true };
-                }
-            }
+            const existingOpportunityProject = input.opportunityId
+                ? await findProjectByOpportunityId(input.opportunityId)
+                : null;
             let oppCustomerName = "";
             let oppSalesUserId: any = undefined;
             let oppSalesDepartment = "";
@@ -544,10 +540,21 @@ export const projectsRouter = router({
                 oppSalesDepartment = opportunity.salesDepartment || "";
                 oppSalesRep = opportunity.salesRep || "";
                 const isPresalesOnly = hasAnyRole(ctx.user, ["presales"]) && !hasAnyRole(ctx.user, ["admin", "manager", "pm"]);
+                const opportunityScope = await getAccessibleOpportunityQuery(ctx.user as any);
+                const isInOpportunityScope = hasAnyRole(ctx.user, ["admin"]) || !!await OpportunityModel.exists({
+                    _id: opportunity._id,
+                    ...opportunityScope
+                });
                 assertAuthorized(
-                    isPresalesOnly ? isOpportunityOwner(ctx.user, opportunity) : canAccessOpportunity(ctx.user, opportunity),
+                    isPresalesOnly
+                        ? isOpportunityOwner(ctx.user, opportunity)
+                        : isInOpportunityScope && canAccessOpportunity(ctx.user, opportunity),
                     "您只能將自己擁有或有權限的商機轉為專案"
                 );
+                if (existingOpportunityProject) {
+                    await finalizeOpportunityConversion(input.opportunityId);
+                    return { id: existingOpportunityProject._id.toString(), reused: true };
+                }
                 if (opportunity.status === "converted") {
                     throw new TRPCError({ code: "BAD_REQUEST", message: "此商機已轉案，請勿重複建立 SR" });
                 }

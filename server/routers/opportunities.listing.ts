@@ -1,4 +1,4 @@
-import { getManagedDepartments, hasAnyRole } from "../_core/authorization";
+import { hasAnyRole } from "../_core/authorization";
 import { toObjectId, type CursorValue } from "../_core/cursor";
 import { UserModel } from "../models/User";
 
@@ -40,47 +40,48 @@ export const buildOpportunitySearchQuery = (search?: string) => {
     };
 };
 
-export const getAccessibleOpportunityQuery = async (ctxUser: OpportunityListUser) => {
-    const userObjectId = toObjectId(ctxUser.id);
-    const baseAccess = [
+export const directOpportunityClauses = (userId: string) => {
+    const userObjectId = toObjectId(userId);
+    return [
         { ownerId: userObjectId },
+        { salesUserId: userObjectId },
         { "members.userId": userObjectId },
         { "presalesAssignments.techId": userObjectId }
     ];
+};
 
-    // Admin and manager can see all opportunity records.
-    if (hasAnyRole(ctxUser as any, ["admin", "manager"])) {
+export const getDirectAccessibleOpportunityQuery = (ctxUser: OpportunityListUser) => {
+    if (hasAnyRole(ctxUser as any, ["admin"])) return {};
+    return { $or: directOpportunityClauses(ctxUser.id) };
+};
+
+export const getAccessibleOpportunityQuery = async (ctxUser: OpportunityListUser) => {
+    const baseAccess = directOpportunityClauses(ctxUser.id);
+
+    // Only Admin can see every opportunity record.
+    if (hasAnyRole(ctxUser as any, ["admin"])) {
         return {};
     }
 
-    const depts = getManagedDepartments(ctxUser as any);
-    if (depts !== null && depts.length > 0) {
-        const deptUsers = await UserModel.find({ department: { $in: depts } }, { _id: 1 }).lean();
+    const department = ctxUser.department?.trim();
+    if (department) {
+        const deptUsers = await UserModel.find(
+            { department, isActive: { $ne: false } },
+            { _id: 1 }
+        ).lean();
         const deptUserIds = deptUsers.map(u => u._id);
-        const departmentApprovalMap: Record<string, Record<string, boolean>> = {
-            IE0C00: { approvedSecurity: true },
-            IE0C30: { approvedM365: true },
-            IE0C50: { approvedAzure: true }
-        };
-
         const accessOrClauses: Record<string, unknown>[] = [
-            ...baseAccess
+            ...baseAccess,
+            { salesDepartment: department }
         ];
 
         if (deptUserIds.length > 0) {
             accessOrClauses.push(
                 { ownerId: { $in: deptUserIds } },
+                { salesUserId: { $in: deptUserIds } },
                 { "members.userId": { $in: deptUserIds } },
                 { "presalesAssignments.techId": { $in: deptUserIds } }
             );
-        }
-
-        // 對每個管理的部門，加入對應的 approval flag 過濾
-        for (const dept of depts) {
-            const approvalClause = departmentApprovalMap[dept];
-            if (approvalClause) {
-                accessOrClauses.push(approvalClause);
-            }
         }
 
         return {
