@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from "react";
 import { trpc } from "../lib/trpc";
-import { Users as UsersIcon, Edit, UserX, UserPlus, Search, Loader2, RefreshCw, Settings2, Trash2 } from "lucide-react";
+import { Users as UsersIcon, Edit, UserX, UserPlus, Search, Loader2, RefreshCw, Settings2, Trash2, Building2 } from "lucide-react";
 import { z } from "zod";
 import { featurePermissions, roles, type FeaturePermission } from "../../../shared/types";
 import { useForm } from "react-hook-form";
@@ -53,10 +53,12 @@ export function UserManagementPage() {
     const [searchTerm, setSearchTerm] = useState("");
     const [sortBy, setSortBy] = useState("name");
     const [sortOrder, setSortOrder] = useState<"asc" | "desc">("asc");
+    const [selectedDepartments, setSelectedDepartments] = useState<string[]>([]);
     const { user: currentUser } = useCurrentUser();
     const canDelete = currentUser?.email?.trim().toLowerCase() === "demo@demo.com";
 
     const debouncedSearchTerm = useDebounce(searchTerm, 500);
+    const { data: departments = [], isLoading: isLoadingDepartments } = trpc.users.getDepartments.useQuery();
 
     const {
         data,
@@ -66,7 +68,13 @@ export function UserManagementPage() {
         hasNextPage,
         isFetchingNextPage
     } = trpc.users.list.useInfiniteQuery(
-        { limit: 20, search: debouncedSearchTerm, sortBy, sortOrder },
+        {
+            limit: 20,
+            search: debouncedSearchTerm,
+            departments: selectedDepartments.length > 0 ? selectedDepartments : undefined,
+            sortBy,
+            sortOrder
+        },
         { getNextPageParam: (lastPage) => lastPage.nextCursor }
     );
 
@@ -81,6 +89,10 @@ export function UserManagementPage() {
         if (observerRef.current) observer.observe(observerRef.current);
         return () => observer.disconnect();
     }, [hasNextPage, isFetchingNextPage, fetchNextPage]);
+
+    useEffect(() => {
+        setSelectedUserIds([]);
+    }, [selectedDepartments]);
 
     // Flatten the infinite pages into a single array
     const users = (data?.pages.flatMap(page => page.items) || []) as any[];
@@ -222,6 +234,13 @@ export function UserManagementPage() {
         }
     };
 
+    const handleDepartmentToggle = (department: string) => {
+        setSelectedDepartments((current) => current.includes(department)
+            ? current.filter((item) => item !== department)
+            : [...current, department]
+        );
+    };
+
     const handleBatchSave = (values: any) => {
         updateBatchRoles.mutate({
             userIds: selectedUserIds,
@@ -291,34 +310,89 @@ export function UserManagementPage() {
                 </div>
             )}
 
-            <div className="bg-card border rounded-xl shadow-sm p-4 flex justify-between items-center flex-wrap gap-4">
-                <div className="relative w-72">
-                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
-                    <input
-                        type="text"
-                        placeholder="搜尋人員姓名、信箱或部門..."
-                        value={searchTerm}
-                        onChange={(e) => setSearchTerm(e.target.value)}
-                        className="w-full pl-9 pr-4 py-2 text-sm rounded-md border border-input bg-background focus:outline-none focus:ring-1 focus:ring-primary"
-                    />
+            <div className="bg-card border rounded-xl shadow-sm p-4 space-y-4">
+                <div className="flex justify-between items-center flex-wrap gap-4">
+                    <div className="relative w-full sm:w-72">
+                        <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+                        <input
+                            type="text"
+                            placeholder="搜尋人員姓名、信箱或部門..."
+                            value={searchTerm}
+                            onChange={(e) => setSearchTerm(e.target.value)}
+                            className="w-full pl-9 pr-4 py-2 text-sm rounded-md border border-input bg-background focus:outline-none focus:ring-1 focus:ring-primary"
+                        />
+                    </div>
+
+                    <div className="flex items-center gap-2">
+                        <span className="text-sm font-medium text-muted-foreground whitespace-nowrap">排序:</span>
+                        <select
+                            value={`${sortBy}-${sortOrder}`}
+                            onChange={(e) => {
+                                const [field, order] = e.target.value.split("-");
+                                setSortBy(field);
+                                setSortOrder(order as "asc" | "desc");
+                            }}
+                            className="text-sm border border-border rounded-md px-3 py-1.5 bg-background font-semibold hover:border-primary/50 transition-colors focus:outline-none cursor-pointer"
+                        >
+                            <option value="name-asc">姓名 (A - Z)</option>
+                            <option value="name-desc">姓名 (Z - A)</option>
+                            <option value="email-asc">依 Email 排序</option>
+                            <option value="role-asc">依主角色排序</option>
+                        </select>
+                    </div>
                 </div>
 
-                <div className="flex items-center gap-2">
-                    <span className="text-sm font-medium text-muted-foreground whitespace-nowrap">排序:</span>
-                    <select 
-                        value={`${sortBy}-${sortOrder}`}
-                        onChange={(e) => {
-                            const [field, order] = e.target.value.split("-");
-                            setSortBy(field);
-                            setSortOrder(order as "asc" | "desc");
-                        }}
-                        className="text-sm border border-border rounded-md px-3 py-1.5 bg-background font-semibold hover:border-primary/50 transition-colors focus:outline-none cursor-pointer"
-                    >
-                        <option value="name-asc">姓名 (A - Z)</option>
-                        <option value="name-desc">姓名 (Z - A)</option>
-                        <option value="email-asc">依 Email 排序</option>
-                        <option value="role-asc">依主角色排序</option>
-                    </select>
+                <div className="border-t border-border/70 pt-4">
+                    <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+                        <div className="flex items-center gap-2">
+                            <Building2 className="h-4 w-4 text-primary" />
+                            <span className="text-sm font-semibold">部門篩選</span>
+                            <span className="text-xs text-muted-foreground">勾選後只顯示對應部門帳號</span>
+                        </div>
+                        {selectedDepartments.length > 0 && (
+                            <button
+                                type="button"
+                                onClick={() => setSelectedDepartments([])}
+                                className="text-xs font-medium text-primary hover:underline"
+                            >
+                                清除篩選
+                            </button>
+                        )}
+                    </div>
+                    <div className="flex max-h-32 flex-wrap gap-2 overflow-y-auto pr-1">
+                        <label className={`inline-flex cursor-pointer items-center gap-2 rounded-full border px-3 py-1.5 text-xs font-medium transition-colors ${selectedDepartments.length === 0 ? "border-primary bg-primary/10 text-primary" : "border-border bg-background hover:border-primary/40"}`}>
+                            <input
+                                type="checkbox"
+                                checked={selectedDepartments.length === 0}
+                                onChange={() => setSelectedDepartments([])}
+                                className="h-3.5 w-3.5 rounded border-input text-primary focus:ring-primary"
+                            />
+                            全部部門
+                        </label>
+                        {isLoadingDepartments ? (
+                            <span className="inline-flex items-center gap-1 px-2 py-1.5 text-xs text-muted-foreground">
+                                <Loader2 className="h-3.5 w-3.5 animate-spin" /> 載入部門中...
+                            </span>
+                        ) : departments.map((department) => {
+                            const checked = selectedDepartments.includes(department);
+                            return (
+                                <label key={department} className={`inline-flex cursor-pointer items-center gap-2 rounded-full border px-3 py-1.5 text-xs font-medium transition-colors ${checked ? "border-primary bg-primary/10 text-primary" : "border-border bg-background hover:border-primary/40"}`}>
+                                    <input
+                                        type="checkbox"
+                                        checked={checked}
+                                        onChange={() => handleDepartmentToggle(department)}
+                                        className="h-3.5 w-3.5 rounded border-input text-primary focus:ring-primary"
+                                    />
+                                    {department}
+                                </label>
+                            );
+                        })}
+                    </div>
+                    <p className="mt-3 text-xs text-muted-foreground">
+                        {selectedDepartments.length === 0
+                            ? "目前顯示全部部門帳號"
+                            : `目前顯示 ${selectedDepartments.join("、")} 的帳號`}
+                    </p>
                 </div>
             </div>
 

@@ -1459,11 +1459,12 @@ export function WbsManagementPage() {
 	                                                                        {isAdded && <span className="rounded bg-emerald-100 px-1.5 py-0.5 text-[10px] font-semibold text-emerald-700">新增</span>}
                                                                         {assigneeChanged && <span className="rounded bg-blue-100 px-1.5 py-0.5 text-[10px] font-semibold text-blue-700">改派</span>}
                                                                     </div>
-                                                                    {item.description && (
-                                                                        <div className="mt-1 text-[11px] text-muted-foreground whitespace-pre-wrap bg-muted/20 p-2 rounded border border-border/50">
-                                                                            {item.description}
-                                                                        </div>
-                                                                    )}
+	                                                                    {item.description && (
+	                                                                        <div className="mt-2 rounded border border-border/60 bg-muted/20 p-2.5">
+	                                                                            <div className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-primary">WBS 工項說明</div>
+	                                                                            <div className="whitespace-pre-wrap text-xs leading-relaxed text-muted-foreground">{item.description}</div>
+	                                                                        </div>
+	                                                                    )}
                                                                     <div className="mt-1.5 flex items-center gap-2 w-48">
                                                                         <div className="h-1.5 w-full bg-muted rounded-full overflow-hidden">
                                                                             <div className="h-full bg-primary transition-all" style={{ width: `${item.completionPercentage || 0}%`, backgroundColor: item.colorCode || 'hsl(var(--primary))' }} />
@@ -1690,15 +1691,15 @@ export function WbsManagementPage() {
                                                                         className="rounded border border-transparent bg-muted px-2 py-2 outline-none focus:border-primary focus:bg-background"
                                                                     />
                                                                 </div>
-                                                                <div className="flex flex-col gap-1 text-xs text-muted-foreground md:col-span-2">
-                                                                    <label>工作說明</label>
-                                                                    <input
-                                                                        type="text"
-                                                                        placeholder="選填"
-                                                                        value={item.description || ""}
-                                                                        onChange={(e) => handleUpdateDraftItem(idx, "description", e.target.value)}
-                                                                        className="rounded border border-transparent bg-muted px-2 py-2 outline-none focus:border-primary focus:bg-background"
-                                                                    />
+	                                                                <div className="flex flex-col gap-1 text-xs text-muted-foreground md:col-span-2">
+	                                                                    <label>WBS 工項說明</label>
+	                                                                    <textarea
+	                                                                        rows={2}
+	                                                                        placeholder="說明工作範圍、執行方式與預期產出（選填）"
+	                                                                        value={item.description || ""}
+	                                                                        onChange={(e) => handleUpdateDraftItem(idx, "description", e.target.value)}
+	                                                                        className="resize-y rounded border border-transparent bg-muted px-2 py-2 leading-relaxed outline-none focus:border-primary focus:bg-background"
+	                                                                    />
                                                                 </div>
                                                                 <div className="flex flex-col gap-1 text-xs text-muted-foreground">
                                                                     <label>指派給 (人員)</label>

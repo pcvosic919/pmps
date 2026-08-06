@@ -14,26 +14,35 @@ const userListInput = z.object({
     limit: z.number().min(1).max(500).nullish(),
     cursor: z.string().nullish(),
     search: z.string().trim().optional(),
+    departments: z.array(z.string().trim().min(1)).max(100).optional(),
     sortBy: z.enum(userSortFields).optional(),
     sortOrder: z.enum(["asc", "desc"]).optional()
 }).optional();
 
 const escapeRegExp = (value: string) => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
-const buildSearchQuery = (search?: string) => {
+export const buildUserListQuery = (search?: string, departments: string[] = []) => {
+    const clauses: Record<string, unknown>[] = [];
     const keyword = search?.trim();
-    if (!keyword) {
-        return {};
+    if (keyword) {
+        const pattern = new RegExp(escapeRegExp(keyword), "i");
+        clauses.push({
+            $or: [
+                { name: pattern },
+                { email: pattern },
+                { department: pattern }
+            ]
+        });
     }
 
-    const pattern = new RegExp(escapeRegExp(keyword), "i");
-    return {
-        $or: [
-            { name: pattern },
-            { email: pattern },
-            { department: pattern }
-        ]
-    };
+    const normalizedDepartments = [...new Set(departments.map((department) => department.trim()).filter(Boolean))];
+    if (normalizedDepartments.length > 0) {
+        clauses.push({ department: { $in: normalizedDepartments } });
+    }
+
+    if (clauses.length === 0) return {};
+    if (clauses.length === 1) return clauses[0];
+    return { $and: clauses };
 };
 
 export const usersRouter = router({
@@ -42,12 +51,13 @@ export const usersRouter = router({
         .query(async ({ input }) => {
             const limit = input?.limit ?? 50;
             const search = input?.search;
+            const departments = input?.departments || [];
             const sortBy = input?.sortBy || "name";
             const sortOrder = input?.sortOrder || "asc";
             const direction = sortOrder === "desc" ? -1 : 1;
             const cursor = input?.cursor ? decodeCursor(input.cursor) : null;
 
-            let query: Record<string, unknown> = buildSearchQuery(search);
+            let query: Record<string, unknown> = buildUserListQuery(search, departments);
 
             if (cursor) {
                 const cursorValue = cursor.value;
@@ -227,7 +237,7 @@ export const usersRouter = router({
     getDepartments: protectedProcedure
         .query(async () => {
             const departments = await UserModel.distinct("department", { department: { $nin: [null, ""] } });
-            return departments as string[];
+            return (departments as string[]).sort((left, right) => left.localeCompare(right, "zh-Hant"));
         }),
 
     deleteManual: roleProcedure(["admin"])
