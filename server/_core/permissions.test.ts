@@ -7,7 +7,6 @@ const makeUser = (overrides: Partial<UserSession> = {}): UserSession => ({
     name: "PM",
     managedDepartments: [],
     role: "pm",
-    roles: [],
     permissionOverrides: { allow: [], deny: [] },
     isActive: true,
     ...overrides

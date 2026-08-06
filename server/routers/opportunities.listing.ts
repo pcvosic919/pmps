@@ -11,7 +11,6 @@ export type OpportunitySortOrder = "asc" | "desc";
 type OpportunityListUser = {
     id: string;
     role: string;
-    roles: string[];
     department?: string;
 };
 

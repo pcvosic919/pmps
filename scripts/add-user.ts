@@ -22,9 +22,9 @@ async function run() {
             console.log(`User ${email} already exists. Updating password and role to ${role}...`);
             existing.password = hashedPassword;
             existing.role = role;
-            existing.roles = [role as any];
             existing.name = "System Admin";
             await existing.save();
+            await UserModel.updateOne({ _id: existing._id }, { $unset: { roles: 1 } });
             console.log("User updated successfully.");
         } else {
             console.log(`Creating new user ${email} with role ${role}...`);
@@ -33,7 +33,6 @@ async function run() {
                 name: "System Admin",
                 password: hashedPassword,
                 role,
-                roles: [role],
                 provider: "manual",
                 isActive: true
             });

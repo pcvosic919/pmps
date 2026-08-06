@@ -9,7 +9,6 @@ export interface IUser extends Document {
     managedDepartments: string[];
     title?: string;
     role: Role;
-    roles: Role[];
     permissionOverrides: PermissionOverrides;
     provider: AuthProvider;
     providerId?: string;
@@ -30,7 +29,6 @@ const UserSchema = new Schema<IUser>({
     managedDepartments: { type: [String], default: [] },
     title: { type: String },
     role: { type: String, enum: roles, default: "user", required: true },
-    roles: { type: [String], enum: roles, default: [] },
     permissionOverrides: {
         allow: { type: [String], enum: featurePermissions, default: [] },
         deny: { type: [String], enum: featurePermissions, default: [] }

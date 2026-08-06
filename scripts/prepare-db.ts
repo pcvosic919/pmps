@@ -124,6 +124,14 @@ async function ensureCollection(model: mongoose.Model<unknown>, options = { crea
     console.log(`+ Created collection: ${collectionName}`);
 }
 
+async function removeLegacySecondaryRoles() {
+    const result = await UserModel.collection.updateMany(
+        { roles: { $exists: true } },
+        { $unset: { roles: "" } }
+    );
+    console.log(`Removed legacy secondary roles from ${result.modifiedCount} user account(s).`);
+}
+
 async function prepare() {
     console.log("Preparing MongoDB database at", getMongoUri());
     const databaseName = getMongoDatabaseName();
@@ -139,6 +147,8 @@ async function prepare() {
     for (const model of appModels) {
         await ensureCollection(model, { createMissingCollections });
     }
+
+    await removeLegacySecondaryRoles();
 
     if (shouldSyncIndexes()) {
         for (const model of appModels) {

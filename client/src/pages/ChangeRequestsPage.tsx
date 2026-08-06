@@ -21,19 +21,23 @@ const crSchema = z.object({
 
 
 export function ChangeRequestsPage() {
+    const { hasRole } = useCurrentUser();
+    const canLoadProjectList = hasRole("admin") || hasRole("manager") || hasRole("pm") || hasRole("tech") || hasRole("presales");
     const { data, isLoading, refetch } = trpc.projects.crList.useQuery();
-    const { data: srList } = trpc.projects.srList.useQuery();
+    const { data: srList } = trpc.projects.srList.useQuery(undefined, { enabled: canLoadProjectList });
     const { data: allUsers } = trpc.users.list.useQuery({ limit: 500 });
     const crs = (data || []) as any[];
-    const { hasRole } = useCurrentUser();
 
-    const canReview = (crStatus: string) => {
-        if (hasRole("admin")) return true;
-        if (crStatus === "pending_business" && hasRole("business")) return true;
-        if (crStatus === "pending_manager" && hasRole("manager")) return true;
-        
+    const canReview = (cr: any) => {
+        if (!["pending_business", "pending_manager"].includes(cr.status)) return false;
+        const sr = srList?.find((item: any) => item.id === cr.srId);
+        if (hasRole("admin") && sr?.permissions?.canReview) return true;
+        if ((hasRole("pm") || hasRole("presales")) && sr?.permissions?.canReview) return true;
+        if (cr.status === "pending_business" && hasRole("business")) return true;
+        if (cr.status === "pending_manager" && hasRole("manager") && sr?.permissions?.canReview) return true;
         return false;
     };
+    const creatableProjects = (srList || []).filter((sr: any) => sr.permissions?.canEditWbs === true);
 
     const [isCreating, setIsCreating] = useState(false);
 
@@ -122,7 +126,7 @@ export function ChangeRequestsPage() {
                     <h2 className="text-3xl font-bold tracking-tight bg-clip-text text-transparent bg-gradient-to-r from-primary to-primary/60">變更請求 (CR) 管理</h2>
                     <p className="text-muted-foreground mt-1">追蹤專案範圍調整與額外工時審核狀況</p>
                 </div>
-                {(hasRole("admin") || hasRole("manager") || hasRole("pm") || hasRole("tech") || hasRole("presales")) && (
+                {creatableProjects.length > 0 && (
                     <button 
                         onClick={() => setIsCreating(true)}
                         className="bg-primary text-primary-foreground hover:bg-primary/90 px-5 py-2.5 rounded-lg inline-flex items-center text-sm font-medium transition-all shadow-md hover:shadow-lg">
@@ -249,7 +253,7 @@ export function ChangeRequestsPage() {
                                                     )}
                                                 </td>
                                                 <td className="px-6 py-4 text-center">
-                                                    {canReview(cr.status) && (
+                                                    {canReview(cr) && (
                                                         <div className="flex items-center justify-center space-x-2">
                                                             <button
                                                                 onClick={() => handleReview(cr.srId, cr.id, "approved")}
@@ -300,7 +304,7 @@ export function ChangeRequestsPage() {
                                                 </SelectTrigger>
                                             </FormControl>
                                             <SelectContent>
-                                                {srList?.map((sr: any) => (
+                                                {creatableProjects.map((sr: any) => (
                                                     <SelectItem key={sr.id} value={sr.id}>
                                                         {sr.title} (#{sr.id.slice(-6)})
                                                     </SelectItem>

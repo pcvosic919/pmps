@@ -20,11 +20,11 @@ type SRStatus = typeof SR_STATUSES[number]["value"];
 type ProjectViewMode = "list" | "grid";
 
 export function ProjectManagementPage() {
-    const { user, hasRole } = useCurrentUser();
-    const isManager = !!user && (
-        user.role === "admin" || user.role === "manager" ||
-        user.roles.includes("admin") || user.roles.includes("manager")
-    );
+    const { user, hasRole, hasPermission } = useCurrentUser();
+    const canReviewProjects = hasPermission("wbs.review", ["admin", "manager", "pm", "presales"]);
+    const canSeeOperationsDashboard = hasRole("admin") || hasRole("manager") || hasRole("pm");
+    const canOperateProject = (sr: any) => sr.permissions?.canOperate === true;
+    const canArchiveProject = (sr: any) => sr.permissions?.canArchive === true;
     const canDelete = user?.email?.trim().toLowerCase() === "demo@demo.com";
 	    const [search, setSearch] = useState("");
     const [filterStatus, setFilterStatus] = useState<string>("all");
@@ -43,8 +43,8 @@ export function ProjectManagementPage() {
 
     const { data: srs, isLoading, refetch } = trpc.projects.srList.useQuery(queryInput);
     const { data: allSrs } = trpc.projects.srList.useQuery({ limit: 200 });
-    const { data: openCasesDashboard } = trpc.analytics.getOpenCasesDashboard.useQuery();
-    const { data: pendingWbs } = trpc.projects.getWbsPendingReview.useQuery(undefined, { enabled: isManager });
+    const { data: openCasesDashboard } = trpc.analytics.getOpenCasesDashboard.useQuery(undefined, { enabled: canSeeOperationsDashboard });
+    const { data: pendingWbs } = trpc.projects.getWbsPendingReview.useQuery(undefined, { enabled: canReviewProjects });
     const updateStatus = trpc.projects.updateSRStatus.useMutation({ onSuccess: () => refetch() });
     const updateFinalPrice = trpc.projects.updateFinalPrice.useMutation({ onSuccess: () => refetch() });
     const deleteSr = trpc.projects.delete.useMutation({ 
@@ -95,9 +95,9 @@ export function ProjectManagementPage() {
                     <h2 className="text-3xl font-bold tracking-tight bg-clip-text text-transparent bg-gradient-to-r from-primary to-primary/60">
                         專案管理
                     </h2>
-                    <p className="text-muted-foreground mt-1">集中查閱所有專案，並由 Admin / Manager / PM 持續追蹤進度與審核狀態</p>
+                    <p className="text-muted-foreground mt-1">依角色與專案關係集中查閱專案、追蹤進度與審核狀態</p>
                 </div>
-                {(hasRole("admin") || isManager || hasRole("pm")) && (
+                {hasPermission("project.create_sr", ["admin", "manager", "pm", "presales"]) && (
                     <Link href="/service-requests">
                         <a className="bg-primary text-primary-foreground hover:bg-primary/90 px-5 py-2.5 rounded-lg inline-flex items-center text-sm font-medium transition-all shadow-md hover:shadow-lg">
                             <Plus className="w-4 h-4 mr-2" />
@@ -137,7 +137,7 @@ export function ProjectManagementPage() {
                 </div>
             )}
 
-            {isManager && (
+            {canReviewProjects && (
                 <div className="bg-card border border-border/50 rounded-xl p-4 flex items-center justify-between gap-4">
                     <div>
                         <p className="text-sm font-medium text-foreground">待審核 WBS 版本</p>
@@ -320,7 +320,7 @@ export function ProjectManagementPage() {
 	                                </div>
 
                                 <div className="flex items-center gap-2 flex-shrink-0">
-                                    {(hasRole("admin") || hasRole("manager") || hasRole("pm")) && (
+                                    {canArchiveProject(sr) && (
                                         showArchived ? (
                                             <button
                                                 type="button"
@@ -347,7 +347,7 @@ export function ProjectManagementPage() {
                                             </button>
                                         )
                                     )}
-                                    {(hasRole("admin") || user?.id === sr.createdById) && showArchived && (
+                                    {canDelete && showArchived && (
                                         <button
                                             type="button"
                                             onClick={event => {
@@ -383,7 +383,7 @@ export function ProjectManagementPage() {
                                                 </button>
                                             </div>
                                         ) : (
-                                            (isManager || hasRole("admin") || user?.id === sr.pmId) && (
+                                            canOperateProject(sr) && (
                                                 <button
                                                     onClick={() => setChangingStatus(sr.id)}
                                                     className="px-3 py-1.5 text-xs border border-border rounded-lg hover:bg-muted transition-colors text-muted-foreground whitespace-nowrap"
@@ -410,7 +410,7 @@ export function ProjectManagementPage() {
                                             刪除專案
                                         </button>
 	                                    )}
-                                        {(isManager || hasRole("admin") || user?.id === sr.pmId) && !hasRole("tech") && (
+                                        {canOperateProject(sr) && !hasRole("tech") && (
                                             <button
                                                 onClick={(event) => {
                                                     event.stopPropagation();

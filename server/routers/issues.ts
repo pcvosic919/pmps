@@ -5,7 +5,24 @@ import { ServiceRequestModel } from "../models/ServiceRequest";
 import mongoose from "mongoose";
 import { issueStatuses, issuePriorities } from "../../shared/types";
 import { TRPCError } from "@trpc/server";
-import { canDeleteRecord } from "../_core/authorization";
+import { assertAuthorized, assertFound, canDeleteRecord } from "../_core/authorization";
+import { canEditProjectWbs, canOperateProject, canViewProject } from "../_core/projectAuthorization";
+import { OpportunityModel } from "../models/Opportunity";
+
+const getProjectAccessContext = async (srId: string) => {
+    const serviceRequest: any = assertFound(
+        await ServiceRequestModel.findById(srId)
+            .select("createdById pmId members wbsVersions.items.assigneeId changeRequests opportunityId")
+            .lean(),
+        "找不到該專案"
+    );
+    const opportunity = serviceRequest.opportunityId
+        ? await OpportunityModel.findById(serviceRequest.opportunityId)
+            .select("ownerId members presalesAssignments")
+            .lean()
+        : null;
+    return { serviceRequest, opportunity };
+};
 
 const syncIssueAssigneeToWbs = async (issue: any) => {
     if (!issue?.assigneeId) return;
@@ -44,7 +61,9 @@ const syncIssueAssigneeToWbs = async (issue: any) => {
 export const issuesRouter = router({
     listBySr: protectedProcedure
         .input(z.object({ srId: z.string() }))
-        .query(async ({ input }) => {
+        .query(async ({ input, ctx }) => {
+            const { serviceRequest, opportunity } = await getProjectAccessContext(input.srId);
+            assertAuthorized(await canViewProject(ctx.user, serviceRequest, opportunity), "您沒有權限查看此專案議題");
             return await IssueModel.find({ srId: input.srId })
                 .populate("assigneeId", "name email role")
                 .populate("reporterId", "name email role")
@@ -61,6 +80,8 @@ export const issuesRouter = router({
             assigneeId: z.string().optional().nullable()
         }))
         .mutation(async ({ input, ctx }) => {
+            const { serviceRequest, opportunity } = await getProjectAccessContext(input.srId);
+            assertAuthorized(await canEditProjectWbs(ctx.user, serviceRequest, opportunity), "您沒有權限建立此專案議題");
             const issue = new IssueModel({
                 ...input,
                 reporterId: ctx.user.id
@@ -79,8 +100,11 @@ export const issuesRouter = router({
             priority: z.enum(issuePriorities).optional(),
             assigneeId: z.string().optional().nullable()
         }))
-        .mutation(async ({ input }) => {
+        .mutation(async ({ input, ctx }) => {
             const { id, ...updates } = input;
+            const existingIssue: any = assertFound(await IssueModel.findById(id).lean(), "找不到該專案議題");
+            const { serviceRequest, opportunity } = await getProjectAccessContext(existingIssue.srId.toString());
+            assertAuthorized(await canEditProjectWbs(ctx.user, serviceRequest, opportunity), "您沒有權限更新此專案議題");
             const updatePayload: any = { ...updates };
             if (updates.assigneeId === null) {
                 updatePayload.$unset = { assigneeId: 1 };
@@ -100,8 +124,10 @@ export const issuesRouter = router({
             if (!canDeleteRecord(ctx.user)) {
                 throw new TRPCError({ code: "FORBIDDEN", message: "只有 Demo@demo.com 可以刪除資料" });
             }
-            const issue = await IssueModel.findByIdAndDelete(input.id);
-            if (!issue) throw new TRPCError({ code: "NOT_FOUND" });
+            const issue: any = assertFound(await IssueModel.findById(input.id).lean(), "找不到該專案議題");
+            const { serviceRequest, opportunity } = await getProjectAccessContext(issue.srId.toString());
+            assertAuthorized(await canOperateProject(ctx.user, serviceRequest, opportunity), "您沒有權限刪除此專案議題");
+            await IssueModel.deleteOne({ _id: input.id });
             return { success: true };
         })
 });

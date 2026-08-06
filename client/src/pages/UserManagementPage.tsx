@@ -2,7 +2,7 @@ import { useState, useEffect, useRef } from "react";
 import { trpc } from "../lib/trpc";
 import { Users as UsersIcon, Edit, UserX, UserPlus, Search, Loader2, RefreshCw, Settings2, Trash2 } from "lucide-react";
 import { z } from "zod";
-import { featurePermissions, roles, type FeaturePermission, type Role } from "../../../shared/types";
+import { featurePermissions, roles, type FeaturePermission } from "../../../shared/types";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -20,17 +20,15 @@ const userSchema = z.object({
     password: z.string().optional(),
     department: z.string().optional(),
     role: z.enum(roles),
-    roles: z.array(z.enum(roles)).optional(),
     isActive: z.boolean().default(true)
 });
 
-const editableRoles = ["admin", "manager", "pm", "presales", "tech", "user"] as const;
+const editableRoles = ["admin", "manager", "pm", "presales", "tech", "business", "user"] as const;
 
 const editUserSchema = z.object({
     department: z.string().optional(),
     managedDepartments: z.array(z.string()).optional(),
     role: z.enum(editableRoles),
-    roles: z.array(z.enum(roles)).optional(),
     permissionOverrides: z.object({
         allow: z.array(z.enum(featurePermissions)),
         deny: z.array(z.enum(featurePermissions))
@@ -129,7 +127,7 @@ export function UserManagementPage() {
 
     const createForm = useForm<any>({
         resolver: zodResolver(userSchema) as any,
-        defaultValues: { name: "", email: "", password: "", department: "", role: "user", isActive: true, roles: [] }
+        defaultValues: { name: "", email: "", password: "", department: "", role: "user", isActive: true }
     });
 
     const editForm = useForm<any>({
@@ -139,13 +137,12 @@ export function UserManagementPage() {
             managedDepartments: [],
             role: "user",
             isActive: true,
-            roles: [],
             permissionOverrides: { allow: [], deny: [] }
         }
     });
 
     const batchEditForm = useForm<any>({
-        defaultValues: { department: "", role: "user", roles: [] }
+        defaultValues: { department: "", role: "user" }
     });
 
     useEffect(() => {
@@ -155,8 +152,6 @@ export function UserManagementPage() {
                 managedDepartments: editingUser.managedDepartments || [],
                 role: editingUser.role,
                 isActive: editingUser.isActive,
-                roles: (editingUser.roles || []) as Role[]
-                ,
                 permissionOverrides: editingUser.permissionOverrides || { allow: [], deny: [] }
             });
         }
@@ -176,8 +171,6 @@ export function UserManagementPage() {
             managedDepartments: values.managedDepartments || [],
             role: values.role,
             isActive: values.isActive,
-            roles: (values.roles || []) as Role[]
-            ,
             permissionOverrides: values.permissionOverrides
         });
     };
@@ -189,8 +182,7 @@ export function UserManagementPage() {
             password: values.password || undefined,
             department: values.department,
             role: values.role,
-            isActive: values.isActive,
-            roles: (values.roles || []) as Role[]
+            isActive: values.isActive
         });
     };
 
@@ -214,15 +206,6 @@ export function UserManagementPage() {
         }
     };
 
-    const handleRoleToggle = (roleName: Role, currentRoles: Role[], onChange: (roles: Role[]) => void) => {
-        const hasRole = currentRoles.includes(roleName);
-        if (hasRole) {
-            onChange(currentRoles.filter(r => r !== roleName));
-        } else {
-            onChange([...currentRoles, roleName]);
-        }
-    };
-
     const handleSelectAll = (checked: boolean) => {
         if (checked) {
             setSelectedUserIds(filteredUsers.map(u => u.id));
@@ -243,14 +226,11 @@ export function UserManagementPage() {
         updateBatchRoles.mutate({
             userIds: selectedUserIds,
             department: values.department || undefined,
-            role: values.role,
-            roles: (values.roles || []) as Role[]
+            role: values.role
         });
     };
 
     if (isLoading) return <div className="p-8 text-center text-muted-foreground">載入中...</div>;
-
-    const availableSecondaryRoles: Role[] = ["pm", "presales", "tech", "business"];
 
     return (
         <div className="space-y-6">
@@ -361,7 +341,6 @@ export function UserManagementPage() {
                                 <th className="px-6 py-3 font-medium">管理部門</th>
                                 <th className="px-6 py-3 font-medium">登入來源</th>
                                 <th className="px-6 py-3 font-medium">主角色 (Role)</th>
-                                <th className="px-6 py-3 font-medium">副角色 (Roles)</th>
                                 <th className="px-6 py-3 font-medium text-center">狀態</th>
                                 <th className="px-6 py-3 font-medium text-center">操作</th>
                             </tr>
@@ -369,7 +348,7 @@ export function UserManagementPage() {
                         <tbody className="divide-y divide-border">
                             {filteredUsers?.length === 0 ? (
                                 <tr>
-                                    <td colSpan={10} className="px-6 py-8 text-center text-muted-foreground">找不到符合的人員</td>
+                                    <td colSpan={9} className="px-6 py-8 text-center text-muted-foreground">找不到符合的人員</td>
                                 </tr>
                             ) : (
                                 filteredUsers?.map((user) => (
@@ -396,9 +375,6 @@ export function UserManagementPage() {
                                             </span>
                                         </td>
                                         <td className="px-6 py-4 font-semibold uppercase">{user.role}</td>
-                                        <td className="px-6 py-4 uppercase text-xs text-muted-foreground">
-                                            {user.roles && user.roles.length > 0 ? user.roles.join(', ') : "-"}
-                                        </td>
                                         <td className="px-6 py-4 text-center">
                                             <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold ${user.isActive ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'}`}>
                                                 {user.isActive ? "啟用" : "停用"}
@@ -488,29 +464,6 @@ export function UserManagementPage() {
                                     </FormItem>
                                 )}
                             />
-                            <FormField
-                                control={batchEditForm.control}
-                                name="roles"
-                                render={({ field }: any) => (
-                                    <FormItem>
-                                        <FormLabel>副角色 (Secondary Roles)</FormLabel>
-                                        <div className="flex flex-wrap gap-2">
-                                            {availableSecondaryRoles.map(r => (
-                                                <label key={r} className="flex items-center space-x-2 bg-muted/50 px-3 py-1.5 rounded-md border">
-                                                    <input
-                                                        type="checkbox"
-                                                        checked={(field.value ?? []).includes(r)}
-                                                        onChange={() => handleRoleToggle(r, field.value ?? [], field.onChange)}
-                                                        className="rounded border-input text-primary focus:ring-primary"
-                                                    />
-                                                    <span className="text-sm font-medium uppercase">{r}</span>
-                                                </label>
-                                            ))}
-                                        </div>
-                                        <FormMessage />
-                                    </FormItem>
-                                )}
-                            />
                             <div className="mt-6 flex justify-end space-x-3">
                                 <Button type="button" variant="outline" onClick={() => setIsBatchEditing(false)}>
                                     取消
@@ -593,29 +546,6 @@ export function UserManagementPage() {
                                                 />
                                             </FormControl>
                                             <p className="text-xs text-muted-foreground">僅 manager 角色需要設定。設定後該主管可看到指定部門的所有案件與報表</p>
-                                            <FormMessage />
-                                        </FormItem>
-                                    )}
-                                />
-                                <FormField
-                                    control={editForm.control}
-                                    name="roles"
-                                    render={({ field }: any) => (
-                                        <FormItem>
-                                            <FormLabel>副角色 (Secondary Roles)</FormLabel>
-                                            <div className="flex flex-wrap gap-2">
-                                                {availableSecondaryRoles.map(r => (
-                                                    <label key={r} className="flex items-center space-x-2 bg-muted/50 px-3 py-1.5 rounded-md border">
-                                                        <input
-                                                            type="checkbox"
-                                                            checked={field.value.includes(r)}
-                                                            onChange={() => handleRoleToggle(r, field.value, field.onChange)}
-                                                            className="rounded border-input text-primary focus:ring-primary"
-                                                        />
-                                                        <span className="text-sm font-medium uppercase">{r}</span>
-                                                    </label>
-                                                ))}
-                                            </div>
                                             <FormMessage />
                                         </FormItem>
                                     )}
@@ -787,29 +717,6 @@ export function UserManagementPage() {
                                                 <SelectItem value="business">BUSINESS</SelectItem>
                                             </SelectContent>
                                         </Select>
-                                        <FormMessage />
-                                    </FormItem>
-                                )}
-                            />
-                            <FormField
-                                control={createForm.control}
-                                name="roles"
-                                render={({ field }) => (
-                                    <FormItem>
-                                        <FormLabel>副角色 (Secondary Roles)</FormLabel>
-                                        <div className="flex flex-wrap gap-2">
-                                            {availableSecondaryRoles.map(r => (
-                                                <label key={r} className="flex items-center space-x-2 bg-muted/50 px-3 py-1.5 rounded-md border">
-                                                    <input
-                                                        type="checkbox"
-                                                        checked={(field.value ?? []).includes(r)}
-                                                        onChange={() => handleRoleToggle(r, field.value ?? [], field.onChange)}
-                                                        className="rounded border-input text-primary focus:ring-primary"
-                                                    />
-                                                    <span className="text-sm font-medium uppercase">{r}</span>
-                                                </label>
-                                            ))}
-                                        </div>
                                         <FormMessage />
                                     </FormItem>
                                 )}

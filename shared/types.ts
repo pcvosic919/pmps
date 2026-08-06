@@ -138,6 +138,8 @@ export interface AuditLog {
     userId: string;
     timestamp: Date;
     reason?: string;
+    actorRole?: string;
+    result?: string;
 }
 
 export interface UserSkill {
@@ -295,7 +297,6 @@ export const profileUpdateSchema = z.object({
     managedDepartments: z.array(z.string()).optional(),
     title: z.string().optional(),
     role: z.enum(roles),
-    roles: z.array(z.enum(roles)),
     permissionOverrides: z.object({
         allow: z.array(z.enum(featurePermissions)),
         deny: z.array(z.enum(featurePermissions)),

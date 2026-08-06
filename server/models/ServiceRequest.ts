@@ -14,7 +14,7 @@ export interface IWbsVersion extends Omit<WbsVersionInput, "submittedBy" | "revi
     reviewedBy?: mongoose.Types.ObjectId;
     items: IWbsItem[];
     departmentApprovals?: Array<Omit<DepartmentApproval, "reviewedBy"> & { reviewedBy?: mongoose.Types.ObjectId }>;
-    auditLogs?: { action: string; userId: mongoose.Types.ObjectId; timestamp: Date; reason?: string }[];
+    auditLogs?: { action: string; userId: mongoose.Types.ObjectId; timestamp: Date; reason?: string; actorRole?: string; result?: string }[];
 }
 
 export interface IChangeRequest extends Omit<ChangeRequestInput, "wbsItemIds" | "requesterId" | "auditLogs"> {
@@ -22,7 +22,7 @@ export interface IChangeRequest extends Omit<ChangeRequestInput, "wbsItemIds" | 
     wbsItemIds?: mongoose.Types.ObjectId[];
     requesterId: mongoose.Types.ObjectId;
     status: ChangeRequestStatus;
-    auditLogs?: { action: string; userId: mongoose.Types.ObjectId; timestamp: Date; reason?: string }[];
+    auditLogs?: { action: string; userId: mongoose.Types.ObjectId; timestamp: Date; reason?: string; actorRole?: string; result?: string }[];
 }
 
 export interface IServiceRequestMember {
@@ -145,7 +145,9 @@ const AuditLogSchema = new Schema({
     action: { type: String, required: true },
     userId: { type: Schema.Types.ObjectId, ref: "User", required: true },
     timestamp: { type: Date, default: Date.now },
-    reason: { type: String }
+    reason: { type: String },
+    actorRole: { type: String },
+    result: { type: String }
 });
 
 const DepartmentApprovalSchema = new Schema({
@@ -311,6 +313,12 @@ ServiceRequestSchema.index(
     }
 );
 ServiceRequestSchema.index({ "members.userId": 1, createdAt: -1 });
+ServiceRequestSchema.index({ createdByDepartment: 1, createdAt: -1 });
+ServiceRequestSchema.index({ "wbsVersions.items.assigneeId": 1, createdAt: -1 });
+ServiceRequestSchema.index({ "wbsVersions.items.assigneeIds": 1, createdAt: -1 });
+ServiceRequestSchema.index({ "externalAssignments.userId": 1, createdAt: -1 });
+ServiceRequestSchema.index({ "externalAssignments.department": 1, createdAt: -1 });
+ServiceRequestSchema.index({ "externalAssignments.teamDepartment": 1, createdAt: -1 });
 ServiceRequestSchema.index({ externalProjectCode: 1 }, { sparse: true });
 ServiceRequestSchema.index({ externalServiceType: 1, status: 1 });
 ServiceRequestSchema.index({ recognitionMonth: 1 });

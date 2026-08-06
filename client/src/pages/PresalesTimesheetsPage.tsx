@@ -8,7 +8,7 @@ import { Clock, Plus, Trash2, AlertCircle } from "lucide-react";
 export function PresalesTimesheetsPage() {
     const utils = trpc.useContext();
     const { user } = useCurrentUser();
-    const canViewAllTimesheets = !!user && (user.role === "manager" || user.role === "pm" || user.roles.includes("manager") || user.roles.includes("pm"));
+    const canViewAllTimesheets = !!user && (user.role === "manager" || user.role === "pm");
     const canDelete = user?.email?.trim().toLowerCase() === "demo@demo.com";
     const [isSubmitting, setIsSubmitting] = useState(false);
     const [viewMode, setViewMode] = useState<"list" | "week" | "month">("list");

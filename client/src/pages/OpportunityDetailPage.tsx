@@ -33,7 +33,7 @@ export function OpportunityDetailPage() {
     const id = match ? (params.id as string) : "";
 
     const { user } = useCurrentUser();
-    const hasRole = (role: string) => user?.role === role || (user?.roles || []).includes(role as any);
+    const hasRole = (role: string) => user?.role === role;
     const canDelete = user?.email?.trim().toLowerCase() === "demo@demo.com";
 
     // ------ Modal states ------
@@ -825,8 +825,7 @@ export function OpportunityDetailPage() {
 	                                    onSelect={(selectedUser) => setAssignTechId(selectedUser.id)}
 	                                    onClear={() => setAssignTechId("")}
 	                                    filterUser={(pickerUser) => {
-	                                        const roles = [pickerUser.role, ...(pickerUser.roles || [])];
-	                                        return roles.some(role => ["presales", "tech", "pm"].includes(role || ""));
+	                                        return ["presales", "tech", "pm"].includes(pickerUser.role || "");
 	                                    }}
 	                                />
 	                            </div>

@@ -12,8 +12,8 @@ type GlobalSearchProps = {
 
 const routes = [
     { href: "/opportunities", icon: Building2, label: "商機管理 (Opportunities)", roles: ["admin", "manager", "business", "presales", "tech", "pm"], permission: "module.opportunities.view" as FeaturePermission },
-    { href: "/projects", icon: FolderKanban, label: "專案管理 (Projects)", roles: ["admin", "manager", "pm", "tech"], permission: "module.projects.view" as FeaturePermission },
-    { href: "/service-requests", icon: FileText, label: "服務請求管理 (SR/WBS)", roles: ["admin", "manager", "pm", "tech"] },
+    { href: "/projects", icon: FolderKanban, label: "專案管理 (Projects)", roles: ["admin", "manager", "pm", "tech", "presales"], permission: "module.projects.view" as FeaturePermission },
+    { href: "/service-requests", icon: FileText, label: "服務請求管理 (SR/WBS)", roles: ["admin", "manager", "pm", "tech", "presales"] },
     { href: "/resources", icon: Users, label: "服務資源與技能矩陣 (Resources)", roles: ["admin", "manager"] },
     { href: "/kpi", icon: Activity, label: "KPI 達成率儀表板", roles: ["admin", "manager"] },
     { href: "/reports", icon: FileText, label: "自訂報表 / Excel 匯出", roles: ["admin", "manager"] },

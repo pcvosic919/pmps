@@ -55,7 +55,7 @@ export function ProjectTimesheetsPage() {
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
         const selectedActivity = (assignments || []).find((assignment: any) => assignment.srId === selectedProjectId);
-        const canSubmitWithoutWbs = selectedActivity?.srType === "other_activity" || selectedActivity?.memberRole === "watcher" || selectedActivity?.memberRole === "participant";
+        const canSubmitWithoutWbs = selectedActivity?.srType === "other_activity" || selectedActivity?.memberRole === "participant";
         if (!selectedProjectId || (!selectedWbsId && !canSubmitWithoutWbs) || !hours || !workDate || !description) return;
 
         setIsSubmitting(true);
@@ -95,7 +95,7 @@ export function ProjectTimesheetsPage() {
     const selectedProject = assignedProjects.find((project) => project.id === selectedProjectId);
     const availableWbsItems = selectedProject?.items || [];
     const selectedWbsItem = availableWbsItems.find((item: any) => (item.wbsItemId || item.id) === selectedWbsId);
-    const canSubmitWithoutWbs = selectedProject?.srType === "other_activity" || selectedProject?.isObserver || selectedProject?.isParticipant;
+    const canSubmitWithoutWbs = selectedProject?.srType === "other_activity" || selectedProject?.isParticipant;
     const scheduledDayAssignments = useMemo(() => {
         if (!assignments || !workDate) return [];
         const selectedDay = new Date(workDate).setHours(0, 0, 0, 0);
@@ -408,6 +408,7 @@ export function ProjectTimesheetsPage() {
                                                     <div className="flex items-center gap-2 mb-1">
                                                         <span className="font-semibold text-primary">{t.srTitle}</span>
                                                         <span className="text-xs bg-muted px-2 py-0.5 rounded text-muted-foreground">{t.wbsItemTitle}</span>
+                                                        {t.techName && <span className="text-xs text-muted-foreground">{t.techName}{t.techDepartment ? ` / ${t.techDepartment}` : ""}</span>}
                                                     </div>
                                                     <p className="text-sm">{t.description}</p>
                                                     <div className="flex items-center gap-4 mt-2 text-xs text-muted-foreground">
@@ -446,6 +447,7 @@ export function ProjectTimesheetsPage() {
                                                                 <div className="flex items-center gap-2 mb-0.5">
                                                                     <span className="font-semibold">{t.srTitle}</span>
 	                                                                    <span className="text-xs bg-muted px-1.5 py-0.5 rounded text-muted-foreground">{t.type === "other_activity" ? "其他活動" : t.wbsItemTitle}</span>
+                                                                    {t.techName && <span className="text-xs text-muted-foreground">{t.techName}</span>}
                                                                 </div>
                                                                 <p className="text-muted-foreground text-xs">{t.description}</p>
                                                             </div>

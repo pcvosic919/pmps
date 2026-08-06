@@ -64,11 +64,10 @@ async function findOrCreateImportedUser(handlerName: string, department: string,
 
     const role = roleFromAssignment(roleName);
     if (existing) {
-        const roles = new Set([...(existing.roles || []), role]);
         existing.department = existing.department || department || parsed.prefix;
         existing.role = existing.role === "user" ? role : existing.role;
-        existing.roles = Array.from(roles);
         await existing.save();
+        await UserModel.updateOne({ _id: existing._id }, { $unset: { roles: 1 } });
         return existing;
     }
 
@@ -77,7 +76,6 @@ async function findOrCreateImportedUser(handlerName: string, department: string,
         name,
         department: department || parsed.prefix,
         role,
-        roles: [role],
         provider: "manual",
         isActive: false
     });

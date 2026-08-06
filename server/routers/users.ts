@@ -68,7 +68,7 @@ export const usersRouter = router({
             }
 
             const items = await UserModel.find(query)
-                .select("name email department managedDepartments title role roles permissionOverrides isActive provider costRate createdAt")
+                .select("name email department managedDepartments title role permissionOverrides isActive provider costRate createdAt lastLoginAt")
                 .sort({ [sortBy]: direction })
                 .limit(limit + 1)
                 .lean();
@@ -86,7 +86,6 @@ export const usersRouter = router({
                     managedDepartments: (u as any).managedDepartments || [],
                     title: u.title,
                     role: u.role,
-                    roles: u.roles,
                     permissionOverrides: (u as any).permissionOverrides || { allow: [], deny: [] },
                     isActive: u.isActive,
                     provider: u.provider,
@@ -104,9 +103,9 @@ export const usersRouter = router({
     pmList: protectedProcedure.query(async () => {
         const users = await UserModel.find({
             isActive: { $ne: false },
-            $or: [{ role: "pm" }, { roles: "pm" }]
+            role: "pm"
         })
-            .select("name email department title role roles isActive provider")
+            .select("name email department title role isActive provider")
             .lean();
         return users.map(u => ({ ...u, id: u._id.toString() }));
     }),
@@ -114,9 +113,9 @@ export const usersRouter = router({
     techList: protectedProcedure.query(async () => {
         const users = await UserModel.find({
             isActive: { $ne: false },
-            $or: [{ role: "tech" }, { roles: "tech" }]
+            role: "tech"
         })
-            .select("name email department title role roles isActive provider costRate")
+            .select("name email department title role isActive provider costRate")
             .lean();
         return users.map(u => ({ ...u, id: u._id.toString() }));
     }),
@@ -125,12 +124,9 @@ export const usersRouter = router({
         const resourceRoles = ["tech", "presales", "pm"];
         const users = await UserModel.find({
             isActive: { $ne: false },
-            $or: [
-                { role: { $in: resourceRoles } },
-                { roles: { $in: resourceRoles } }
-            ]
+            role: { $in: resourceRoles }
         })
-            .select("name email department title role roles isActive provider costRate skills")
+            .select("name email department title role isActive provider costRate skills")
             .sort({ department: 1, name: 1 })
             .lean();
         return users.map(u => ({ ...u, id: u._id.toString() }));
@@ -141,7 +137,7 @@ export const usersRouter = router({
             isActive: { $ne: false },
             lastLoginAt: { $exists: true, $ne: null }
         })
-            .select("name email department title role roles isActive provider lastLoginAt")
+            .select("name email department title role isActive provider lastLoginAt")
             .sort({ lastLoginAt: -1 })
             .limit(50)
             .lean();
@@ -152,12 +148,9 @@ export const usersRouter = router({
         const allowedRoles = ["presales", "tech", "pm"];
         const users = await UserModel.find({
             isActive: { $ne: false },
-            $or: [
-                { role: { $in: allowedRoles } },
-                { roles: { $in: allowedRoles } }
-            ]
+            role: { $in: allowedRoles }
         })
-            .select("name email department title role roles isActive provider")
+            .select("name email department title role isActive provider")
             .lean();
         return users.map(u => ({ ...u, id: u._id.toString() }));
     }),
@@ -169,7 +162,6 @@ export const usersRouter = router({
             password: z.string().optional(),
             department: z.string().optional(),
             role: z.enum(roles).default("user"),
-            roles: z.array(z.enum(roles)).default([]),
             isActive: z.boolean().default(true)
         }))
         .mutation(async ({ input }) => {
@@ -220,15 +212,14 @@ export const usersRouter = router({
         .input(z.object({
             userIds: z.array(z.string()).min(1),
             department: z.string().optional(),
-            role: z.enum(roles).optional(),
-            roles: z.array(z.enum(roles)).optional()
+            role: z.enum(roles).optional()
         }))
         .mutation(async ({ input }) => {
             const { userIds, ...data } = input;
             if (Object.keys(data).length === 0) return { success: true };
             await UserModel.updateMany(
                 { _id: { $in: userIds } },
-                { $set: data }
+                { $set: data, $unset: { roles: 1 } }
             );
             return { success: true };
         }),
@@ -256,12 +247,7 @@ export const usersRouter = router({
         }),
 
     getCostRates: roleProcedure(["admin", "manager", "pm"]).query(async () => {
-        const query = {
-            $or: [
-                { role: { $in: ["pm", "tech", "presales"] } },
-                { roles: { $in: ["pm", "tech", "presales"] } }
-            ]
-        };
+        const query = { role: { $in: ["pm", "tech", "presales"] } };
         const users = await UserModel.find(query, { _id: 1, name: 1, email: 1, department: 1, role: 1, costRate: 1, costRateHistory: 1 }).lean();
 
         return users.map(u => ({
@@ -344,7 +330,6 @@ export const usersRouter = router({
             managedDepartments: z.array(z.string()).optional(),
             title: z.string().optional(),
             role: z.enum(roles).optional(),
-            roles: z.array(z.enum(roles)).optional(),
             permissionOverrides: z.object({
                 allow: z.array(z.enum(featurePermissions)),
                 deny: z.array(z.enum(featurePermissions))
@@ -353,7 +338,7 @@ export const usersRouter = router({
         }))
         .mutation(async ({ input }) => {
             const { id, ...data } = input;
-            await UserModel.updateOne({ _id: id }, { $set: { ...data } });
+            await UserModel.updateOne({ _id: id }, { $set: { ...data }, $unset: { roles: 1 } });
             return { success: true };
         }),
 });

@@ -368,10 +368,7 @@ export const analyticsRouter = router({
         }).optional())
         .query(async ({ ctx, input }) => {
         let userQuery: any = {
-            $or: [
-                { role: { $in: ["pm", "tech", "presales"] } },
-                { roles: { $in: ["pm", "tech", "presales"] } }
-            ]
+            role: { $in: ["pm", "tech", "presales"] }
         };
 
         if (input?.departments?.length) {
@@ -939,8 +936,8 @@ export const analyticsRouter = router({
 
             // 取得所有部門與使用者
             const allUsers = await UserModel.find(
-                { $or: [{ role: { $in: ["pm", "tech", "presales", "manager"] } }, { roles: { $in: ["pm", "tech", "presales", "manager"] } }] },
-                { _id: 1, name: 1, department: 1, role: 1, roles: 1, kpiTarget: 1 }
+                { role: { $in: ["pm", "tech", "presales", "manager"] } },
+                { _id: 1, name: 1, department: 1, role: 1, kpiTarget: 1 }
             ).lean();
 
             // 取得年度系統設定（目標業績）

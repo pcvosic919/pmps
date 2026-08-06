@@ -52,7 +52,7 @@ export function LoginPage() {
     const loginMutation = trpc.auth.login.useMutation();
     const entraLoginMutation = trpc.auth.entraLogin.useMutation();
 
-    const handleLoginSuccess = (payload: { token: string; user?: { id: string; email: string; name: string; role: Role; roles: Role[]; permissionOverrides?: PermissionOverrides; isActive: boolean } | null }) => {
+    const handleLoginSuccess = (payload: { token: string; user?: { id: string; email: string; name: string; role: Role; permissionOverrides?: PermissionOverrides; isActive: boolean } | null }) => {
         setAuthSession(
             payload.token,
             payload.user ? {

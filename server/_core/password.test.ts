@@ -33,7 +33,6 @@ describe("token helpers", () => {
             sub: "user-1",
             email: "demo@example.com",
             role: "admin",
-            roles: ["admin"],
             name: "Demo Admin"
         });
         const streamToken = signNotificationStreamToken("user-1");

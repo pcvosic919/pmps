@@ -18,7 +18,6 @@ type AuthUser = {
     email: string;
     name: string;
     role: Role;
-    roles: Role[];
     permissionOverrides: PermissionOverrides;
     isActive: boolean;
 };
