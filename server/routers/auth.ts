@@ -18,7 +18,6 @@ const issueSession = (user: {
     email: string;
     name: string;
     role: (typeof roles)[number];
-    roles?: (typeof roles)[number][];
     permissionOverrides?: PermissionOverrides;
     isActive?: boolean;
 }) => {
@@ -27,7 +26,6 @@ const issueSession = (user: {
             sub: user._id.toString(),
             email: user.email,
             role: user.role,
-            roles: user.roles || [],
             name: user.name
         });
 
@@ -38,7 +36,6 @@ const issueSession = (user: {
                 name: user.name,
                 email: user.email,
                 role: user.role,
-                roles: user.roles || [],
                 permissionOverrides: user.permissionOverrides || { allow: [], deny: [] },
                 isActive: user.isActive ?? true
             }
@@ -82,7 +79,6 @@ export const authRouter = router({
         email: ctx.user.email,
         name: ctx.user.name,
         role: ctx.user.role,
-        roles: ctx.user.roles,
         permissionOverrides: ctx.user.permissionOverrides,
         isActive: ctx.user.isActive
     })),
@@ -105,7 +101,6 @@ export const authRouter = router({
                     email: BREAKGLASS_CONFIG.email,
                     name: BREAKGLASS_CONFIG.user.name,
                     role: BREAKGLASS_CONFIG.user.role,
-                    roles: BREAKGLASS_CONFIG.user.roles,
                     isActive: true
                 });
             }
@@ -280,7 +275,6 @@ export const authRouter = router({
                         department: me.department || "",
                         title: me.jobTitle || "",
                         role: "user",
-                        roles: [],
                         provider: "entra",
                         providerId: me.id,
                         isActive: true

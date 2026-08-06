@@ -24,6 +24,7 @@ type ChangeRequestLike = {
 };
 
 type ServiceRequestLike = {
+    createdById?: IdLike;
     pmId?: IdLike;
     members?: Array<{ userId?: IdLike; memberRole?: string }>;
     wbsVersions?: WbsVersionLike[];
@@ -35,7 +36,7 @@ type TimesheetLike = {
 };
 
 const includesRole = (user: UserSession, role: Role) =>
-    user.role === role || user.roles.includes(role);
+    user.role === role;
 
 export const hasAnyRole = (user: UserSession, roles: Role[]) =>
     roles.some(role => includesRole(user, role));
@@ -94,6 +95,19 @@ export const canManageOpportunity = (user: UserSession, opportunity: Opportunity
 export const isResponsiblePm = (user: UserSession, serviceRequest: ServiceRequestLike) =>
     idsMatch(serviceRequest.pmId, user.id);
 
+export const getProjectMemberRole = (user: UserSession, serviceRequest: ServiceRequestLike) =>
+    (serviceRequest.members || []).find(member => idsMatch(member.userId, user.id))?.memberRole;
+
+export const isProjectOwner = (user: UserSession, serviceRequest: ServiceRequestLike) => {
+    const owner = (serviceRequest.members || []).find(member => member.memberRole === "owner");
+    return owner ? idsMatch(owner.userId, user.id) : idsMatch(serviceRequest.createdById, user.id);
+};
+
+export const isActiveProjectMember = (user: UserSession, serviceRequest: ServiceRequestLike) => {
+    const memberRole = getProjectMemberRole(user, serviceRequest);
+    return !!memberRole && memberRole !== "watcher";
+};
+
 export const isServiceRequestMember = (user: UserSession, serviceRequest: ServiceRequestLike) =>
     (serviceRequest.members || []).some(member => idsMatch(member.userId, user.id)) ||
     (serviceRequest.wbsVersions || []).some(version =>
@@ -108,8 +122,10 @@ export const canAccessServiceRequest = (
     serviceRequest: ServiceRequestLike,
     opportunity?: OpportunityLike | null
 ) =>
-    isAdminOrManager(user) ||
-    isResponsiblePm(user, serviceRequest) ||
+    hasAnyRole(user, ["admin"]) ||
+    (hasAnyRole(user, ["pm"]) && (isResponsiblePm(user, serviceRequest) || !!getProjectMemberRole(user, serviceRequest))) ||
+    (hasAnyRole(user, ["presales"]) && (isProjectOwner(user, serviceRequest) || isServiceRequestMember(user, serviceRequest))) ||
+    (hasAnyRole(user, ["tech"]) && isServiceRequestMember(user, serviceRequest)) ||
     isServiceRequestMember(user, serviceRequest) ||
     (!!opportunity && canAccessOpportunity(user, opportunity));
 
@@ -118,8 +134,9 @@ export const canManageServiceRequestStatus = (
     serviceRequest: ServiceRequestLike,
     opportunity?: OpportunityLike | null
 ) =>
-    hasAnyRole(user, ["admin", "manager"]) ||
-    isResponsiblePm(user, serviceRequest) ||
+    hasAnyRole(user, ["admin"]) ||
+    (hasAnyRole(user, ["pm"]) && (isResponsiblePm(user, serviceRequest) || isActiveProjectMember(user, serviceRequest))) ||
+    (hasAnyRole(user, ["presales"]) && isProjectOwner(user, serviceRequest)) ||
     (!!opportunity && isOpportunityBusinessOwner(user, opportunity));
 
 export const canAccessChangeRequest = (
@@ -129,16 +146,19 @@ export const canAccessChangeRequest = (
     opportunity?: OpportunityLike | null
 ) =>
     isAdminOrManager(user) ||
-    isResponsiblePm(user, serviceRequest) ||
+    canAccessServiceRequest(user, serviceRequest, opportunity) ||
     idsMatch(changeRequest.requesterId, user.id) ||
     (!!opportunity && canManageOpportunity(user, opportunity));
 
 export const canReviewChangeRequest = (
     user: UserSession,
+    serviceRequest: ServiceRequestLike,
     changeRequest: ChangeRequestLike,
     opportunity?: OpportunityLike | null
 ) => {
-    if (isAdminOrManager(user)) return true;
+    if (hasAnyRole(user, ["admin"])) return true;
+    if (hasAnyRole(user, ["pm"]) && (isResponsiblePm(user, serviceRequest) || isActiveProjectMember(user, serviceRequest))) return true;
+    if (hasAnyRole(user, ["presales"]) && isProjectOwner(user, serviceRequest)) return true;
     if (changeRequest.status === "pending_business") {
         return !!opportunity && isOpportunityBusinessOwner(user, opportunity);
     }
@@ -153,7 +173,7 @@ export const canManageTimesheet = (
         serviceRequest?: ServiceRequestLike | null;
     }
 ) =>
-    isAdminOrManager(user) ||
+    hasAnyRole(user, ["admin"]) ||
     idsMatch(timesheet.techId, user.id) ||
     (!!options?.opportunity && canManageOpportunity(user, options.opportunity)) ||
     (!!options?.serviceRequest && isResponsiblePm(user, options.serviceRequest));
@@ -169,11 +189,10 @@ export const getManagedDepartments = (user: UserSession): string[] | null => {
     if (hasAnyRole(user, ["admin"])) return null; // null = 無限制
 
     if (hasAnyRole(user, ["manager"])) {
-        if (user.managedDepartments?.length > 0) {
-            return user.managedDepartments;
-        }
-        // 向下相容：沒設定 managedDepartments 就用原本的 department
-        return user.department ? [user.department] : [];
+        return Array.from(new Set([
+            user.department,
+            ...(user.managedDepartments || [])
+        ].map(department => department?.trim()).filter((department): department is string => Boolean(department))));
     }
 
     return []; // 非主管，不能看部門層級資料

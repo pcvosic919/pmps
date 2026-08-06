@@ -25,18 +25,17 @@ type DemoUserSeed = {
     email: string;
     name: string;
     role: Role;
-    roles: Role[];
 };
 
 const demoUsers: DemoUserSeed[] = [
-    { email: "demo@demo.com", name: "Local Demo", role: "admin", roles: ["admin"] },
-    { email: "demo_admin@demo.com", name: "Demo Admin", role: "admin", roles: ["admin"] },
-    { email: "demo_manager@demo.com", name: "Demo Manager", role: "manager", roles: ["manager"] },
-    { email: "demo_business@demo.com", name: "Demo Business", role: "business", roles: ["business"] },
-    { email: "demo_presales@demo.com", name: "Demo Presales", role: "presales", roles: ["presales"] },
-    { email: "demo_pm@demo.com", name: "Demo PM", role: "pm", roles: ["pm"] },
-    { email: "demo_tech@demo.com", name: "Demo Tech", role: "tech", roles: ["tech"] },
-    { email: "demo_presales2@demo.com", name: "Demo Presales 2", role: "presales", roles: ["presales", "tech"] },
+    { email: "demo@demo.com", name: "Local Demo", role: "admin" },
+    { email: "demo_admin@demo.com", name: "Demo Admin", role: "admin" },
+    { email: "demo_manager@demo.com", name: "Demo Manager", role: "manager" },
+    { email: "demo_business@demo.com", name: "Demo Business", role: "business" },
+    { email: "demo_presales@demo.com", name: "Demo Presales", role: "presales" },
+    { email: "demo_pm@demo.com", name: "Demo PM", role: "pm" },
+    { email: "demo_tech@demo.com", name: "Demo Tech", role: "tech" },
+    { email: "demo_presales2@demo.com", name: "Demo Presales 2", role: "presales" },
 ];
 
 const demoSystemSettings = [

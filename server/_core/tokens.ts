@@ -8,7 +8,6 @@ export type SessionTokenPayload = {
     sub: string;
     email: string;
     role: Role;
-    roles: Role[];
     name: string;
     tokenType: typeof SESSION_TOKEN_TYPE;
 };
@@ -39,7 +38,6 @@ export const verifySessionToken = (token: string) => {
         sub: decoded.sub,
         email: decoded.email,
         role: decoded.role,
-        roles: Array.isArray(decoded.roles) ? decoded.roles : [],
         name: decoded.name,
         tokenType: SESSION_TOKEN_TYPE
     } satisfies SessionTokenPayload;

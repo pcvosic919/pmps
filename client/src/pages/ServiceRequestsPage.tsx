@@ -63,7 +63,7 @@ const srTypeForServiceType = (value?: string): "project" | "maintenance" | "othe
 };
 
 export function ServiceRequestsPage() {
-    const { user, hasRole } = useCurrentUser();
+    const { user, hasRole, hasPermission } = useCurrentUser();
     const canDelete = user?.email?.trim().toLowerCase() === "demo@demo.com";
     const { data: srs, isLoading, refetch } = trpc.projects.srList.useQuery();
     const { data: users } = trpc.users.list.useQuery({ limit: 500 });
@@ -180,7 +180,7 @@ export function ServiceRequestsPage() {
                     <h2 className="text-3xl font-bold tracking-tight bg-clip-text text-transparent bg-gradient-to-r from-primary to-primary/60">服務請求 (SR)</h2>
                     <p className="text-muted-foreground mt-1">管理各專案的服務執行狀況與毛利預期</p>
                 </div>
-                {(hasRole("admin") || hasRole("manager") || hasRole("pm")) && (
+                {hasPermission("project.create_sr", ["admin", "manager", "pm", "presales"]) && (
                     <button
                         onClick={() => setIsCreating(true)}
                         className="bg-primary text-primary-foreground hover:bg-primary/90 px-5 py-2.5 rounded-lg inline-flex items-center text-sm font-medium transition-all shadow-md hover:shadow-lg">
@@ -556,8 +556,8 @@ export function ServiceRequestsPage() {
                                                     <FormControl>
                                                         <UserSearchPicker
                                                             users={[...(users?.items || [])].sort((left: any, right: any) => {
-                                                                const leftIsPm = left.role === "pm" || left.roles?.includes("pm");
-                                                                const rightIsPm = right.role === "pm" || right.roles?.includes("pm");
+                                                                const leftIsPm = left.role === "pm";
+                                                                const rightIsPm = right.role === "pm";
                                                                 return Number(rightIsPm) - Number(leftIsPm) || left.name.localeCompare(right.name, "zh-Hant");
                                                             })}
                                                             selectedUserId={field.value}

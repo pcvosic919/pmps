@@ -202,8 +202,7 @@ export async function syncEntraUsersJob(options: { pruneStale?: boolean } = {}) 
             } else {
                 await UserModel.create({
                     ...payload,
-                    role: "user",
-                    roles: []
+                    role: "user"
                 });
                 created += 1;
             }

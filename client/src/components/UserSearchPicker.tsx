@@ -10,7 +10,6 @@ export type PickerUser = {
     department?: string;
     title?: string;
     role?: string;
-    roles?: string[];
     isActive?: boolean;
 };
 
@@ -57,7 +56,6 @@ const getUserSearchValues = (user: PickerUser) => [
     user.department,
     user.title,
     user.role,
-    ...(user.roles || []),
     `${user.name || ""} ${user.email || ""} ${user.department || ""} ${user.title || ""}`
 ].filter(Boolean).map((value) => String(value));
 

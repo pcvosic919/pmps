@@ -148,11 +148,6 @@ export function ResourcesPage() {
                                     <span className="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-medium bg-primary/10 text-primary capitalize">
                                         {user.role}
                                     </span>
-                                    {user.roles?.filter((r: string) => r !== user.role).map((r: string) => (
-                                        <span key={r} className="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-medium bg-secondary text-secondary-foreground border capitalize">
-                                            {r}
-                                        </span>
-                                    ))}
                                 </div>
 
                                 <div>

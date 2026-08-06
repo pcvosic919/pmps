@@ -21,6 +21,7 @@ import {
     getManagedDepartments,
     hasAnyRole,
     isOpportunityBusinessOwner,
+    isOpportunityOwner,
 } from "../_core/authorization";
 import { decodeCursor, encodeCursor, toObjectId } from "../_core/cursor";
 import { createNotification } from "../_core/notifications";
@@ -863,7 +864,7 @@ export const opportunitiesRouter = router({
             return { success: true };
         }),
 
-    createSR: roleProcedure(["admin", "pm", "presales"])
+    createSR: roleProcedure(["admin", "manager", "pm", "presales"])
         .input(z.object({
             opportunityId: z.string(),
             title: z.string(),
@@ -882,7 +883,14 @@ export const opportunitiesRouter = router({
                     .lean(),
                 "找不到該商機"
             );
-            assertAuthorized(canManageOpportunity(ctx.user, opportunity), "您沒有權限從此商機建立 SR");
+            const isPresalesOnly = hasAnyRole(ctx.user, ["presales"]) &&
+                !hasAnyRole(ctx.user, ["admin", "manager", "pm"]);
+            assertAuthorized(
+                isPresalesOnly
+                    ? isOpportunityOwner(ctx.user, opportunity)
+                    : canManageOpportunity(ctx.user, opportunity),
+                "您沒有權限從此商機建立 SR"
+            );
             assertOpportunityConvertible(opportunity);
             const salesUserFields = await getSalesUserFields(input.salesUserId);
 

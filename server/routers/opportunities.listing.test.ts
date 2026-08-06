@@ -10,7 +10,6 @@ import {
 type TestUser = {
     id: string;
     role: string;
-    roles: string[];
 };
 
 type TestOpportunity = {
@@ -32,13 +31,11 @@ const searchableFields = ["title", "customerName"] as const;
 const managerUser: TestUser = {
     id: new mongoose.Types.ObjectId().toString(),
     role: "manager",
-    roles: []
 };
 
 const memberUser: TestUser = {
     id: new mongoose.Types.ObjectId().toString(),
     role: "business",
-    roles: []
 };
 
 const outsiderId = new mongoose.Types.ObjectId();

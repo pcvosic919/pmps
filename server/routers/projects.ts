@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { permissionProcedure, router, protectedProcedure, roleProcedure, userHasPermission } from "../_core/trpc";
+import { permissionProcedure, router, protectedProcedure, roleProcedure } from "../_core/trpc";
 import { sharePointService } from "../services/SharePointService";
 import { folderStorageService } from "../services/FolderStorageService";
 import { ServiceRequestModel } from "../models/ServiceRequest";
@@ -18,14 +18,28 @@ import {
     assertAuthorized,
     assertFound,
     canDeleteRecord,
+    canAccessOpportunity,
     canAccessChangeRequest,
-    canAccessServiceRequest,
-    canManageServiceRequestStatus,
     canManageTimesheet,
     canReviewChangeRequest,
     getManagedDepartments,
     hasAnyRole,
+    isOpportunityOwner,
 } from "../_core/authorization";
+import {
+    buildManagerProjectScopeQuery,
+    canArchiveProject,
+    canEditProjectWbs,
+    canManageProjectMembers,
+    canOperateProject,
+    canReviewProject,
+    canViewProject,
+    directProjectClauses,
+    getProjectCapabilities,
+    managerCanAccessUser,
+    projectPermissionDenied,
+    type ProjectAccessUser,
+} from "../_core/projectAuthorization";
 import { createNotification, createNotifications } from "../_core/notifications";
 import { getAccessibleOpportunityQuery } from "./opportunities.listing";
 import { toObjectId } from "../_core/cursor";
@@ -167,11 +181,6 @@ const idString = (value: any) => value?._id?.toString?.() || value?.toString?.()
 const getSrMemberRole = (sr: any, userId: string) =>
     (sr.members || []).find((member: any) => idString(member.userId) === userId)?.memberRole;
 
-const isSrOwnerMember = (sr: any, userId: string) =>
-    (sr.members || []).some((member: any) =>
-        member.memberRole === "owner" && idString(member.userId) === userId
-    );
-
 const buildSrActivityAssignment = (sr: any, assignee: any, options?: { isPmView?: boolean; isBacklog?: boolean }) => {
     const projectWindow = getProjectScheduleWindow(sr);
     const memberRole = getSrMemberRole(sr, assignee?._id?.toString?.() || assignee?.toString?.() || "");
@@ -251,11 +260,15 @@ const buildServiceRequestQuery = async ({
     status,
     includeArchived = false
 }: {
-    user: { id: string; role: string; roles: string[]; department?: string };
+    user: ProjectAccessUser;
     search?: string;
     status?: string;
     includeArchived?: boolean;
 }) => {
+    if (projectPermissionDenied(user, "module.projects.view")) {
+        return { _id: { $exists: false } };
+    }
+
     const clauses: Record<string, unknown>[] = [];
     const searchQuery = buildServiceRequestSearchQuery(search);
     if (Object.keys(searchQuery).length > 0) {
@@ -272,44 +285,44 @@ const buildServiceRequestQuery = async ({
         return clauses.length > 0 ? { $and: clauses } : {};
     }
 
-    const accessClauses: Record<string, unknown>[] = [];
-    const userObjectId = toObjectId(user.id);
-
-    // Manager can see all SRs where PM is in their department
-    if (hasAnyRole(user as any, ["manager"]) && user.department) {
-        const deptUsers = await UserModel.find({ department: user.department }, { _id: 1 }).lean();
-        const deptUserIds = deptUsers.map(u => u._id);
-        if (deptUserIds.length > 0) {
-            accessClauses.push({ pmId: { $in: deptUserIds } });
+    if (hasAnyRole(user as any, ["manager"])) {
+        clauses.push(await buildManagerProjectScopeQuery(user));
+    } else {
+        const accessClauses: Record<string, unknown>[] = directProjectClauses(
+            user.id,
+            hasAnyRole(user as any, ["presales"])
+        );
+        if (hasAnyRole(user as any, ["tech", "presales", "business"])) {
+            const accessibleOpportunities = await OpportunityModel.find(
+                await getAccessibleOpportunityQuery(user as any),
+                { _id: 1 }
+            ).lean();
+            const accessibleOpportunityIds = accessibleOpportunities.map((item) => item._id);
+            if (accessibleOpportunityIds.length > 0) {
+                accessClauses.push({ opportunityId: { $in: accessibleOpportunityIds } });
+            }
         }
+        clauses.push({ $or: accessClauses });
     }
-
-    // Other roles: only their own SRs
-    const accessibleOpportunities = await OpportunityModel.find(
-        await getAccessibleOpportunityQuery(user as any),
-        { _id: 1 }
-    ).lean();
-    const accessibleOpportunityIds = accessibleOpportunities.map((item) => item._id);
-
-    accessClauses.push(
-        { pmId: userObjectId },
-        { "members.userId": userObjectId },
-        { "changeRequests.requesterId": userObjectId },
-        { "wbsVersions.items.assigneeId": userObjectId }
-    );
-
-    if (accessibleOpportunityIds.length > 0) {
-        accessClauses.push({ opportunityId: { $in: accessibleOpportunityIds } });
-    }
-
-    clauses.push({ $or: accessClauses });
 
     return clauses.length > 0 ? { $and: clauses } : {};
 };
 
-const getManagerIds = async () => {
+const getManagerIds = async (departments: string[]) => {
+    const normalizedDepartments = [...new Set(departments.map((department) => department.trim()).filter(Boolean))];
+    if (normalizedDepartments.length === 0) return [];
+
     const managers = await UserModel.find(
-        { $or: [{ role: "manager" }, { roles: "manager" }], isActive: true },
+        {
+            $and: [
+                { role: "manager" },
+                { $or: [
+                    { department: { $in: normalizedDepartments } },
+                    { managedDepartments: { $in: normalizedDepartments } }
+                ] }
+            ],
+            isActive: true
+        },
         { _id: 1 }
     ).lean();
 
@@ -397,7 +410,7 @@ const getProjectWbsSummary = (sr: any) => {
 const getReviewerDepartments = (user: any): string[] | null => getManagedDepartments(user);
 
 export const projectsRouter = router({
-    srList: permissionProcedure("module.projects.view", ["admin", "manager", "pm", "tech"]).input(z.object({
+    srList: permissionProcedure("module.projects.view", ["admin", "manager", "pm", "tech", "presales"]).input(z.object({
         search: z.string().trim().optional(),
         status: z.enum(srStatuses).optional(),
         includeArchived: z.boolean().optional(),
@@ -451,14 +464,15 @@ export const projectsRouter = router({
             .limit(input?.limit ?? 200)
             .lean();
 
-	        return items.map(item => ({
+	        return Promise.all(items.map(async item => ({
 	            ...item,
 	            id: item._id.toString(),
 	            opportunityId: item.opportunityId?.toString(),
 	            salesUserId: item.salesUserId?.toString() || "",
 	            pmId: item.pmId?.toString() || "",
-	            projectSummary: getProjectWbsSummary(item)
-	        }));
+	            projectSummary: getProjectWbsSummary(item),
+                permissions: await getProjectCapabilities(ctx.user, item, undefined, { knownVisible: true })
+	        })));
 	    }),
 
     getActiveProjectCount: protectedProcedure.query(async ({ ctx }) => {
@@ -474,7 +488,7 @@ export const projectsRouter = router({
         return { count: activeCount };
     }),
 
-    createSR: permissionProcedure("project.create_sr", ["admin", "manager", "pm"])
+    createSR: permissionProcedure("project.create_sr", ["admin", "manager", "pm", "presales"])
         .input(z.object({
             title: z.string(),
             customerName: z.string().optional(),
@@ -519,7 +533,11 @@ export const projectsRouter = router({
                 oppSalesUserId = opportunity.salesUserId;
                 oppSalesDepartment = opportunity.salesDepartment || "";
                 oppSalesRep = opportunity.salesRep || "";
-                assertAuthorized(canAccessServiceRequest(ctx.user, { members: buildSrMembers(ctx.user.id, input.pmId, input.joinPmAsMember) }, opportunity), "您沒有權限從此商機建立 SR");
+                const isPresalesOnly = hasAnyRole(ctx.user, ["presales"]) && !hasAnyRole(ctx.user, ["admin", "manager", "pm"]);
+                assertAuthorized(
+                    isPresalesOnly ? isOpportunityOwner(ctx.user, opportunity) : canAccessOpportunity(ctx.user, opportunity),
+                    "您只能將自己擁有或有權限的商機轉為專案"
+                );
                 if (opportunity.status === "converted") {
                     throw new TRPCError({ code: "BAD_REQUEST", message: "此商機已轉案，請勿重複建立 SR" });
                 }
@@ -604,18 +622,18 @@ export const projectsRouter = router({
             const sr: any = assertFound(
                 await ServiceRequestModel.findById(input.srId)
                     .select("pmId createdById members opportunityId wbsVersions.items.assigneeId changeRequests")
-                    .populate("members.userId", "name email department title role roles")
+                    .populate("members.userId", "name email department title role")
                     .lean(),
                 "找不到該服務請求"
             );
             const opportunity = sr.opportunityId
                 ? await OpportunityModel.findById(sr.opportunityId).select("ownerId members presalesAssignments").lean()
                 : null;
-            assertAuthorized(canAccessServiceRequest(ctx.user, sr, opportunity), "您沒有權限查看此專案成員");
+            assertAuthorized(await canViewProject(ctx.user, sr, opportunity), "您沒有權限查看此專案成員");
             const members = await ensureSrOwnerMember(sr);
             const userIds = members.map((member: any) => member.userId?._id || member.userId).filter(Boolean);
             const fallbackUsers = await UserModel.find({ _id: { $in: userIds } })
-                .select("name email department title role roles")
+                .select("name email department title role")
                 .lean();
             const fallbackUserMap = new Map(fallbackUsers.map((item: any) => [item._id.toString(), item]));
             return members.map((member: any) => ({
@@ -626,12 +644,11 @@ export const projectsRouter = router({
                 department: member.userId?.department || fallbackUserMap.get(idString(member.userId))?.department || "",
                 title: member.userId?.title || fallbackUserMap.get(idString(member.userId))?.title || "",
                 role: member.userId?.role || fallbackUserMap.get(idString(member.userId))?.role || "",
-                roles: member.userId?.roles || fallbackUserMap.get(idString(member.userId))?.roles || [],
                 memberRole: member.memberRole
             }));
         }),
 
-    addSrMember: permissionProcedure("project.manage_members", ["admin", "manager", "pm"])
+    addSrMember: permissionProcedure("project.manage_members", ["admin", "manager", "pm", "presales"])
         .input(z.object({
             srId: z.string(),
             userId: z.string(),
@@ -650,7 +667,7 @@ export const projectsRouter = router({
                 ? await OpportunityModel.findById(sr.opportunityId).select("ownerId members presalesAssignments").lean()
                 : null;
             assertAuthorized(
-                canManageServiceRequestStatus(ctx.user, sr, opportunity) || isSrOwnerMember(sr, ctx.user.id),
+                await canManageProjectMembers(ctx.user, sr, opportunity),
                 "您沒有權限管理此專案成員"
             );
             const user = assertFound(await UserModel.findById(input.userId).select("_id isActive").lean(), "找不到指定使用者");
@@ -672,7 +689,7 @@ export const projectsRouter = router({
             return { success: true };
         }),
 
-    removeSrMember: permissionProcedure("project.manage_members", ["admin", "manager", "pm"])
+    removeSrMember: permissionProcedure("project.manage_members", ["admin", "manager", "pm", "presales"])
         .input(z.object({ srId: z.string(), memberId: z.string() }))
         .mutation(async ({ input, ctx }) => {
             const sr: any = assertFound(
@@ -684,7 +701,7 @@ export const projectsRouter = router({
                 ? await OpportunityModel.findById(sr.opportunityId).select("ownerId members presalesAssignments").lean()
                 : null;
             assertAuthorized(
-                canManageServiceRequestStatus(ctx.user, sr, opportunity) || isSrOwnerMember(sr, ctx.user.id),
+                await canManageProjectMembers(ctx.user, sr, opportunity),
                 "您沒有權限管理此專案成員"
             );
             const member = (sr.members || []).find((item: any) => item._id?.toString() === input.memberId);
@@ -699,7 +716,7 @@ export const projectsRouter = router({
             return { success: true };
         }),
 
-    updateSRStatus: protectedProcedure
+    updateSRStatus: permissionProcedure("project.edit", ["admin", "manager", "pm", "presales"])
         .input(z.object({
             id: z.string(),
             status: z.enum(srStatuses)
@@ -715,7 +732,7 @@ export const projectsRouter = router({
                     .lean()
                 : null;
             assertAuthorized(
-                canManageServiceRequestStatus(ctx.user, sr, opportunity),
+                await canOperateProject(ctx.user, sr, opportunity),
                 "您沒有權限更新服務請求狀態"
             );
 
@@ -726,16 +743,14 @@ export const projectsRouter = router({
             return { success: true };
         }),
 
-    getWbsPendingReview: roleProcedure(["admin", "manager", "pm"])
+    getWbsPendingReview: permissionProcedure("wbs.review", ["admin", "manager", "pm", "presales"])
         .query(async ({ ctx }) => {
-            const matchClause: any = { "wbsVersions.status": "submitted" };
-            if (!hasAnyRole(ctx.user as any, ["admin", "manager"])) {
-                matchClause.pmId = toObjectId(ctx.user.id);
-            }
+            const accessQuery = await buildServiceRequestQuery({ user: ctx.user });
 
             const pending = await ServiceRequestModel.aggregate([
+                { $match: accessQuery },
                 { $unwind: "$wbsVersions" },
-                { $match: matchClause },
+                { $match: { "wbsVersions.status": "submitted" } },
                 { $sort: { "wbsVersions.createdAt": -1 } },
                 {
                     $project: {
@@ -750,7 +765,18 @@ export const projectsRouter = router({
                 }
             ]);
 
-            return pending.map(p => ({
+            const projectIds = [...new Set(pending.map((item: any) => item.srId.toString()))];
+            const projects = projectIds.length > 0
+                ? await ServiceRequestModel.find({ _id: { $in: projectIds } })
+                    .select("pmId createdById members")
+                    .lean()
+                : [];
+            const reviewableProjectIds = new Set((await Promise.all(projects.map(async (project: any) => ({
+                id: project._id.toString(),
+                allowed: await canReviewProject(ctx.user, project)
+            })))).filter((item) => item.allowed).map((item) => item.id));
+
+            return pending.filter((item: any) => reviewableProjectIds.has(item.srId.toString())).map(p => ({
                 ...p,
                 id: p.id.toString(),
                 srId: p.srId.toString(),
@@ -758,7 +784,7 @@ export const projectsRouter = router({
             }));
         }),
 
-    reviewWbsVersion: permissionProcedure("wbs.review", ["admin", "manager", "pm"])
+    reviewWbsVersion: permissionProcedure("wbs.review", ["admin", "manager", "pm", "presales"])
         .input(z.object({
             id: z.string(), // wbsVersion _id
             action: z.enum(approvalActions),
@@ -773,7 +799,7 @@ export const projectsRouter = router({
                     .select("ownerId members presalesAssignments")
                     .lean()
                 : null;
-            assertAuthorized(canManageServiceRequestStatus(ctx.user, sr, opportunity), "您沒有權限審核此 WBS 版本");
+            assertAuthorized(await canReviewProject(ctx.user, sr, opportunity), "您沒有權限審核此 WBS 版本");
 
             const version = sr.wbsVersions.id(input.id);
             if (!version) throw new TRPCError({ code: "NOT_FOUND", message: "找不到該 WBS 版本" });
@@ -782,8 +808,10 @@ export const projectsRouter = router({
             }
 
             const approvals = version.departmentApprovals || [];
-            const reviewerDepartments = getReviewerDepartments(ctx.user);
-            const canApproveAll = reviewerDepartments === null;
+            const isDepartmentManager = hasAnyRole(ctx.user, ["manager"]) &&
+                !hasAnyRole(ctx.user, ["admin", "pm", "presales"]);
+            const reviewerDepartments = isDepartmentManager ? getReviewerDepartments(ctx.user) || [] : [];
+            const canApproveAll = !isDepartmentManager;
             const actionableApprovals = approvals.filter((approval: any) =>
                 canApproveAll || reviewerDepartments.includes(approval.department)
             );
@@ -866,7 +894,7 @@ export const projectsRouter = router({
                     .select("ownerId members presalesAssignments")
                     .lean()
                 : null;
-            assertAuthorized(canAccessServiceRequest(ctx.user, sr, opportunity), "您沒有權限檢視附件");
+            assertAuthorized(await canViewProject(ctx.user, sr, opportunity), "您沒有權限檢視附件");
             return (sr.attachments || []).map((a: any) => ({
                 ...a,
                 id: a._id.toString(),
@@ -897,7 +925,7 @@ export const projectsRouter = router({
                     .select("ownerId members presalesAssignments")
                     .lean()
                 : null;
-            assertAuthorized(canAccessServiceRequest(ctx.user, sr, opportunity), "您沒有權限上傳附件");
+            assertAuthorized(await canEditProjectWbs(ctx.user, sr, opportunity), "您沒有權限上傳附件");
 
             const localAttachment = sr.localFolderPath && input.fileDataBase64
                 ? await writeLocalAttachment(sr.localFolderPath, input.fileName, input.fileDataBase64)
@@ -946,7 +974,7 @@ export const projectsRouter = router({
             const opportunity = sr.opportunityId
                 ? await OpportunityModel.findById(sr.opportunityId).select("ownerId members presalesAssignments").lean()
                 : null;
-            assertAuthorized(canAccessServiceRequest(ctx.user, sr, opportunity), "您沒有權限下載附件");
+            assertAuthorized(await canViewProject(ctx.user, sr, opportunity), "您沒有權限下載附件");
             const attachment = (sr.attachments || []).find((item: any) => idString(item._id) === input.attachmentId);
             if (!attachment) throw new TRPCError({ code: "NOT_FOUND", message: "找不到該附件" });
 
@@ -986,7 +1014,7 @@ export const projectsRouter = router({
             if (!attachment) throw new TRPCError({ code: "NOT_FOUND", message: "找不到該附件" });
             const isUploader = idString(attachment.uploadedById) === ctx.user.id;
             assertAuthorized(
-                isUploader || canManageServiceRequestStatus(ctx.user, sr, opportunity) || hasAnyRole(ctx.user, ["admin", "manager"]),
+                isUploader || await canOperateProject(ctx.user, sr, opportunity),
                 "您沒有權限刪除附件"
             );
 
@@ -1017,7 +1045,7 @@ export const projectsRouter = router({
             return { success: true };
         }),
 
-    srById: permissionProcedure("module.projects.view", ["admin", "manager", "pm", "tech"])
+    srById: permissionProcedure("module.projects.view", ["admin", "manager", "pm", "tech", "presales"])
         .input(z.object({ id: z.string() }))
         .query(async ({ input, ctx }) => {
             const sr = assertFound(
@@ -1029,7 +1057,8 @@ export const projectsRouter = router({
                     .select("ownerId members presalesAssignments")
                     .lean()
                 : null;
-            assertAuthorized(canAccessServiceRequest(ctx.user, sr, opportunity), "您沒有權限檢視此服務請求");
+            assertAuthorized(await canViewProject(ctx.user, sr, opportunity), "您沒有權限檢視此服務請求");
+            const permissions = await getProjectCapabilities(ctx.user, sr, opportunity, { knownVisible: true });
 
             const wbsVersions = (sr.wbsVersions || []).map((v: any) => {
                 const totalEstimatedHours = (v.items || []).reduce((sum: number, item: any) => sum + item.estimatedHours, 0);
@@ -1050,7 +1079,9 @@ export const projectsRouter = router({
                         action: log.action,
                         userId: log.userId.toString(),
                         timestamp: log.timestamp,
-                        reason: log.reason
+                        reason: log.reason,
+                        actorRole: log.actorRole,
+                        result: log.result
                     })),
                     departmentApprovals: (v.departmentApprovals || []).map((approval: any) => ({
                         department: approval.department,
@@ -1069,11 +1100,12 @@ export const projectsRouter = router({
                 opportunityId: sr.opportunityId?.toString(),
                 salesUserId: sr.salesUserId?.toString() || "",
                 pmId: sr.pmId?.toString(),
-                wbsVersions
+                wbsVersions,
+                permissions
             };
         }),
 
-    updateProjectBasics: permissionProcedure("project.edit", ["admin", "manager", "pm"])
+    updateProjectBasics: permissionProcedure("project.edit", ["admin", "manager", "pm", "presales"])
         .input(z.object({
             id: z.string(),
             title: z.string().trim().min(1).optional(),
@@ -1091,7 +1123,7 @@ export const projectsRouter = router({
             const opportunity = sr.opportunityId
                 ? await OpportunityModel.findById(sr.opportunityId).select("ownerId members presalesAssignments").lean()
                 : null;
-            assertAuthorized(canManageServiceRequestStatus(ctx.user, sr, opportunity), "您沒有權限修改專案基本資料");
+            assertAuthorized(await canOperateProject(ctx.user, sr, opportunity), "您沒有權限修改專案基本資料");
             const { id, ...changes } = input;
             const update: Record<string, unknown> = {
                 ...changes,
@@ -1120,7 +1152,7 @@ export const projectsRouter = router({
             return { success: true };
         }),
 
-    transferSrOwner: permissionProcedure("project.manage_members", ["admin", "manager", "pm"])
+    transferSrOwner: permissionProcedure("project.manage_members", ["admin", "manager", "pm", "presales"])
         .input(z.object({ srId: z.string(), newOwnerUserId: z.string() }))
         .mutation(async ({ input, ctx }) => {
             const sr: any = assertFound(await ServiceRequestModel.findById(input.srId), "找不到該專案");
@@ -1128,7 +1160,7 @@ export const projectsRouter = router({
                 ? await OpportunityModel.findById(sr.opportunityId).select("ownerId members presalesAssignments").lean()
                 : null;
             assertAuthorized(
-                canManageServiceRequestStatus(ctx.user, sr, opportunity) || isSrOwnerMember(sr, ctx.user.id),
+                await canManageProjectMembers(ctx.user, sr, opportunity),
                 "您沒有權限交接專案擁有者"
             );
             const currentOwner = (sr.members || []).find((member: any) => member.memberRole === "owner");
@@ -1160,12 +1192,12 @@ export const projectsRouter = router({
             return { success: true };
         }),
 
-    archiveProject: permissionProcedure("project.archive", ["admin", "manager", "pm"])
+    archiveProject: permissionProcedure("project.archive", ["admin", "manager", "pm", "presales"])
         .input(z.object({ id: z.string(), reason: z.string().trim().optional() }))
         .mutation(async ({ input, ctx }) => {
             const sr: any = assertFound(await ServiceRequestModel.findById(input.id), "找不到該專案");
             assertAuthorized(
-                hasAnyRole(ctx.user, ["admin", "manager"]) || idString(sr.createdById) === ctx.user.id || idString(sr.pmId) === ctx.user.id,
+                await canArchiveProject(ctx.user, sr),
                 "您沒有權限封存此專案"
             );
             sr.archivedAt = new Date();
@@ -1178,12 +1210,12 @@ export const projectsRouter = router({
             return { success: true };
         }),
 
-    restoreProject: permissionProcedure("project.archive", ["admin", "manager", "pm"])
+    restoreProject: permissionProcedure("project.archive", ["admin", "manager", "pm", "presales"])
         .input(z.object({ id: z.string() }))
         .mutation(async ({ input, ctx }) => {
             const sr: any = assertFound(await ServiceRequestModel.findById(input.id), "找不到該專案");
             assertAuthorized(
-                hasAnyRole(ctx.user, ["admin", "manager"]) || idString(sr.createdById) === ctx.user.id || idString(sr.pmId) === ctx.user.id,
+                await canArchiveProject(ctx.user, sr),
                 "您沒有權限還原此專案"
             );
             sr.archivedAt = undefined;
@@ -1196,7 +1228,7 @@ export const projectsRouter = router({
             return { success: true };
         }),
 
-    updateSalesOwner: protectedProcedure
+    updateSalesOwner: permissionProcedure("project.edit", ["admin", "manager", "pm", "presales", "business"])
         .input(z.object({
             id: z.string(),
             salesUserId: z.string()
@@ -1213,7 +1245,7 @@ export const projectsRouter = router({
                     .select("ownerId members presalesAssignments")
                     .lean()
                 : null;
-            assertAuthorized(canManageServiceRequestStatus(ctx.user, sr, opportunity), "您沒有權限更新業務欄位");
+            assertAuthorized(await canOperateProject(ctx.user, sr, opportunity), "您沒有權限更新業務欄位");
             const salesUserFields = assertFound(await getSalesUserFields(input.salesUserId), "找不到指定的業務帳號");
 
             await ServiceRequestModel.updateOne(
@@ -1223,7 +1255,7 @@ export const projectsRouter = router({
             return { success: true };
         }),
 
-    updateFinalPrice: protectedProcedure
+    updateFinalPrice: permissionProcedure("project.edit", ["admin", "manager", "pm", "presales", "business"])
         .input(z.object({
             id: z.string(),
             finalPrice: z.number().min(0)
@@ -1240,7 +1272,7 @@ export const projectsRouter = router({
                     .select("ownerId members presalesAssignments")
                     .lean()
                 : null;
-            assertAuthorized(canManageServiceRequestStatus(ctx.user, sr, opportunity), "您沒有權限更新最終成交金額");
+            assertAuthorized(await canOperateProject(ctx.user, sr, opportunity), "您沒有權限更新最終成交金額");
 
             await ServiceRequestModel.updateOne(
                 { _id: input.id },
@@ -1267,7 +1299,7 @@ export const projectsRouter = router({
             const opportunity = sr.opportunityId
                 ? await OpportunityModel.findById(sr.opportunityId).select("ownerId members presalesAssignments").lean()
                 : null;
-            assertAuthorized(canAccessServiceRequest(ctx.user, sr, opportunity), "您沒有權限讀取 WBS 草稿");
+            assertAuthorized(await canViewProject(ctx.user, sr, opportunity), "您沒有權限讀取 WBS 草稿");
             const draft = (sr.wbsDrafts || []).find((item: any) => idString(item.userId) === ctx.user.id);
             if (!draft) return null;
             return {
@@ -1283,7 +1315,7 @@ export const projectsRouter = router({
             };
         }),
 
-    saveWbsDraft: permissionProcedure("wbs.submit", ["admin", "tech", "presales", "pm"])
+    saveWbsDraft: permissionProcedure("wbs.submit", ["admin", "manager", "tech", "presales", "pm"])
         .input(z.object({
             srId: z.string(),
             baseVersionNumber: z.number().optional(),
@@ -1299,7 +1331,7 @@ export const projectsRouter = router({
             const opportunity = sr.opportunityId
                 ? await OpportunityModel.findById(sr.opportunityId).select("ownerId members presalesAssignments").lean()
                 : null;
-            assertAuthorized(canAccessServiceRequest(ctx.user, sr, opportunity), "您沒有權限儲存 WBS 草稿");
+            assertAuthorized(await canEditProjectWbs(ctx.user, sr, opportunity), "您沒有權限儲存 WBS 草稿");
             const existingIndex = (sr.wbsDrafts || []).findIndex((item: any) => idString(item.userId) === ctx.user.id);
             const currentRevision = existingIndex >= 0 ? sr.wbsDrafts[existingIndex].revision : 0;
             if (input.revision !== undefined && input.revision < currentRevision) {
@@ -1322,9 +1354,19 @@ export const projectsRouter = router({
             return { revision: nextDraft.revision, updatedAt: nextDraft.updatedAt };
         }),
 
-    discardWbsDraft: permissionProcedure("wbs.submit", ["admin", "tech", "presales", "pm"])
+    discardWbsDraft: permissionProcedure("wbs.submit", ["admin", "manager", "tech", "presales", "pm"])
         .input(z.object({ srId: z.string() }))
         .mutation(async ({ input, ctx }) => {
+            const sr: any = assertFound(
+                await ServiceRequestModel.findById(input.srId)
+                    .select("createdById pmId members wbsVersions.items.assigneeId changeRequests opportunityId")
+                    .lean(),
+                "找不到該專案"
+            );
+            const opportunity = sr.opportunityId
+                ? await OpportunityModel.findById(sr.opportunityId).select("ownerId members presalesAssignments").lean()
+                : null;
+            assertAuthorized(await canEditProjectWbs(ctx.user, sr, opportunity), "您沒有權限刪除此 WBS 草稿");
             await ServiceRequestModel.updateOne(
                 { _id: input.srId },
                 { $pull: { wbsDrafts: { userId: toObjectId(ctx.user.id) } } }
@@ -1332,7 +1374,7 @@ export const projectsRouter = router({
             return { success: true };
         }),
 
-    submitWbsVersion: permissionProcedure("wbs.submit", ["admin", "tech", "presales", "pm"])
+    submitWbsVersion: permissionProcedure("wbs.submit", ["admin", "manager", "tech", "presales", "pm"])
         .input(z.object({
             srId: z.string(),
             versionNumber: z.number(),
@@ -1347,8 +1389,7 @@ export const projectsRouter = router({
                 .lean()
                 : null;
                 
-            const isTechOrPresales = hasAnyRole(ctx.user, ["tech", "presales"]);
-            assertAuthorized(canAccessServiceRequest(ctx.user, sr, opportunity) || isTechOrPresales, "您沒有權限提交 WBS 版本");
+            assertAuthorized(await canEditProjectWbs(ctx.user, sr, opportunity), "您沒有權限提交 WBS 版本");
 
             for (let index = 0; index < input.items.length; index++) {
                 const item = input.items[index];
@@ -1406,7 +1447,7 @@ export const projectsRouter = router({
                 }
             );
 
-            const managerIds = await getManagerIds();
+            const managerIds = await getManagerIds(departmentApprovals.map((approval) => approval.department));
             await createNotifications(managerIds.map((userId) => ({
                 userId,
                 type: "approval",
@@ -1418,8 +1459,9 @@ export const projectsRouter = router({
         }),
 
     crList: protectedProcedure.query(async ({ ctx }) => {
-        const srs = await ServiceRequestModel.find()
-            .select("title pmId members wbsVersions.items.assigneeId changeRequests opportunityId")
+        const projectQuery = await buildServiceRequestQuery({ user: ctx.user });
+        const srs = await ServiceRequestModel.find(projectQuery)
+            .select("title createdById pmId members wbsVersions.items.assigneeId changeRequests opportunityId")
             .lean();
         const opportunityIds = [...new Set(srs
             .map(sr => sr.opportunityId?.toString())
@@ -1430,11 +1472,12 @@ export const projectsRouter = router({
                 .lean()
             : [];
         const opportunityMap = new Map(opportunities.map(opp => [opp._id.toString(), opp]));
+        const managerView = hasAnyRole(ctx.user, ["manager"]);
 
         return srs.flatMap(sr => {
             const opportunity = sr.opportunityId ? opportunityMap.get(sr.opportunityId.toString()) : null;
             return (sr.changeRequests || [])
-                .filter((changeRequest: any) => canAccessChangeRequest(ctx.user, sr, changeRequest, opportunity))
+                .filter((changeRequest: any) => managerView || canAccessChangeRequest(ctx.user, sr, changeRequest, opportunity))
                 .map((changeRequest: any) => ({
                     id: changeRequest._id.toString(),
                     srId: sr._id.toString(),
@@ -1448,7 +1491,9 @@ export const projectsRouter = router({
                         action: log.action,
                         userId: log.userId.toString(),
                         timestamp: log.timestamp,
-                        reason: log.reason
+                        reason: log.reason,
+                        actorRole: log.actorRole,
+                        result: log.result
                     })),
                     createdAt: changeRequest.createdAt,
                     srTitle: sr.title
@@ -1456,7 +1501,7 @@ export const projectsRouter = router({
         }).sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
     }),
 
-    createCr: roleProcedure(["admin", "pm", "tech", "presales"])
+    createCr: roleProcedure(["admin", "manager", "pm", "tech", "presales"])
         .input(z.object({
             srId: z.string(),
             wbsItemIds: z.array(z.string()).optional(),
@@ -1472,7 +1517,7 @@ export const projectsRouter = router({
                     .select("ownerId members presalesAssignments")
                     .lean()
                 : null;
-            assertAuthorized(canAccessServiceRequest(ctx.user, sr, opportunity), "您沒有權限建立變更請求");
+            assertAuthorized(await canEditProjectWbs(ctx.user, sr, opportunity), "您沒有權限建立變更請求");
 
             const crId = new mongoose.Types.ObjectId();
             sr.changeRequests.push({
@@ -1523,10 +1568,31 @@ export const projectsRouter = router({
 
             const cr = sr.changeRequests.id(input.crId);
             if (!cr) throw new TRPCError({ code: "NOT_FOUND", message: "找不到該變更詳細項" });
+            if (!["pending_business", "pending_manager"].includes(cr.status)) {
+                throw new TRPCError({ code: "BAD_REQUEST", message: "此變更請求已完成審核" });
+            }
+            const canReviewAsProjectOperator = await canReviewProject(ctx.user, sr, opportunity);
+            const isManagerOnlyReviewer = hasAnyRole(ctx.user, ["manager"]) &&
+                !hasAnyRole(ctx.user, ["admin", "pm", "presales"]);
+            const isProjectReviewer = canReviewAsProjectOperator &&
+                (!isManagerOnlyReviewer || cr.status === "pending_manager");
+            const isBusinessReviewer = hasAnyRole(ctx.user, ["business"]) &&
+                canReviewChangeRequest(ctx.user, sr, cr, opportunity);
             assertAuthorized(
-                canReviewChangeRequest(ctx.user, cr, opportunity),
+                isProjectReviewer || isBusinessReviewer,
                 "您沒有權限審核此變更請求"
             );
+
+            const reviewStage = cr.status;
+            const reviewerRole = isBusinessReviewer && reviewStage === "pending_business"
+                ? "business"
+                : hasAnyRole(ctx.user, ["admin"])
+                    ? "admin"
+                    : hasAnyRole(ctx.user, ["pm"])
+                        ? "pm"
+                        : hasAnyRole(ctx.user, ["presales"])
+                            ? "presales"
+                            : "manager";
 
             if (input.action === "rejected") {
                 cr.status = "rejected";
@@ -1562,7 +1628,9 @@ export const projectsRouter = router({
                         : "rejected",
                 userId: toObjectId(ctx.user.id),
                 timestamp: new Date(),
-                reason: input.rejectionReason ?? null
+                reason: input.rejectionReason ?? null,
+                actorRole: reviewerRole,
+                result: input.action
             });
 
             await sr.save();
@@ -1578,7 +1646,7 @@ export const projectsRouter = router({
             return { success: true };
         }),
 
-    getMyProjectAssignments: permissionProcedure("module.calendar.view", ["admin", "manager", "pm", "tech"])
+    getMyProjectAssignments: permissionProcedure("module.calendar.view", ["admin", "manager", "pm", "tech", "presales"])
         .input(z.object({
             scope: z.enum(["mine", "managed", "all"]).default("mine")
         }).optional())
@@ -1776,7 +1844,7 @@ export const projectsRouter = router({
             return [...wbsAssignments, ...otherActivityAssignments, ...presalesAssignments, ...manualAssignments];
         }),
 
-    updateWbsItemSchedule: protectedProcedure
+    updateWbsItemSchedule: permissionProcedure("module.calendar.view", ["admin", "manager", "pm", "tech", "presales"])
         .input(z.object({
             srId: z.string(),
             itemId: z.string(),
@@ -1793,7 +1861,8 @@ export const projectsRouter = router({
             const item = effectiveVersion.items.find((i: any) => i._id.toString() === input.itemId);
             if (!item) throw new TRPCError({ code: "NOT_FOUND", message: "找不到任務項目" });
             
-            if (item.assigneeId?.toString() !== ctx.user.id && !hasAnyRole(ctx.user, ["admin", "manager", "pm"])) {
+            const canOperate = await canOperateProject(ctx.user, sr);
+            if (item.assigneeId?.toString() !== ctx.user.id && !canOperate) {
                 throw new TRPCError({ code: "FORBIDDEN", message: "無權限修改此任務" });
             }
             
@@ -1807,7 +1876,7 @@ export const projectsRouter = router({
             return { success: true };
         }),
 
-    scheduleWbsItem: protectedProcedure
+    scheduleWbsItem: permissionProcedure("module.calendar.view", ["admin", "manager", "pm", "tech", "presales"])
         .input(z.object({
             srId: z.string(),
             itemId: z.string(),
@@ -1828,7 +1897,8 @@ export const projectsRouter = router({
                 throw new TRPCError({ code: "BAD_REQUEST", message: "此 WBS 項目尚未指派處理人員，無法排程" });
             }
 
-            if (assigneeId !== ctx.user.id && !hasAnyRole(ctx.user, ["admin", "manager", "pm"])) {
+            const canOperate = await canOperateProject(ctx.user, sr);
+            if (assigneeId !== ctx.user.id && !canOperate) {
                 throw new TRPCError({ code: "FORBIDDEN", message: "無權限修改此任務" });
             }
 
@@ -1886,19 +1956,18 @@ export const projectsRouter = router({
             return { id: task._id.toString() };
         }),
 
-    updateCalendarTaskSchedule: protectedProcedure
+    updateCalendarTaskSchedule: permissionProcedure("module.calendar.view", ["admin", "manager", "pm", "tech", "presales"])
         .input(z.object({ id: z.string(), startDate: z.string().or(z.date()), endDate: z.string().or(z.date()) }))
         .mutation(async ({ ctx, input }) => {
             const task = await CalendarTaskModel.findById(input.id);
             if (!task) throw new TRPCError({ code: "NOT_FOUND", message: "找不到行事曆任務" });
-            if (task.assigneeId.toString() !== ctx.user.id && !hasAnyRole(ctx.user, ["admin", "manager", "pm"])) {
-                throw new TRPCError({ code: "FORBIDDEN", message: "無權限修改此任務" });
-            }
             const startDate = new Date(input.startDate);
             const endDate = new Date(input.endDate);
+            let canManageLinkedProject = false;
             if (task.sourceType === "wbs" && task.srId && task.wbsItemId) {
                 const sr = await ServiceRequestModel.findById(task.srId);
                 if (!sr) throw new TRPCError({ code: "NOT_FOUND", message: "找不到專案" });
+                canManageLinkedProject = await canOperateProject(ctx.user, sr);
                 const effectiveVersion = getEffectiveWbsVersion(sr);
                 const item = effectiveVersion?.items.find((i: any) => i._id.toString() === task.wbsItemId?.toString());
                 if (!item) throw new TRPCError({ code: "NOT_FOUND", message: "找不到任務項目" });
@@ -1920,6 +1989,11 @@ export const projectsRouter = router({
                     });
                 }
             }
+            const canManageAssignee = hasAnyRole(ctx.user, ["admin"]) ||
+                (hasAnyRole(ctx.user, ["manager"]) && await managerCanAccessUser(ctx.user, task.assigneeId.toString()));
+            if (task.assigneeId.toString() !== ctx.user.id && !canManageLinkedProject && !canManageAssignee) {
+                throw new TRPCError({ code: "FORBIDDEN", message: "無權限修改此任務" });
+            }
             task.startDate = startDate;
             task.endDate = endDate;
             await task.save();
@@ -1928,9 +2002,15 @@ export const projectsRouter = router({
 
     generateWbsQuote: protectedProcedure
         .input(z.object({ srId: z.string() }))
-        .query(async ({ input }) => {
+        .query(async ({ ctx, input }) => {
             const sr = await ServiceRequestModel.findById(input.srId).populate("wbsVersions.items.assigneeId", "name email department costRate").lean();
             if (!sr) throw new TRPCError({ code: "NOT_FOUND", message: "找不到專案" });
+            const opportunity = sr.opportunityId
+                ? await OpportunityModel.findById(sr.opportunityId)
+                    .select("ownerId members presalesAssignments")
+                    .lean()
+                : null;
+            assertAuthorized(await canViewProject(ctx.user, sr, opportunity), "您沒有權限查看此專案報價");
             const version = getEffectiveWbsVersion(sr) || [...(sr.wbsVersions || [])].sort((a: any, b: any) => b.versionNumber - a.versionNumber)[0];
             if (!version) throw new TRPCError({ code: "BAD_REQUEST", message: "沒有可轉報價的 WBS" });
             const items = (version.items || []).map((item: any) => {
@@ -1954,10 +2034,22 @@ export const projectsRouter = router({
             };
         }),
 
-    getMyProjectTimesheets: protectedProcedure
+    getMyProjectTimesheets: permissionProcedure("module.projects.view", ["admin", "manager", "pm", "tech", "presales"])
         .query(async ({ ctx }) => {
-            const items = await TimesheetModel.find({ techId: ctx.user.id, type: { $in: ["project", "other_activity"] } })
+            const timesheetQuery: Record<string, unknown> = { type: { $in: ["project", "other_activity"] } };
+            if (hasAnyRole(ctx.user, ["admin"])) {
+                // Admin retains organization-wide visibility.
+            } else if (hasAnyRole(ctx.user, ["manager"])) {
+                const projectIds = await ServiceRequestModel.find(await buildManagerProjectScopeQuery(ctx.user))
+                    .distinct("_id");
+                timesheetQuery.srId = { $in: projectIds };
+            } else {
+                timesheetQuery.techId = toObjectId(ctx.user.id);
+            }
+
+            const items = await TimesheetModel.find(timesheetQuery)
                 .populate("srId")
+                .populate("techId", "name email department")
                 .sort({ workDate: -1 })
                 .lean();
 
@@ -1985,6 +2077,9 @@ export const projectsRouter = router({
                     description: t.description,
                     costAmount: t.costAmount,
                     isBillable: t.isBillable !== false,
+                    techId: t.techId?._id?.toString() || t.techId?.toString(),
+                    techName: t.techId?.name || t.techId?.email || "",
+                    techDepartment: t.techId?.department || "",
                     wbsItemTitle: wbsItemTitle,
                     srTitle: t.srId?.title || "未知專案"
                 };
@@ -2021,11 +2116,15 @@ export const projectsRouter = router({
                     .select("ownerId members presalesAssignments")
                     .lean()
                 : null;
-            assertAuthorized(canAccessServiceRequest(ctx.user, srAccessView, opportunity), "您沒有權限填寫此專案工時");
+            assertAuthorized(await canViewProject(ctx.user, srAccessView, opportunity), "您沒有權限填寫此專案工時");
 
             const currentMemberRole = getSrMemberRole(srAccessView, ctx.user.id);
             const isObserver = currentMemberRole === "watcher";
             const isParticipant = currentMemberRole === "participant";
+            if (isObserver) {
+                throw new TRPCError({ code: "FORBIDDEN", message: "專案觀察者只能查看，不能填寫工時" });
+            }
+            const canOperateCurrentProject = await canOperateProject(ctx.user, srAccessView, opportunity);
             let wbsItem: any = null;
             let effectiveVersion: any = null;
             if (input.wbsItemId) {
@@ -2034,16 +2133,16 @@ export const projectsRouter = router({
                 if (!effectiveVersion || !wbsItem) {
                     throw new TRPCError({ code: "BAD_REQUEST", message: "找不到可填報的 WBS 項目" });
                 }
-                if (wbsItem.assigneeId?.toString() !== ctx.user.id && !isObserver && !hasAnyRole(ctx.user, ["admin", "manager"])) {
+                if (wbsItem.assigneeId?.toString() !== ctx.user.id && !canOperateCurrentProject) {
                     throw new TRPCError({ code: "FORBIDDEN", message: "您只能填寫指派給自己的 WBS 項目" });
                 }
-            } else if (sr.srType !== "other_activity" && !isObserver && !isParticipant) {
+            } else if (sr.srType !== "other_activity" && !isParticipant && !canOperateCurrentProject) {
                 throw new TRPCError({ code: "BAD_REQUEST", message: "此類型工時需選擇 WBS 項目" });
             }
 
             const user = await UserModel.findById(ctx.user.id).select("costRate").lean();
             const hourlyRate = user?.costRate?.hourlyRate || 500;
-            const isBillable = !isObserver;
+            const isBillable = true;
 
             const costAmount = isBillable ? input.hours * hourlyRate : 0;
 
@@ -2076,7 +2175,7 @@ export const projectsRouter = router({
             return { success: true };
         }),
 
-    deleteProjectTimesheet: roleProcedure(["admin", "tech", "presales"])
+    deleteProjectTimesheet: roleProcedure(["admin", "tech", "presales", "pm"])
         .input(z.object({ id: z.string() }))
         .mutation(async ({ ctx, input }) => {
             if (!canDeleteRecord(ctx.user)) {
@@ -2086,10 +2185,20 @@ export const projectsRouter = router({
             await assertSettlementUnlocked(getMonthKey(new Date(ts.workDate)), "project");
             const serviceRequestDoc = ts.srId
                 ? await ServiceRequestModel.findById(ts.srId)
-                    .select("pmId wbsVersions")
+                    .select("createdById pmId members opportunityId wbsVersions")
+                : null;
+            const opportunity = serviceRequestDoc?.opportunityId
+                ? await OpportunityModel.findById(serviceRequestDoc.opportunityId)
+                    .select("ownerId members presalesAssignments")
+                    .lean()
                 : null;
             assertAuthorized(
-                canManageTimesheet(ctx.user, ts, { serviceRequest: serviceRequestDoc }),
+                !!serviceRequestDoc && await canViewProject(ctx.user, serviceRequestDoc, opportunity),
+                "您沒有權限查看此專案工時"
+            );
+            assertAuthorized(
+                canManageTimesheet(ctx.user, ts, { serviceRequest: serviceRequestDoc }) ||
+                    (!!serviceRequestDoc && await canOperateProject(ctx.user, serviceRequestDoc, opportunity)),
                 "您沒有權限刪除此專案工時"
             );
 
@@ -2114,9 +2223,8 @@ export const projectsRouter = router({
         .mutation(async ({ input, ctx }) => {
             const sr = await ServiceRequestModel.findById(input.id);
             assertFound(sr, "找不到該專案");
-            const canDelete = hasAnyRole(ctx.user, ["admin"]) ||
-                (idString(sr.createdById) === ctx.user.id && userHasPermission(ctx.user, "project.delete", []));
-            assertAuthorized(canDelete, "僅專案建立者或管理員可永久刪除專案");
+            assertAuthorized(canDeleteRecord(ctx.user), "只有 Demo@demo.com 可以永久刪除專案");
+            assertAuthorized(await canOperateProject(ctx.user, sr), "您沒有權限永久刪除此專案");
 
             const [timesheetCount, calendarTaskCount, issueCount] = await Promise.all([
                 TimesheetModel.countDocuments({ srId: sr._id }),

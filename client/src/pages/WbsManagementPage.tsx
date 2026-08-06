@@ -44,7 +44,7 @@ export function WbsManagementPage() {
     const [, params] = useRoute("/service-requests/:id");
     const srId = params?.id || "";
     const utils = trpc.useContext();
-    const { hasRole, user } = useCurrentUser();
+    const { hasRole } = useCurrentUser();
 
     const [isBuildingVersion, setIsBuildingVersion] = useState(false);
     const [draftItems, setDraftItems] = useState<WbsDraftItem[]>([]);
@@ -460,8 +460,10 @@ export function WbsManagementPage() {
 	            { key: "overdue", label: "逾期未完成", count: overdue.length, examples: overdue.slice(0, 3).map((item: any) => item.title) }
 	        ].filter(item => item.count > 0);
 	    })();
-	    const isProjectOwnerMember = (projectMembers || []).some((member: any) => member.userId === user?.id && member.memberRole === "owner");
-	    const canEditSalesOwner = hasRole("admin") || hasRole("manager") || user?.id === sr.pmId || isProjectOwnerMember;
+	    const canEditSalesOwner = sr.permissions?.canOperate === true;
+	    const canManageProjectMembers = sr.permissions?.canManageMembers === true;
+	    const canEditWbs = sr.permissions?.canEditWbs === true;
+	    const canReviewSubmittedWbs = sr.permissions?.canReview === true;
 
     const getStatusColor = (status: string) => {
         switch (status) {
@@ -1025,7 +1027,7 @@ export function WbsManagementPage() {
                                 <span className="text-muted-foreground">業務部門</span>
                                 <span className="font-medium text-right">{sr.salesDepartment || "未填寫"}</span>
                             </div>
-                            {canEditSalesOwner && (
+                            {canManageProjectMembers && (
                                 <button
                                     onClick={() => {
                                         setEditedSalesUserId(sr.salesUserId || "");
@@ -1110,7 +1112,7 @@ export function WbsManagementPage() {
                                             <div className="truncate font-medium">{member.userName}</div>
                                             <div className="truncate text-xs text-muted-foreground">{member.department || "未指定部門"} / {member.memberRole === "participant" ? "參與人員" : member.memberRole === "watcher" ? "觀察者" : member.memberRole}</div>
                                         </div>
-                                        {canEditSalesOwner && member.memberRole !== "owner" && (
+                                        {canManageProjectMembers && member.memberRole !== "owner" && (
                                             <button
                                                 onClick={() => removeProjectMemberMutation.mutate({ srId, memberId: member.id })}
                                                 className="rounded p-1 text-muted-foreground hover:bg-red-50 hover:text-red-500"
@@ -1129,11 +1131,11 @@ export function WbsManagementPage() {
                     <div className="bg-card border border-border rounded-xl p-5 shadow-sm">
                         <h3 className="font-semibold text-base mb-3 flex items-center"><Paperclip className="w-4 h-4 mr-2 text-primary" />專案附件</h3>
                         <div
-                            onDragOver={e => { e.preventDefault(); setIsDragging(true); }}
+                            onDragOver={e => { e.preventDefault(); if (canEditWbs) setIsDragging(true); }}
                             onDragLeave={() => setIsDragging(false)}
-                            onDrop={handleDrop}
-                            className={`border-2 border-dashed rounded-lg p-4 text-center transition-colors cursor-pointer ${isDragging ? 'border-primary bg-primary/5' : 'border-border hover:border-primary/50 hover:bg-muted/30'} ${isUploading ? 'opacity-50 cursor-not-allowed' : ''}`}
-                            onClick={() => !isUploading && document.getElementById('file-input')?.click()}
+                            onDrop={event => canEditWbs ? handleDrop(event) : event.preventDefault()}
+                            className={`border-2 border-dashed rounded-lg p-4 text-center transition-colors ${canEditWbs ? 'cursor-pointer' : 'cursor-not-allowed opacity-60'} ${isDragging ? 'border-primary bg-primary/5' : 'border-border hover:border-primary/50 hover:bg-muted/30'} ${isUploading ? 'opacity-50 cursor-not-allowed' : ''}`}
+                            onClick={() => canEditWbs && !isUploading && document.getElementById('file-input')?.click()}
                         >
                             <Upload className={`w-7 h-7 mx-auto mb-2 ${isDragging ? 'text-primary' : 'text-muted-foreground/50'}`} />
                             <p className="text-xs text-muted-foreground">{isUploading ? "上傳中..." : "拖曳或點擊上傳檔案"}</p>
@@ -1141,7 +1143,7 @@ export function WbsManagementPage() {
 	                                id="file-input" type="file" multiple style={{ display: 'none' }}
 	                                accept=".pdf,.doc,.docx,.xls,.xlsx,.png,.jpg,.jpeg,.zip"
 	                                onChange={e => handleFileUpload(e.target.files)}
-	                                disabled={isUploading}
+	                                disabled={isUploading || !canEditWbs}
 	                            />
 	                        </div>
                             {sr.srType === "other_activity" && (
@@ -1153,10 +1155,11 @@ export function WbsManagementPage() {
                                         style={{ display: "none" }}
                                         accept=".eml,.msg,.pdf,.doc,.docx,.png,.jpg,.jpeg"
                                         onChange={e => handleFileUpload(e.target.files, "service_content_email")}
-                                        disabled={isUploading}
+                                        disabled={isUploading || !canEditWbs}
                                     />
                                     <button
-                                        onClick={() => !isUploading && document.getElementById("service-content-file-input")?.click()}
+                                        onClick={() => canEditWbs && !isUploading && document.getElementById("service-content-file-input")?.click()}
+                                        disabled={!canEditWbs}
                                         className="w-full px-3 py-2 rounded-lg border border-border bg-background text-xs font-semibold hover:bg-muted transition-colors"
                                     >
                                         上傳服務內容郵件
@@ -1190,7 +1193,7 @@ export function WbsManagementPage() {
                                             >
                                                 <Download className="h-3.5 w-3.5" />
                                             </button>
-                                            <button
+                                            {canEditWbs && <button
                                                 type="button"
                                                 onClick={() => {
                                                     if (window.confirm(`確定刪除附件「${a.fileName}」？`)) {
@@ -1201,7 +1204,7 @@ export function WbsManagementPage() {
                                                 title="刪除附件"
                                             >
                                                 <Trash2 className="h-3.5 w-3.5" />
-                                            </button>
+                                            </button>}
 	                                    </div>
                                 ))}
                             </div>
@@ -1220,7 +1223,7 @@ export function WbsManagementPage() {
 	                                >
 	                                    匯出
 	                                </button>
-	                                <button onClick={() => setIsCreatingIssue(true)} className="p-1.5 hover:bg-muted bg-primary/10 rounded-lg text-primary transition-colors"><Plus className="w-4 h-4" /></button>
+	                                {canEditWbs && <button onClick={() => setIsCreatingIssue(true)} className="p-1.5 hover:bg-muted bg-primary/10 rounded-lg text-primary transition-colors"><Plus className="w-4 h-4" /></button>}
 	                            </div>
 	                        </div>
                         {issues && issues.length > 0 ? (
@@ -1232,6 +1235,7 @@ export function WbsManagementPage() {
                                             <select
                                                 value={i.status}
                                                 onChange={e => updateIssueMutation.mutate({ id: i.id, status: e.target.value as any })}
+                                                disabled={!canEditWbs}
                                                 className={`text-[10px] px-1.5 py-0.5 rounded border font-semibold outline-none focus:ring-2 focus:ring-primary/30 ${i.status === 'resolved' || i.status === 'closed' ? 'bg-green-100 text-green-700 border-green-200' : 'bg-amber-100 text-amber-700 border-amber-200'}`}
                                             >
                                                 <option value="open">待處理 (Open)</option>
@@ -1270,7 +1274,7 @@ export function WbsManagementPage() {
                                     <button onClick={handleExportXlsx} className="bg-muted text-foreground hover:bg-muted/80 border px-3 py-1.5 rounded-md inline-flex items-center text-sm font-medium transition-colors shadow-sm">
                                         匯出 Excel
                                     </button>
-                                    {(!latestVersion || latestVersion.status !== "submitted") && (hasRole("admin") || hasRole("manager") || hasRole("tech") || hasRole("presales") || user?.id === sr.pmId) && (
+                                    {(!latestVersion || latestVersion.status !== "submitted") && canEditWbs && (
                                         <button onClick={handleStartBuild}
                                             className="bg-primary text-primary-foreground hover:bg-primary/90 px-4 py-1.5 rounded-md inline-flex items-center text-sm font-medium transition-colors shadow-sm">
                                             <Plus className="w-4 h-4 mr-1.5" />建立 v{nextVersionNumber}
@@ -1358,7 +1362,7 @@ export function WbsManagementPage() {
                                                         </div>
                                                     )}
                                                 </div>
-                                                {version.status === "submitted" && (hasRole("admin") || hasRole("manager") || user?.id === sr.pmId) && (
+                                                {version.status === "submitted" && canReviewSubmittedWbs && (
                                                     <div className="flex gap-2">
                                                         {reviewingId === version.id ? (
                                                             <span className="text-xs text-muted-foreground animate-pulse">處理中...</span>
@@ -1939,7 +1943,7 @@ export function WbsManagementPage() {
                                 PM
                                 <select value={editedPmId} onChange={event => setEditedPmId(event.target.value)} className="mt-1 w-full rounded-lg border border-border bg-background px-3 py-2 font-normal">
                                     <option value="">未指派</option>
-                                    {(allUsers?.items || []).filter((item: any) => item.role === "pm" || item.roles?.includes("pm")).map((item: any) => (
+                                    {(allUsers?.items || []).filter((item: any) => item.role === "pm").map((item: any) => (
                                         <option key={item.id} value={item.id}>{item.name}</option>
                                     ))}
                                 </select>

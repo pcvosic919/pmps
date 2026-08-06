@@ -22,7 +22,6 @@ export type UserSession = {
     department?: string;
     managedDepartments: string[];
     role: Role;
-    roles: Role[];
     permissionOverrides: PermissionOverrides;
     isActive: boolean;
 };
@@ -48,7 +47,6 @@ export const createContext = async ({ req, res }: CreateExpressContextOptions) =
                     name: BREAKGLASS_CONFIG.user.name,
                     managedDepartments: [],
                     role: BREAKGLASS_CONFIG.user.role,
-                    roles: BREAKGLASS_CONFIG.user.roles,
                     permissionOverrides: { allow: [], deny: [] },
                     isActive: true
                 };
@@ -65,7 +63,6 @@ export const createContext = async ({ req, res }: CreateExpressContextOptions) =
                             department: dbUser.department,
                             managedDepartments: (dbUser as any).managedDepartments || [],
                             role: dbUser.role as Role,
-                            roles: (dbUser.roles || []) as Role[],
                             permissionOverrides: {
                                 allow: ((dbUser as any).permissionOverrides?.allow || []) as FeaturePermission[],
                                 deny: ((dbUser as any).permissionOverrides?.deny || []) as FeaturePermission[]
@@ -178,7 +175,7 @@ export const userHasPermission = (
 ) => {
     if (user.permissionOverrides.deny.includes(permission)) return false;
     if (user.permissionOverrides.allow.includes(permission)) return true;
-    return defaultRoles.includes(user.role) || user.roles.some(role => defaultRoles.includes(role));
+    return defaultRoles.includes(user.role);
 };
 
 export const permissionProcedure = (permission: FeaturePermission, defaultRoles: Role[]) =>
@@ -195,10 +192,7 @@ export const permissionProcedure = (permission: FeaturePermission, defaultRoles:
 // Role-based authorization middleware
 export const roleProcedure = (allowedRoles: Role[]) =>
     protectedProcedure.use(({ next, ctx }) => {
-        // Check if user's primary role or any of their multiple roles match the allowed roles
-        const hasRole =
-            allowedRoles.includes(ctx.user.role) ||
-            ctx.user.roles.some((r) => allowedRoles.includes(r as Role));
+        const hasRole = allowedRoles.includes(ctx.user.role);
 
         if (!hasRole) {
             throw new TRPCError({

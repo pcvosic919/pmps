@@ -83,17 +83,17 @@ const navGroups: NavGroup[] = [
         key: "delivery",
         label: "專案 / 工時",
         items: [
-            { icon: LayoutDashboard, label: "專案總表", href: "/pm-dashboard", roles: ["admin", "manager", "pm"] },
-            { icon: FolderKanban, label: "專案管理", href: "/projects", roles: ["admin", "manager", "pm", "tech"], permission: "module.projects.view" },
-            { icon: Clock, label: "專案工時", href: "/project-timesheets", roles: ["admin", "manager", "pm", "tech"] },
-            { icon: FileCheck, label: "變更單 (CR)", href: "/change-requests", roles: ["admin", "manager", "pm", "tech"] },
+            { icon: LayoutDashboard, label: "專案總表", href: "/pm-dashboard", roles: ["admin", "manager", "pm", "presales"] },
+            { icon: FolderKanban, label: "專案管理", href: "/projects", roles: ["admin", "manager", "pm", "tech", "presales"], permission: "module.projects.view" },
+            { icon: Clock, label: "專案工時", href: "/project-timesheets", roles: ["admin", "manager", "pm", "tech", "presales"] },
+            { icon: FileCheck, label: "變更單 (CR)", href: "/change-requests", roles: ["admin", "manager", "pm", "tech", "presales", "business"] },
         ],
     },
     {
         key: "schedule",
         label: "排程",
         items: [
-            { icon: CalendarDays, label: "排程行事曆", href: "/calendar", roles: ["admin", "manager", "pm", "tech"], permission: "module.calendar.view" },
+            { icon: CalendarDays, label: "排程行事曆", href: "/calendar", roles: ["admin", "manager", "pm", "tech", "presales"], permission: "module.calendar.view" },
         ],
     },
     {
@@ -169,7 +169,7 @@ export function AppLayout({ children }: AppLayoutProps) {
     const unreadCount = notifications?.filter((item) => !item.isRead).length ?? 0;
 
     const hasRole = (role: string) =>
-        !!user && (user.role === role || user.roles.includes(role as never));
+        !!user && user.role === role;
 
     const visibleNavGroups = navGroups
         .map((group) => ({

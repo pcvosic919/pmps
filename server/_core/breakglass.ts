@@ -13,7 +13,6 @@ export const BREAKGLASS_CONFIG = {
         email: process.env.BREAKGLASS_EMAIL || "demo@demo.com",
 
         role: "admin" as Role,
-        roles: ["admin" as Role],
         isActive: true,
     }
 };
