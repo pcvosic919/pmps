@@ -1,8 +1,13 @@
 import { useState, useMemo } from "react";
 import { trpc } from "../lib/trpc";
 import { cn } from "../lib/utils";
-import { CalendarDays, Plus, Trash2, AlertCircle, Filter, Package } from "lucide-react";
+import { CalendarDays, Plus, Trash2, AlertCircle, Filter, Package, ClipboardList } from "lucide-react";
 import { useCurrentUser } from "../lib/useCurrentUser";
+
+const summarizeWbsDescription = (value?: string, maxLength = 48) => {
+    const normalized = value?.replace(/\s+/g, " ").trim() || "";
+    return normalized.length > maxLength ? `${normalized.slice(0, maxLength)}…` : normalized;
+};
 
 export function ProjectTimesheetsPage() {
     const utils = trpc.useContext();
@@ -158,9 +163,9 @@ export function ProjectTimesheetsPage() {
                 </div>
             </div>
 
-            <div className="grid md:grid-cols-3 gap-6">
+            <div className="grid gap-6 lg:grid-cols-[minmax(320px,380px)_minmax(0,1fr)]">
                 {/* Form Section */}
-                <div className="md:col-span-1 space-y-4">
+                <div className="space-y-4">
                     <div className="bg-card border border-border rounded-xl p-6 shadow-sm">
 	                        <h3 className="text-xl font-bold mb-4 flex items-center gap-2">
 	                            <Plus className="w-5 h-5 text-primary" />
@@ -191,7 +196,13 @@ export function ProjectTimesheetsPage() {
 	                                            <div className="flex items-start justify-between gap-3">
 	                                                <div className="min-w-0">
 	                                                    <div className="text-[11px] text-muted-foreground truncate">{assignment.srTitle}</div>
-	                                                    <div className="text-sm font-semibold truncate">{assignment.title}</div>
+	                                                    <div className="mt-0.5 flex items-center gap-1.5">
+	                                                        {assignment.code && <span className="shrink-0 rounded bg-primary/10 px-1.5 py-0.5 font-mono text-[10px] font-semibold text-primary">{assignment.code}</span>}
+	                                                        <div className="text-sm font-semibold truncate">{assignment.title}</div>
+	                                                    </div>
+	                                                    {assignment.description && (
+	                                                        <p className="mt-1 line-clamp-2 text-xs leading-relaxed text-foreground/70">{assignment.description}</p>
+	                                                    )}
 	                                                    <div className="mt-1 text-xs text-muted-foreground truncate">{assignment.assigneeName || "未指派"}{assignment.assigneeDepartment ? ` / ${assignment.assigneeDepartment}` : ""}</div>
 	                                                </div>
 	                                                <span className="shrink-0 text-[11px] border border-border rounded-full px-2 py-0.5 text-muted-foreground">{statusLabels[assignment.status || "not_started"]}</span>
@@ -234,12 +245,12 @@ export function ProjectTimesheetsPage() {
 	                                    required={!canSubmitWithoutWbs}
 	                                    disabled={!selectedProjectId}
                                 >
-                                    <option value="">-- 再選擇該專案下的 WBS --</option>
-                                    {availableWbsItems.map((a: any) => (
-                                        <option key={a.wbsItemId || a.id} value={a.wbsItemId || a.id}>
-                                            {a.title} ({a.estimatedHours} 天 / 已填 {a.actualHours || 0} 小時)
-                                        </option>
-                                    ))}
+	                                    <option value="">-- 再選擇該專案下的 WBS --</option>
+	                                    {availableWbsItems.map((a: any) => (
+	                                        <option key={a.wbsItemId || a.id} value={a.wbsItemId || a.id}>
+	                                            {a.code ? `[${a.code}] ` : ""}{a.title}{a.description ? ` — ${summarizeWbsDescription(a.description)}` : ""} ({a.totalEstimatedHours ?? a.estimatedHours ?? 0} 天 / 已填 {a.actualHours || 0} 小時)
+	                                        </option>
+	                                    ))}
                                 </select>
                                 {assignments?.length === 0 && (
                                     <p className="text-xs text-yellow-600 dark:text-yellow-400 mt-1 flex items-center gap-1">
@@ -260,6 +271,32 @@ export function ProjectTimesheetsPage() {
 	                                    <p className="text-xs text-emerald-600 mt-1 flex items-center gap-1">
 	                                        <AlertCircle className="w-3 h-3" /> 此 WBS 已標示完成，請確認是否仍需補填工時
 	                                    </p>
+	                                )}
+	                                {selectedWbsItem && (
+	                                    <div className="mt-3 overflow-hidden rounded-lg border border-primary/20 bg-primary/[0.04]">
+	                                        <div className="flex items-start gap-3 border-b border-primary/10 px-3 py-3">
+	                                            <div className="rounded-md bg-primary/10 p-2 text-primary">
+	                                                <ClipboardList className="h-4 w-4" />
+	                                            </div>
+	                                            <div className="min-w-0 flex-1">
+	                                                <div className="flex flex-wrap items-center gap-2">
+	                                                    <span className="text-[11px] font-semibold uppercase tracking-wide text-primary">WBS 工項說明</span>
+	                                                    {selectedWbsItem.code && <span className="rounded bg-background px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground">{selectedWbsItem.code}</span>}
+	                                                </div>
+	                                                <p className="mt-1 text-sm font-semibold leading-snug">{selectedWbsItem.title}</p>
+	                                            </div>
+	                                        </div>
+	                                        <div className="space-y-3 px-3 py-3">
+	                                            <p className={`whitespace-pre-wrap text-xs leading-relaxed ${selectedWbsItem.description ? "text-foreground/80" : "italic text-muted-foreground"}`}>
+	                                                {selectedWbsItem.description || "此工項尚未填寫說明，請至 WBS 管理補充工作範圍與預期產出。"}
+	                                            </p>
+	                                            <div className="flex flex-wrap gap-2 text-[11px] text-muted-foreground">
+	                                                <span className="rounded-full border border-border bg-background px-2 py-1">預估 {selectedWbsItem.totalEstimatedHours ?? selectedWbsItem.estimatedHours ?? 0} 天</span>
+	                                                <span className="rounded-full border border-border bg-background px-2 py-1">已填 {selectedWbsItem.actualHours || 0} 小時</span>
+	                                                <span className="rounded-full border border-border bg-background px-2 py-1">{statusLabels[selectedWbsItem.status || "not_started"]}</span>
+	                                            </div>
+	                                        </div>
+	                                    </div>
 	                                )}
 	                            </div>
 
@@ -325,7 +362,7 @@ export function ProjectTimesheetsPage() {
                 </div>
 
                 {/* History Section */}
-                <div className="md:col-span-2 space-y-4">
+                <div className="min-w-0 space-y-4">
                     <div className="bg-card border border-border rounded-xl p-6 shadow-sm min-h-full">
                         <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-6">
                             <h3 className="text-xl font-bold">我的任務填報紀錄</h3>
