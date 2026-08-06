@@ -14,7 +14,6 @@ import { memberRoles, opportunityStatuses, opportunityTypes } from "../../shared
 import {
     assertAuthorized,
     assertFound,
-    canAccessOpportunity,
     canDeleteRecord,
     canManageOpportunity,
     canManageTimesheet,
@@ -29,6 +28,7 @@ import { ensureCompanyByName } from "../_core/companies";
 import { writeLocalAttachment } from "../_core/attachments";
 import {
     buildOpportunityListQuery,
+    getAccessibleOpportunityQuery,
     opportunitySortFields,
 } from "./opportunities.listing";
 import {
@@ -89,6 +89,22 @@ const assertOpportunityConvertible = (opportunity: { status?: string }) => {
 
 const getEffectiveOpportunityType = (opportunity: { opportunityType?: string; estimatedValue?: number }) =>
     opportunity.opportunityType || (Number(opportunity.estimatedValue || 0) > 0 ? "revenue" : "presales");
+
+const opportunityIdString = (opportunity: any) =>
+    opportunity?._id?.toString?.() || opportunity?.id?.toString?.() || "";
+
+const canAccessOpportunityInScope = async (user: any, opportunity: any) => {
+    if (hasAnyRole(user, ["admin"])) return true;
+    const opportunityId = opportunityIdString(opportunity);
+    if (!opportunityId) return false;
+    const accessQuery = await getAccessibleOpportunityQuery(user);
+    return !!await OpportunityModel.exists({ _id: opportunityId, ...accessQuery });
+};
+
+const canManageOpportunityInScope = async (user: any, opportunity: any) => {
+    if (!await canAccessOpportunityInScope(user, opportunity)) return false;
+    return hasAnyRole(user, ["admin", "manager"]) || canManageOpportunity(user, opportunity);
+};
 
 const getSalesUserFields = async (salesUserId?: string) => {
     if (!salesUserId) return null;
@@ -370,8 +386,10 @@ export const opportunitiesRouter = router({
                                     .lean(),
                                 "找不到指定的商機 ID"
                             );
-                            const canUpdate = hasAnyRole(ctx.user, ["admin", "manager", "presales"]) ||
-                                isOpportunityBusinessOwner(ctx.user, opportunity);
+                            const canUpdate = await canAccessOpportunityInScope(ctx.user, opportunity) && (
+                                hasAnyRole(ctx.user, ["admin", "manager", "presales"]) ||
+                                isOpportunityBusinessOwner(ctx.user, opportunity)
+                            );
                             assertAuthorized(canUpdate, "您沒有權限更新此商機");
                             assertOpportunityEditable(opportunity);
                             await ensureCompanyByName(row.customerName, ctx.user.id);
@@ -576,7 +594,7 @@ export const opportunitiesRouter = router({
                 await OpportunityModel.findById(input.id).lean(),
                 "找不到該商機"
             );
-            assertAuthorized(canAccessOpportunity(ctx.user, opp), "您沒有權限檢視此商機");
+            assertAuthorized(await canAccessOpportunityInScope(ctx.user, opp), "您沒有權限檢視此商機");
             return {
                 ...opp,
                 id: opp._id.toString(),
@@ -595,7 +613,7 @@ export const opportunitiesRouter = router({
                     .lean(),
                 "找不到該商機"
             );
-            assertAuthorized(canAccessOpportunity(ctx.user, opp), "您沒有權限檢視商機成員");
+            assertAuthorized(await canAccessOpportunityInScope(ctx.user, opp), "您沒有權限檢視商機成員");
             
             const members = await ensureOpportunityOwnerMember(opp);
             const userIds = members.map((m: any) => m.userId);
@@ -619,10 +637,6 @@ export const opportunitiesRouter = router({
         }))
         .mutation(async ({ input, ctx }) => {
             const existingProject = await findProjectByOpportunityId(input.opportunityId);
-            if (existingProject) {
-                await finalizeOpportunityConversion(input.opportunityId);
-                return { id: existingProject._id.toString(), reused: true };
-            }
             const opportunity = assertFound(
                 await OpportunityModel.findById(input.opportunityId)
                     .select("ownerId members presalesAssignments status")
@@ -630,7 +644,15 @@ export const opportunitiesRouter = router({
                 "找不到該商機"
             );
             const isOwner = opportunity.ownerId?.toString() === ctx.user.id;
-            assertAuthorized(canManageOpportunity(ctx.user, opportunity) || isOwner, "您沒有權限新增商機成員");
+            assertAuthorized(
+                await canAccessOpportunityInScope(ctx.user, opportunity) &&
+                    (canManageOpportunity(ctx.user, opportunity) || isOwner || hasAnyRole(ctx.user, ["admin", "manager"])),
+                "您沒有權限新增商機成員"
+            );
+            if (existingProject) {
+                await finalizeOpportunityConversion(input.opportunityId);
+                return { id: existingProject._id.toString(), reused: true };
+            }
             assertOpportunityEditable(opportunity);
 
             const existingMember = (opportunity.members || []).find((member: any) => member.userId?.toString() === input.userId);
@@ -684,7 +706,11 @@ export const opportunitiesRouter = router({
                 "找不到該商機"
             );
             const isOwner = opportunity.ownerId?.toString() === ctx.user.id;
-            assertAuthorized(canManageOpportunity(ctx.user, opportunity) || isOwner, "您沒有權限移除此商機成員");
+            assertAuthorized(
+                await canAccessOpportunityInScope(ctx.user, opportunity) &&
+                    (canManageOpportunity(ctx.user, opportunity) || isOwner || hasAnyRole(ctx.user, ["admin", "manager"])),
+                "您沒有權限移除此商機成員"
+            );
             assertOpportunityEditable(opportunity);
 
             await OpportunityModel.updateOne(
@@ -703,7 +729,7 @@ export const opportunitiesRouter = router({
                     .lean(),
                 "找不到該商機"
             );
-            assertAuthorized(canAccessOpportunity(ctx.user, opp), "您沒有權限檢視售前指派");
+            assertAuthorized(await canAccessOpportunityInScope(ctx.user, opp), "您沒有權限檢視售前指派");
             return (opp.presalesAssignments || []).map((a: any) => ({
                 id: a._id.toString(),
                 opportunityId: input.opportunityId,
@@ -722,7 +748,7 @@ export const opportunitiesRouter = router({
                     .lean(),
                 "找不到該商機"
             );
-            assertAuthorized(canAccessOpportunity(ctx.user, opp), "您沒有權限檢視售前工時");
+            assertAuthorized(await canAccessOpportunityInScope(ctx.user, opp), "您沒有權限檢視售前工時");
             const items = await TimesheetModel.find({ opportunityId: input.opportunityId, type: "presales" })
                 .sort({ workDate: -1 })
                 .lean();
@@ -829,7 +855,11 @@ export const opportunitiesRouter = router({
                 "找不到該商機"
             );
             const isTechOrPresales = hasAnyRole(ctx.user, ["tech", "presales"]);
-            assertAuthorized(canManageOpportunity(ctx.user, opportunity) || isTechOrPresales, "您沒有權限指派售前");
+            assertAuthorized(
+                await canAccessOpportunityInScope(ctx.user, opportunity) &&
+                    (canManageOpportunity(ctx.user, opportunity) || isTechOrPresales),
+                "您沒有權限指派售前"
+            );
             assertOpportunityEditable(opportunity);
             assertOpportunityAssignable(opportunity);
 
@@ -886,9 +916,11 @@ export const opportunitiesRouter = router({
             const isPresalesOnly = hasAnyRole(ctx.user, ["presales"]) &&
                 !hasAnyRole(ctx.user, ["admin", "manager", "pm"]);
             assertAuthorized(
-                isPresalesOnly
-                    ? isOpportunityOwner(ctx.user, opportunity)
-                    : canManageOpportunity(ctx.user, opportunity),
+                await canAccessOpportunityInScope(ctx.user, opportunity) && (
+                    isPresalesOnly
+                        ? isOpportunityOwner(ctx.user, opportunity)
+                        : hasAnyRole(ctx.user, ["admin", "manager"]) || canManageOpportunity(ctx.user, opportunity)
+                ),
                 "您沒有權限從此商機建立 SR"
             );
             assertOpportunityConvertible(opportunity);
@@ -963,7 +995,7 @@ export const opportunitiesRouter = router({
                     .lean(),
                 "找不到該商機"
             );
-            assertAuthorized(canManageOpportunity(ctx.user, opportunity), "您沒有權限更新商機狀態");
+            assertAuthorized(await canManageOpportunityInScope(ctx.user, opportunity), "您沒有權限更新商機狀態");
             assertOpportunityEditable(opportunity);
             if (input.status === "quoting" && input.estimatedValue === undefined) {
                 throw new TRPCError({ code: "BAD_REQUEST", message: "切換為報價中時必須輸入商機金額" });
@@ -996,7 +1028,7 @@ export const opportunitiesRouter = router({
                     .lean(),
                 "找不到該商機"
             );
-            assertAuthorized(canManageOpportunity(ctx.user, opportunity), "您沒有權限更新自訂欄位");
+            assertAuthorized(await canManageOpportunityInScope(ctx.user, opportunity), "您沒有權限更新自訂欄位");
             assertOpportunityEditable(opportunity);
 
             await OpportunityModel.updateOne(
@@ -1020,7 +1052,8 @@ export const opportunitiesRouter = router({
             );
 
             const isBusinessOwner = isOpportunityBusinessOwner(ctx.user, opportunity);
-            const canUpdate = hasAnyRole(ctx.user, ["admin", "manager"]) || isBusinessOwner;
+            const canUpdate = await canAccessOpportunityInScope(ctx.user, opportunity) &&
+                (hasAnyRole(ctx.user, ["admin", "manager"]) || isBusinessOwner);
             assertAuthorized(canUpdate, "您沒有權限更新商機描述");
             assertOpportunityEditable(opportunity);
 
@@ -1045,7 +1078,8 @@ export const opportunitiesRouter = router({
             );
 
             const isBusinessOwner = isOpportunityBusinessOwner(ctx.user, opportunity);
-            const canUpdate = hasAnyRole(ctx.user, ["admin", "manager", "presales"]) || isBusinessOwner;
+            const canUpdate = await canAccessOpportunityInScope(ctx.user, opportunity) &&
+                (hasAnyRole(ctx.user, ["admin", "manager", "presales"]) || isBusinessOwner);
             assertAuthorized(canUpdate, "您沒有權限更新商機金額");
             assertOpportunityEditable(opportunity);
 
@@ -1071,7 +1105,8 @@ export const opportunitiesRouter = router({
             );
 
             const isBusinessOwner = isOpportunityBusinessOwner(ctx.user, opportunity);
-            const canUpdate = hasAnyRole(ctx.user, ["admin", "manager", "presales"]) || isBusinessOwner;
+            const canUpdate = await canAccessOpportunityInScope(ctx.user, opportunity) &&
+                (hasAnyRole(ctx.user, ["admin", "manager", "presales"]) || isBusinessOwner);
             assertAuthorized(canUpdate, "您沒有權限更新商機類型");
             assertOpportunityEditable(opportunity);
 
@@ -1097,7 +1132,8 @@ export const opportunitiesRouter = router({
             );
 
             const isBusinessOwner = isOpportunityBusinessOwner(ctx.user, opportunity);
-            const canUpdate = hasAnyRole(ctx.user, ["admin", "manager", "presales"]) || isBusinessOwner;
+            const canUpdate = await canAccessOpportunityInScope(ctx.user, opportunity) &&
+                (hasAnyRole(ctx.user, ["admin", "manager", "presales"]) || isBusinessOwner);
             assertAuthorized(canUpdate, "您沒有權限更新業務欄位");
             assertOpportunityEditable(opportunity);
             const salesUserFields = assertFound(await getSalesUserFields(input.salesUserId), "找不到指定的業務帳號");
@@ -1142,7 +1178,8 @@ export const opportunitiesRouter = router({
                 assignment.techId?.toString() === ctx.user.id
             );
             assertAuthorized(
-                canManageOpportunity(ctx.user, opportunity) || isAssignedPresales || hasAnyRole(ctx.user, ["admin", "manager"]),
+                await canAccessOpportunityInScope(ctx.user, opportunity) &&
+                    (canManageOpportunity(ctx.user, opportunity) || isAssignedPresales || hasAnyRole(ctx.user, ["admin", "manager"])),
                 "您沒有權限填寫此工時"
             );
 
@@ -1199,7 +1236,7 @@ export const opportunitiesRouter = router({
                     .lean(),
                 "找不到該商機"
             );
-            assertAuthorized(canManageOpportunity(ctx.user, opp) || hasAnyRole(ctx.user, ["admin", "manager"]), "您沒有權限上傳附件");
+            assertAuthorized(await canManageOpportunityInScope(ctx.user, opp), "您沒有權限上傳附件");
             assertOpportunityEditable(opp);
             
             const localAttachment = opp.localFolderPath && input.fileDataBase64
