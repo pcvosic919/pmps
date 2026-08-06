@@ -33,6 +33,7 @@ const srSchema = z.object({
     recognitionMonth: z.string().optional(),
     srType: z.enum(["project", "maintenance", "other_activity"]).default("project"),
     contractAmount: z.number().min(0, "合約金額不能為負").optional(),
+    finalPrice: z.number().min(0, "合約最終金額不能為負").optional(),
     totalPoints: z.number().min(0).optional(),
     pointValue: z.number().min(0).optional(),
     pmId: z.string().optional(),
@@ -63,7 +64,7 @@ const srTypeForServiceType = (value?: string): "project" | "maintenance" | "othe
 };
 
 export function ServiceRequestsPage() {
-    const { user, hasRole, hasPermission } = useCurrentUser();
+    const { user, hasPermission } = useCurrentUser();
     const canDelete = user?.email?.trim().toLowerCase() === "demo@demo.com";
     const { data: srs, isLoading, refetch } = trpc.projects.srList.useQuery();
     const { data: users } = trpc.users.list.useQuery({ limit: 500 });
@@ -105,7 +106,7 @@ export function ServiceRequestsPage() {
     const form = useForm<any>({
         resolver: zodResolver(srSchema) as any,
         defaultValues: { 
-            title: "", customerName: "", srType: "project", contractAmount: 0, 
+            title: "", customerName: "", srType: "project", contractAmount: 0, finalPrice: undefined,
             salesUserId: "", salesDepartment: "", salesRep: "",
             externalServiceType: "專案服務", plannedStartDate: "", plannedEndDate: "", reviewDate: "", warrantyExpiresAt: "",
             billingAllocation: "", recognitionMonth: "",
@@ -130,6 +131,7 @@ export function ServiceRequestsPage() {
         createSR.mutate({
             ...values,
             contractAmount: finalContractAmount,
+            finalPrice: values.finalPrice ?? finalContractAmount,
             opportunityId: undefined
         });
     };
@@ -228,7 +230,7 @@ export function ServiceRequestsPage() {
                                         </div>
                                     </td>
                                     <td className="px-6 py-4">
-                                        {!hasRole("tech") ? (
+                                        {sr.permissions?.canViewFinancials ? (
                                             <span className="text-sm font-mono font-bold text-foreground">
                                                 {sr.contractAmount?.toLocaleString() || 0}
                                             </span>
@@ -541,6 +543,31 @@ export function ServiceRequestsPage() {
                                                             <FormControl>
                                                                 <Input type="number" {...field} onChange={(e) => field.onChange(Number(e.target.value))} />
                                                             </FormControl>
+                                                            <FormMessage />
+                                                        </FormItem>
+                                                    )}
+                                                />
+                                                <div className="rounded-lg border border-border bg-muted/30 p-4">
+                                                    <div className="text-xs text-muted-foreground">點數計算報價</div>
+                                                    <div className="mt-1 text-xl font-bold">NT$ {previewAmount.toLocaleString()}</div>
+                                                    <div className="mt-1 text-xs text-muted-foreground">總點數 × 點數單價，建立後作為合約報價。</div>
+                                                </div>
+                                                <FormField
+                                                    control={form.control}
+                                                    name="finalPrice"
+                                                    render={({ field }: any) => (
+                                                        <FormItem>
+                                                            <FormLabel>合約最終金額 (NT$)</FormLabel>
+                                                            <FormControl>
+                                                                <Input
+                                                                    type="number"
+                                                                    min={0}
+                                                                    placeholder={`未填則使用 ${previewAmount.toLocaleString()}`}
+                                                                    value={field.value ?? ""}
+                                                                    onChange={(event) => field.onChange(event.target.value === "" ? undefined : Number(event.target.value))}
+                                                                />
+                                                            </FormControl>
+                                                            <p className="text-xs text-muted-foreground">可填寫議價後的最終成交金額；留空時使用點數計算報價。</p>
                                                             <FormMessage />
                                                         </FormItem>
                                                     )}

@@ -16,22 +16,22 @@ import {
     Cell
 } from "recharts";
 
-import { useCurrentUser } from "../lib/useCurrentUser";
-
 export function PmDashboardPage() {
-    const { hasRole } = useCurrentUser();
     const { data: projects, isLoading } = trpc.projects.srList.useQuery({ limit: 50 });
     const getProjectAmount = (project: any) => Number(project.finalPrice ?? project.contractAmount ?? 0);
 
     const activeProjects = useMemo(() => 
         (projects || []).filter(p => !["completed", "cancelled"].includes(p.status)),
     [projects]);
+    const financialProjects = useMemo(() =>
+        activeProjects.filter(project => project.permissions?.canViewFinancials === true),
+    [activeProjects]);
 
     const metrics = useMemo(() => {
         if (!activeProjects.length) return { totalAmount: 0, atRisk: 0, new: 0, active: 0 };
         
         return activeProjects.reduce((acc, p) => ({
-            totalAmount: acc.totalAmount + getProjectAmount(p),
+            totalAmount: acc.totalAmount + (p.permissions?.canViewFinancials ? getProjectAmount(p) : 0),
             atRisk: acc.atRisk + (p.marginWarning ? 1 : 0),
             new: acc.new + (p.status === "new" ? 1 : 0),
             active: acc.active + (p.status === "in_progress" ? 1 : 0)
@@ -39,7 +39,7 @@ export function PmDashboardPage() {
     }, [activeProjects]);
 
     const chartData = useMemo(() => {
-        return activeProjects
+        return financialProjects
             .map(p => ({
                 name: p.title.length > 10 ? p.title.substring(0, 10) + '...' : p.title,
                 fullTitle: p.title,
@@ -49,7 +49,7 @@ export function PmDashboardPage() {
             }))
             .sort((a, b) => b.amount - a.amount)
             .slice(0, 10); // Top 10 by amount
-    }, [activeProjects]);
+    }, [financialProjects]);
 
     if (isLoading) {
         return <div className="p-8 text-center animate-pulse text-muted-foreground">載入專案總表資料中...</div>;
@@ -97,7 +97,7 @@ export function PmDashboardPage() {
                         <div>
                             <p className="text-sm font-semibold tracking-wider text-muted-foreground uppercase text-xs">管理總合約額</p>
                             <h3 className="text-3xl font-black mt-2 bg-clip-text text-transparent bg-gradient-to-r from-emerald-600 to-emerald-400">
-                                {hasRole("tech") ? "---" : (metrics.totalAmount >= 1000000 
+                                {financialProjects.length === 0 ? "---" : (metrics.totalAmount >= 1000000
                                     ? `NT$ ${(metrics.totalAmount / 1000000).toFixed(1)}M` 
                                     : `NT$ ${(metrics.totalAmount / 1000).toFixed(0)}K`)}
                             </h3>
@@ -109,7 +109,7 @@ export function PmDashboardPage() {
                     <div className="mt-4 pt-4 border-t border-border/50">
                         <p className="text-xs text-muted-foreground flex items-center">
                             <TrendingUp className="w-3.5 h-3.5 mr-1.5 text-emerald-500" />
-                            活躍狀態下累積合約值
+                            {financialProjects.length > 0 ? `${financialProjects.length} 個可查閱專案的累積合約值` : "目前沒有可查閱的成交金額"}
                         </p>
                     </div>
                 </div>
@@ -160,7 +160,7 @@ export function PmDashboardPage() {
                         <Activity className="w-5 h-5 mr-2 text-primary drop-shadow-[0_0_5px_rgba(var(--primary),0.5)]" /> Top 10 活躍專案 (按最終成交金額)
                     </h3>
                     <div className="h-[300px] w-full">
-                        {hasRole("tech") ? (
+                        {financialProjects.length === 0 ? (
                             <div className="h-full flex items-center justify-center text-muted-foreground italic bg-muted/20 rounded-xl border border-dashed">
                                 成交金額資訊僅限特定角色查閱
                             </div>
@@ -217,7 +217,7 @@ export function PmDashboardPage() {
                                         <span className="bg-primary/10 text-primary border border-primary/20 shadow-inner px-2.5 py-1 rounded-md capitalize font-semibold tracking-wide">
                                             {p.status.replace("_", " ")}
                                         </span>
-                                        {!hasRole("tech") && <span className="font-mono font-medium text-muted-foreground group-hover:text-foreground transition-colors">NT$ {getProjectAmount(p).toLocaleString()}</span>}
+                                        {p.permissions?.canViewFinancials && <span className="font-mono font-medium text-muted-foreground group-hover:text-foreground transition-colors">NT$ {getProjectAmount(p).toLocaleString()}</span>}
                                     </div>
                                 </a>
                             </Link>

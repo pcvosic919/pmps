@@ -42,6 +42,8 @@ const permissionLabels: Record<FeaturePermission, string> = {
     "module.calendar.view": "檢視排程行事曆",
     "project.create_sr": "建立 SR",
     "project.edit": "編輯專案",
+    "project.financials.view": "檢視專案財務資訊",
+    "project.financials.edit": "編輯專案財務資訊",
     "project.manage_members": "管理專案成員",
     "project.archive": "封存／還原專案",
     "project.delete": "永久刪除專案",

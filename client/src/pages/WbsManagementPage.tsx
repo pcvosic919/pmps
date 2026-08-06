@@ -4,7 +4,6 @@ import { useRoute } from "wouter";
 import { ArrowLeft, Plus, FileText, Clock, Trash2, Save, X, CheckCircle2, XCircle, Upload, Paperclip, AlertCircle, Receipt, Download, ChevronDown, ChevronRight, Users, UserPlus } from "lucide-react";
 import { Link } from "wouter";
 import toast from "react-hot-toast";
-import { useCurrentUser } from "../lib/useCurrentUser";
 import * as XLSX from "xlsx";
 import { SharePointFilesSection } from "../components/SharePointFilesSection";
 import { exportRowsToXlsx, exportWbsCostWorkbook, exportWbsQuoteWorkbook, formatExportDate, makeXlsxFileName } from "../lib/exportXlsx";
@@ -44,7 +43,6 @@ export function WbsManagementPage() {
     const [, params] = useRoute("/service-requests/:id");
     const srId = params?.id || "";
     const utils = trpc.useContext();
-    const { hasRole } = useCurrentUser();
 
     const [isBuildingVersion, setIsBuildingVersion] = useState(false);
     const [draftItems, setDraftItems] = useState<WbsDraftItem[]>([]);
@@ -80,6 +78,7 @@ export function WbsManagementPage() {
     const [isCreatingIssue, setIsCreatingIssue] = useState(false);
     const [newIssueData, setNewIssueData] = useState({ title: "", description: "", priority: "medium", assigneeId: "" });
     const [showEditSalesModal, setShowEditSalesModal] = useState(false);
+    const [showFinancialModal, setShowFinancialModal] = useState(false);
     const [showProjectMemberModal, setShowProjectMemberModal] = useState(false);
     const [projectMemberUserId, setProjectMemberUserId] = useState("");
     const [projectMemberRole, setProjectMemberRole] = useState<"owner" | "participant" | "watcher">("participant");
@@ -92,6 +91,10 @@ export function WbsManagementPage() {
     const [editedPlannedStartDate, setEditedPlannedStartDate] = useState("");
     const [editedPlannedEndDate, setEditedPlannedEndDate] = useState("");
     const [editedSrType, setEditedSrType] = useState<"project" | "maintenance" | "other_activity">("project");
+    const [editedContractAmount, setEditedContractAmount] = useState(0);
+    const [editedFinalPrice, setEditedFinalPrice] = useState(0);
+    const [editedTotalPoints, setEditedTotalPoints] = useState(0);
+    const [editedPointValue, setEditedPointValue] = useState(0);
 
     const { data: sr, isLoading, error } = trpc.projects.srById.useQuery({ id: srId }, { enabled: !!srId });
     const { data: savedDraft, isFetched: isDraftFetched } = trpc.projects.getWbsDraft.useQuery({ srId }, { enabled: !!srId });
@@ -241,12 +244,13 @@ export function WbsManagementPage() {
         onError: (err) => toast.error(err.message || "更新業務欄位失敗")
     });
 
-    const updateFinalPriceMutation = trpc.projects.updateFinalPrice.useMutation({
+    const updateProjectFinancialsMutation = trpc.projects.updateProjectFinancials.useMutation({
         onSuccess: () => {
             utils.projects.srById.invalidate({ id: srId });
-            toast.success("最終成交金額已更新");
+            setShowFinancialModal(false);
+            toast.success("專案商務資訊已更新");
         },
-        onError: (err) => toast.error(err.message || "更新最終成交金額失敗")
+        onError: (err) => toast.error(err.message || "更新專案商務資訊失敗")
     });
 
     const addProjectMemberMutation = trpc.projects.addSrMember.useMutation({
@@ -462,6 +466,8 @@ export function WbsManagementPage() {
 	    })();
 	    const canEditSalesOwner = sr.permissions?.canOperate === true;
 	    const canManageProjectMembers = sr.permissions?.canManageMembers === true;
+	    const canViewFinancials = sr.permissions?.canViewFinancials === true;
+	    const canEditFinancials = sr.permissions?.canEditFinancials === true;
 	    const canEditWbs = sr.permissions?.canEditWbs === true;
 	    const canReviewSubmittedWbs = sr.permissions?.canReview === true;
 
@@ -945,15 +951,27 @@ export function WbsManagementPage() {
         }
     };
 
-    const handleUpdateFinalPrice = () => {
-        const value = window.prompt("請輸入與業務敲定的最終成交金額 (NT$)", String(sr?.finalPrice ?? sr?.contractAmount ?? 0));
-        if (value === null) return;
-        const finalPrice = Number(value);
-        if (Number.isNaN(finalPrice) || finalPrice < 0) {
-            toast.error("請輸入有效的最終成交金額");
+    const openFinancialModal = () => {
+        setEditedContractAmount(Number(sr?.contractAmount || 0));
+        setEditedFinalPrice(Number(sr?.finalPrice ?? sr?.contractAmount ?? 0));
+        setEditedTotalPoints(Number(sr?.totalPoints || 0));
+        setEditedPointValue(Number(sr?.pointValue || 0));
+        setShowFinancialModal(true);
+    };
+
+    const handleUpdateProjectFinancials = () => {
+        const values = [editedContractAmount, editedFinalPrice, editedTotalPoints, editedPointValue];
+        if (values.some(value => Number.isNaN(value) || value < 0)) {
+            toast.error("金額、點數與單價不可為負數");
             return;
         }
-        updateFinalPriceMutation.mutate({ id: sr.id, finalPrice });
+        updateProjectFinancialsMutation.mutate({
+            id: sr.id,
+            contractAmount: editedContractAmount,
+            finalPrice: editedFinalPrice,
+            totalPoints: sr.srType === "maintenance" ? editedTotalPoints : undefined,
+            pointValue: sr.srType === "maintenance" ? editedPointValue : undefined
+        });
     };
 
     const handleExportQuote = async () => {
@@ -1046,8 +1064,20 @@ export function WbsManagementPage() {
                                     編輯基本資料
                                 </button>
                             )}
-                            {!hasRole("tech") && (
+                            {canViewFinancials && (
                                 <>
+	                                    {sr.srType === "maintenance" && (
+                                            <div className="rounded-lg border border-sky-200 bg-sky-50/70 p-3 text-sky-900 dark:border-sky-900 dark:bg-sky-950/30 dark:text-sky-100">
+                                                <div className="mb-2 text-xs font-semibold uppercase tracking-wide">維運點數</div>
+                                                <div className="grid grid-cols-2 gap-2 text-xs">
+                                                    <div>總點數 <strong className="block text-sm">{Number(sr.totalPoints || 0).toLocaleString()}</strong></div>
+                                                    <div>點數單價 <strong className="block text-sm">NT$ {Number(sr.pointValue || 0).toLocaleString()}</strong></div>
+                                                </div>
+                                                <div className="mt-2 border-t border-sky-200 pt-2 text-xs dark:border-sky-900">
+                                                    點數計算報價：<strong>NT$ {(Number(sr.totalPoints || 0) * Number(sr.pointValue || 0)).toLocaleString()}</strong>
+                                                </div>
+                                            </div>
+                                        )}
 	                                    <div className="flex justify-between">
 	                                        <span className="text-muted-foreground">合約報價</span>
 	                                        <span className="font-bold">NT$ {sr.contractAmount?.toLocaleString() || 0}</span>
@@ -1056,12 +1086,12 @@ export function WbsManagementPage() {
                                             <span className="text-muted-foreground">最終成交金額</span>
                                             <span className="font-bold">NT$ {(sr.finalPrice ?? sr.contractAmount ?? 0).toLocaleString()}</span>
                                         </div>
-                                        {canEditSalesOwner && (
+                                        {canEditFinancials && (
                                             <button
-                                                onClick={handleUpdateFinalPrice}
+                                                onClick={openFinancialModal}
                                                 className="w-full mt-2 px-3 py-2 rounded-lg border border-emerald-200 bg-emerald-50 text-emerald-700 text-sm font-semibold hover:bg-emerald-100 transition-colors"
                                             >
-                                                更新最終成交金額
+                                                編輯商務資訊
                                             </button>
                                         )}
                                         <div>
@@ -1909,6 +1939,57 @@ export function WbsManagementPage() {
                                 className="px-4 py-2 text-sm bg-primary text-primary-foreground rounded-lg hover:bg-primary/90 disabled:opacity-50"
                             >
                                 {addProjectMemberMutation.isPending ? "新增中..." : "確認新增"}
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {/* Project financials modal */}
+            {showFinancialModal && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4 backdrop-blur-sm">
+                    <div className="max-h-[calc(100dvh-2rem)] w-full max-w-lg space-y-5 overflow-y-auto overscroll-contain rounded-xl border border-border bg-card p-6 shadow-xl">
+                        <div className="flex items-start justify-between gap-4">
+                            <div>
+                                <h2 className="text-lg font-bold">編輯專案商務資訊</h2>
+                                <p className="mt-1 text-xs text-muted-foreground">點數計算報價、合約報價與最終成交金額分開保存，不會互相覆蓋。</p>
+                            </div>
+                            <button onClick={() => setShowFinancialModal(false)} className="p-1 rounded-full hover:bg-muted"><X className="w-5 h-5 text-muted-foreground" /></button>
+                        </div>
+                        {sr.srType === "maintenance" && (
+                            <div className="grid grid-cols-2 gap-3 rounded-xl border border-sky-200 bg-sky-50/60 p-4 dark:border-sky-900 dark:bg-sky-950/20">
+                                <label className="text-sm font-medium">
+                                    總點數
+                                    <input type="number" min={0} value={editedTotalPoints} onChange={event => setEditedTotalPoints(Number(event.target.value))} className="mt-1 w-full rounded-lg border border-border bg-background px-3 py-2 font-normal" />
+                                </label>
+                                <label className="text-sm font-medium">
+                                    點數單價 (NT$)
+                                    <input type="number" min={0} value={editedPointValue} onChange={event => setEditedPointValue(Number(event.target.value))} className="mt-1 w-full rounded-lg border border-border bg-background px-3 py-2 font-normal" />
+                                </label>
+                                <div className="col-span-2 rounded-lg bg-background/80 p-3 text-sm">
+                                    點數計算報價
+                                    <strong className="float-right text-base">NT$ {(editedTotalPoints * editedPointValue).toLocaleString()}</strong>
+                                </div>
+                            </div>
+                        )}
+                        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                            <label className="text-sm font-medium">
+                                合約報價 (NT$)
+                                <input type="number" min={0} value={editedContractAmount} onChange={event => setEditedContractAmount(Number(event.target.value))} className="mt-1 w-full rounded-lg border border-border bg-background px-3 py-2 font-normal" />
+                            </label>
+                            <label className="text-sm font-medium">
+                                合約最終金額 (NT$)
+                                <input type="number" min={0} value={editedFinalPrice} onChange={event => setEditedFinalPrice(Number(event.target.value))} className="mt-1 w-full rounded-lg border border-border bg-background px-3 py-2 font-normal" />
+                            </label>
+                        </div>
+                        <div className="flex justify-end gap-3">
+                            <button onClick={() => setShowFinancialModal(false)} className="px-4 py-2 text-sm border border-border rounded-lg hover:bg-muted">取消</button>
+                            <button
+                                onClick={handleUpdateProjectFinancials}
+                                disabled={updateProjectFinancialsMutation.isPending}
+                                className="px-4 py-2 text-sm bg-primary text-primary-foreground rounded-lg hover:bg-primary/90 disabled:opacity-50"
+                            >
+                                {updateProjectFinancialsMutation.isPending ? "儲存中..." : "儲存商務資訊"}
                             </button>
                         </div>
                     </div>

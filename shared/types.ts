@@ -18,6 +18,8 @@ export const featurePermissions = [
     "module.calendar.view",
     "project.create_sr",
     "project.edit",
+    "project.financials.view",
+    "project.financials.edit",
     "project.manage_members",
     "project.archive",
     "project.delete",

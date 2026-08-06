@@ -4,8 +4,13 @@ import { UserModel } from "../models/User";
 import {
     canAccessServiceRequest,
     canManageServiceRequestStatus,
+    getProjectMemberRole,
     getManagedDepartments,
     hasAnyRole,
+    isOpportunityBusinessOwner,
+    isProjectOwner,
+    isResponsiblePm,
+    isServiceRequestMember,
 } from "./authorization";
 import { toObjectId } from "./cursor";
 
@@ -19,7 +24,7 @@ export type ProjectAccessUser = {
 
 const idString = (value: any) => value?._id?.toString?.() || value?.toString?.() || "";
 
-export const directProjectClauses = (userId: string, includeCreatedBy = false) => {
+export const directProjectClauses = (userId: string, includeCreatedBy = true) => {
     const userObjectId = toObjectId(userId);
     return [
         { pmId: userObjectId },
@@ -90,7 +95,51 @@ export const canViewProject = async (user: ProjectAccessUser, project: any, oppo
     if (projectPermissionDenied(user, "module.projects.view")) return false;
     if (hasAnyRole(user as any, ["admin"])) return true;
     if (hasAnyRole(user as any, ["manager"])) return managerCanAccessProject(user, project);
+    if (idString(project?.createdById) === user.id) return true;
     return canAccessServiceRequest(user as any, project, opportunity);
+};
+
+export const canViewProjectFinancials = async (
+    user: ProjectAccessUser,
+    project: any,
+    opportunity?: any,
+    options: { knownVisible?: boolean } = {}
+) => {
+    if (
+        projectPermissionDenied(user, "module.projects.view") ||
+        projectPermissionDenied(user, "project.financials.view")
+    ) return false;
+
+    const canView = options.knownVisible === true || await canViewProject(user, project, opportunity);
+    if (!canView) return false;
+    if (
+        projectPermissionAllowed(user, "project.financials.view") ||
+        projectPermissionAllowed(user, "project.financials.edit")
+    ) return true;
+    if (hasAnyRole(user as any, ["admin", "manager"])) return true;
+    if (isProjectOwner(user as any, project) || isResponsiblePm(user as any, project)) return true;
+    if (getProjectMemberRole(user as any, project) === "watcher") return false;
+    return hasAnyRole(user as any, ["pm", "presales", "business"]);
+};
+
+export const canEditProjectFinancials = async (
+    user: ProjectAccessUser,
+    project: any,
+    opportunity?: any,
+    options: { knownVisible?: boolean } = {}
+) => {
+    if (
+        projectPermissionDenied(user, "module.projects.view") ||
+        projectPermissionDenied(user, "project.financials.view") ||
+        projectPermissionDenied(user, "project.financials.edit")
+    ) return false;
+
+    if (!await canViewProjectFinancials(user, project, opportunity, options)) return false;
+    if (projectPermissionAllowed(user, "project.financials.edit")) return true;
+    if (hasAnyRole(user as any, ["admin", "manager"])) return true;
+    return isProjectOwner(user as any, project) ||
+        isResponsiblePm(user as any, project) ||
+        (!!opportunity && isOpportunityBusinessOwner(user as any, opportunity));
 };
 
 export const canOperateProject = async (
@@ -117,7 +166,13 @@ export const canReviewProject = (user: ProjectAccessUser, project: any, opportun
 
 export const canEditProjectWbs = async (user: ProjectAccessUser, project: any, opportunity?: any) => {
     if (projectPermissionDenied(user, "module.projects.view") || projectPermissionDenied(user, "wbs.submit")) return false;
-    if (hasAnyRole(user as any, ["tech"])) return canViewProject(user, project, opportunity);
+    if (hasAnyRole(user as any, ["tech"])) {
+        const canView = await canViewProject(user, project, opportunity);
+        return canView && (
+            isServiceRequestMember(user as any, project) ||
+            projectPermissionAllowed(user, "wbs.submit")
+        );
+    }
     return canOperateProject(user, project, opportunity, "wbs.submit");
 };
 
@@ -136,14 +191,25 @@ export const getProjectCapabilities = async (
         return canOperateProject(user, project, opportunity, permission);
     };
 
-    const [canOperate, canReview, canManageMembers, canArchive] = await Promise.all([
+    const [canOperate, canReview, canManageMembers, canArchive, canViewFinancials, canEditFinancials] = await Promise.all([
         canPerform("project.edit"),
         canPerform("wbs.review"),
         canPerform("project.manage_members"),
         canPerform("project.archive"),
+        canViewProjectFinancials(user, project, opportunity, options),
+        canEditProjectFinancials(user, project, opportunity, options),
     ]);
     const canEditWbs = hasAnyRole(user as any, ["tech"])
-        ? canView && !projectPermissionDenied(user, "wbs.submit")
+        ? await canEditProjectWbs(user, project, opportunity)
         : await canPerform("wbs.submit");
-    return { canView, canOperate, canReview, canManageMembers, canArchive, canEditWbs };
+    return {
+        canView,
+        canOperate,
+        canReview,
+        canManageMembers,
+        canArchive,
+        canEditWbs,
+        canViewFinancials,
+        canEditFinancials
+    };
 };
