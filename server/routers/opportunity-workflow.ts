@@ -1,4 +1,9 @@
-import type { OpportunityProbability, OpportunityStatus } from "../../shared/types";
+import type { OpportunityProbability, OpportunityQuoteStatus, OpportunityStatus, SrStatus } from "../../shared/types";
+
+type ActorLike = { id: string; role: string };
+type OpportunityOwnershipLike = { ownerId?: unknown; salesUserId?: unknown };
+const sameId = (left?: unknown, right?: unknown) =>
+    left != null && right != null && left.toString() === right.toString();
 
 export const terminalOpportunityStatuses = ["converted", "won", "lost", "cancelled"] as const satisfies readonly OpportunityStatus[];
 
@@ -16,6 +21,26 @@ export const getStatusAfterPresalesAssignment = (status: OpportunityStatus): Opp
 
 export const canConvertOpportunityStatus = (status: OpportunityStatus): boolean =>
     status !== "converted" && status !== "lost" && status !== "cancelled";
+
+export const canManuallySetOpportunityStatus = (status: OpportunityStatus): boolean =>
+    !["quoting", "won", "converted"].includes(status);
+
+export const canConfirmOpportunityQuoteStatus = (status: OpportunityQuoteStatus): boolean =>
+    status === "submitted" || status === "accepted";
+
+export const canReplaceAcceptedQuoteForProjectStatus = (status?: SrStatus): boolean =>
+    status === undefined || status === "new";
+
+export const canConfirmOpportunityQuote = (actor: ActorLike, opportunity: OpportunityOwnershipLike): boolean =>
+    actor.role === "admin"
+    || actor.role === "manager"
+    || sameId(opportunity.ownerId, actor.id)
+    || sameId(opportunity.salesUserId, actor.id);
+
+export const canCreateOpportunityConversionException = (actor: ActorLike, opportunity: OpportunityOwnershipLike): boolean =>
+    actor.role === "admin"
+    || actor.role === "manager"
+    || sameId(opportunity.ownerId, actor.id);
 
 const opportunityStatusProbability: Record<OpportunityStatus, OpportunityProbability> = {
     new: 20,

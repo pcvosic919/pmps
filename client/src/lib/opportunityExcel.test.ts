@@ -15,6 +15,8 @@ describe("parseOpportunityWorkbook", () => {
             "客戶名稱 *": "範例公司",
             "業務人員 Email": "Sales@Example.com",
             預估金額: "NT$ 1,250,000",
+            "商機成功率 (%)": "60%",
+            成功率備註: "方案規劃中",
             商機類型: "協銷",
             預計成交日: "2026-12-31",
             產品名稱: "M365；Azure",
@@ -27,6 +29,8 @@ describe("parseOpportunityWorkbook", () => {
         expect(row.customerName).toBe("範例公司");
         expect(row.salesEmail).toBe("Sales@Example.com");
         expect(row.estimatedValue).toBe(1_250_000);
+        expect(row.probability).toBe(60);
+        expect(row.probabilityNote).toBe("方案規劃中");
         expect(row.opportunityType).toBe("presales");
         expect(row.expectedCloseDate).toBe("2026-12-31");
         expect(row.productNames).toEqual(["M365", "Azure"]);
@@ -39,6 +43,7 @@ describe("parseOpportunityWorkbook", () => {
             商機名稱: "",
             客戶名稱: "",
             預估金額: "not-a-number",
+            商機成功率: 55,
             商機類型: "其他",
             預計成交日: "2026-02-30",
             "Security 核准": "maybe"
@@ -48,6 +53,7 @@ describe("parseOpportunityWorkbook", () => {
             "商機名稱不可為空",
             "客戶名稱不可為空",
             "預估金額必須是大於或等於 0 的數字",
+            "商機成功率必須是 0、20、40、60、80 或 100",
             "商機類型必須是營收型商機或協銷",
             "預計成交日格式必須為 YYYY-MM-DD",
             "Security 核准必須填 Y 或 N"

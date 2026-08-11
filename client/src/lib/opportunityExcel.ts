@@ -10,6 +10,8 @@ export type OpportunityImportPayload = {
     salesDepartment?: string;
     salesRep?: string;
     estimatedValue: number;
+    probability?: 0 | 20 | 40 | 60 | 80 | 100;
+    probabilityNote?: string;
     opportunityType: "revenue" | "presales";
     expectedCloseDate?: string;
     productNames: string[];
@@ -38,6 +40,7 @@ export type OpportunityExportRow = {
     currency?: string;
     taxIncluded?: boolean;
     probability?: number;
+    probabilityNote?: string;
     opportunityType: string;
     status: string;
     expectedCloseDate?: string | Date | null;
@@ -72,6 +75,8 @@ const importHeaders = [
     "業務人員",
     "業務部門",
     "預估金額",
+    "商機成功率 (%)",
+    "成功率備註",
     "商機類型",
     "預計成交日",
     "產品名稱",
@@ -98,6 +103,16 @@ const parseAmount = (value: unknown) => {
     return Number.isFinite(amount) && amount >= 0
         ? { value: amount }
         : { value: 0, error: "預估金額必須是大於或等於 0 的數字" };
+};
+
+const parseProbability = (value: unknown) => {
+    const normalized = textCell(value).replace(/%/g, "");
+    if (!normalized) return { value: undefined };
+    const probability = Number(normalized);
+    if ([0, 20, 40, 60, 80, 100].includes(probability)) {
+        return { value: probability as 0 | 20 | 40 | 60 | 80 | 100 };
+    }
+    return { value: undefined, error: "商機成功率必須是 0、20、40、60、80 或 100" };
 };
 
 const formatDateParts = (year: number, month: number, day: number) => {
@@ -157,8 +172,8 @@ export const downloadOpportunityTemplate = () => {
     const workbook = XLSX.utils.book_new();
     appendSheet(workbook, "商機資料", [
         importHeaders,
-        ["", "M365 導入專案", "範例科技股份有限公司", "sales@example.com", "王小明", "業務一部", 500000, "營收型商機", "2026-12-31", "M365；Azure", "Excel 範例列，正式匯入前可刪除", "Y", "N", "N"]
-    ], [26, 32, 28, 30, 18, 18, 16, 18, 16, 32, 48, 14, 14, 16]);
+        ["", "M365 導入專案", "範例科技股份有限公司", "sales@example.com", "王小明", "業務一部", 500000, 40, "需求已確認，待客戶確認預算", "營收型商機", "2026-12-31", "M365；Azure", "Excel 範例列，正式匯入前可刪除", "Y", "N", "N"]
+    ], [26, 32, 28, 30, 18, 18, 16, 18, 42, 18, 16, 32, 48, 14, 14, 16]);
     appendSheet(workbook, "欄位說明", [
         ["欄位", "必要性", "格式／允許值", "說明"],
         ["商機 ID", "選填", "MongoDB ID", "留白代表新增；填入代表更新既有商機。不可用 Excel 修改狀態。"],
@@ -166,6 +181,8 @@ export const downloadOpportunityTemplate = () => {
         ["客戶名稱", "必填", "文字", "不存在時依系統規則建立客戶。"],
         ["業務人員 Email", "選填", "啟用中的系統帳號 Email", "有填寫時會以 Email 對應業務人員，優先於姓名及部門。"],
         ["預估金額", "選填", "大於或等於 0 的數字", "空白視為 0。"],
+        ["商機成功率", "選填", "0／20／40／60／80／100", "用於 Pipeline 預測；100% 不會自動建立專案。"],
+        ["成功率備註", "選填", "最多 2,000 字", "說明成功率的判斷依據。"],
         ["商機類型", "選填", "營收型商機／協銷", "空白視為營收型商機。"],
         ["預計成交日", "選填", "YYYY-MM-DD", "例如 2026-12-31。"],
         ["產品名稱", "選填", "以分號分隔", "例如 M365；Azure。"],
@@ -192,6 +209,7 @@ export const exportOpportunitiesToXlsx = (rows: OpportunityExportRow[]) => {
         row.currency || "TWD",
         row.taxIncluded ? "Y" : "N",
         row.probability ?? 0,
+        row.probabilityNote || "",
         row.opportunityType === "presales" ? "協銷" : "營收型商機",
         formatDate(row.expectedCloseDate),
         row.productNames.join("；"),
@@ -221,7 +239,8 @@ export const exportOpportunitiesToXlsx = (rows: OpportunityExportRow[]) => {
             "最終成交金額",
             "幣別",
             "含稅",
-            "成交率 (%)",
+            "商機成功率 (%)",
+            "成功率備註",
             "商機類型",
             "預計成交日",
             "產品名稱",
@@ -237,7 +256,7 @@ export const exportOpportunitiesToXlsx = (rows: OpportunityExportRow[]) => {
             "建立日期"
         ],
         ...dataRows
-    ], [24, 26, 32, 28, 30, 18, 18, 16, 16, 16, 18, 10, 10, 14, 18, 16, 32, 48, 14, 14, 16, 18, 18, 30, 18, 18, 18]);
+    ], [24, 26, 32, 28, 30, 18, 18, 16, 16, 16, 18, 10, 10, 14, 40, 18, 16, 32, 48, 14, 14, 16, 18, 18, 30, 18, 18, 18]);
     XLSX.writeFileXLSX(workbook, makeXlsxFileName("商機資料", formatExportDate()), { compression: true });
 };
 
@@ -266,6 +285,10 @@ export const parseOpportunityWorkbook = (data: ArrayBuffer): OpportunityImportPr
         if (!customerName) errors.push("客戶名稱不可為空");
         const amount = parseAmount(getCell(source, ["預估金額", "商機金額", "estimatedValue"]));
         if (amount.error) errors.push(amount.error);
+        const probability = parseProbability(getCell(source, ["商機成功率 (%)", "商機成功率", "成交率 (%)", "成交率", "probability"]));
+        if (probability.error) errors.push(probability.error);
+        const probabilityNote = textCell(getCell(source, ["成功率備註", "成交率備註", "probabilityNote"]));
+        if (probabilityNote.length > 2000) errors.push("成功率備註不可超過 2,000 字");
         const type = parseOpportunityType(getCell(source, ["商機類型", "類型", "opportunityType"]));
         if (type.error) errors.push(type.error);
         const date = parseDate(getCell(source, ["預計成交日", "expectedCloseDate"]));
@@ -285,6 +308,8 @@ export const parseOpportunityWorkbook = (data: ArrayBuffer): OpportunityImportPr
             salesRep: salesRep || undefined,
             salesDepartment: salesDepartment || undefined,
             estimatedValue: amount.value,
+            probability: probability.value,
+            probabilityNote: probabilityNote || undefined,
             opportunityType: type.value,
             expectedCloseDate: date.value,
             productNames: textCell(getCell(source, ["產品名稱", "產品", "productNames"]))

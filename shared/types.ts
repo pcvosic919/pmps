@@ -114,6 +114,9 @@ export type OpportunityProbability = typeof opportunityProbabilities[number];
 export const opportunityQuoteStatuses = ["draft", "submitted", "accepted", "void"] as const;
 export type OpportunityQuoteStatus = typeof opportunityQuoteStatuses[number];
 
+export const projectConversionModes = ["direct", "confirmed_quote", "exception", "legacy"] as const;
+export type ProjectConversionMode = typeof projectConversionModes[number];
+
 export const businessHistoryEntityTypes = [
     "opportunity",
     "opportunity_quote",
@@ -215,6 +218,7 @@ export interface OpportunityInput {
     quotedAmount?: number;
     finalDealAmount?: number;
     probability?: OpportunityProbability;
+    probabilityNote?: string;
     opportunityType: OpportunityType;
     status: OpportunityStatus;
     expectedCloseDate?: Date;

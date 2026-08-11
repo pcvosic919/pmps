@@ -22,7 +22,6 @@ import {
     getManagedDepartments,
     hasAnyRole,
     isOpportunityBusinessOwner,
-    isOpportunityOwner,
 } from "../_core/authorization";
 import { decodeCursor, encodeCursor, toObjectId } from "../_core/cursor";
 import { createNotification } from "../_core/notifications";
@@ -35,17 +34,25 @@ import {
 } from "./opportunities.listing";
 import {
     canConvertOpportunityStatus,
+    canConfirmOpportunityQuote,
+    canCreateOpportunityConversionException,
+    canManuallySetOpportunityStatus,
     getProbabilityForOpportunityStatus,
     getInitialOpportunityStatus,
     getStatusAfterMemberAssignment,
     getStatusAfterPresalesAssignment,
     isTerminalOpportunityStatus
 } from "./opportunity-workflow";
-import { createProjectForOpportunityOnce, finalizeOpportunityConversion, findProjectByOpportunityId } from "../services/OpportunityConversionService";
+import {
+    buildOpportunityProjectMembers,
+    confirmQuoteAndCreateDraftProject,
+    createProjectForOpportunityOnce,
+    finalizeOpportunityConversion,
+    findProjectByOpportunityId
+} from "../services/OpportunityConversionService";
 import { listBusinessHistory, recordBusinessHistory } from "../services/BusinessHistoryService";
 import { syncOpportunityProductApprovals } from "../services/ProductApprovalService";
 import {
-    adoptOpportunityQuote,
     createOpportunityQuoteVersion,
     submitOpportunityQuote,
     voidOpportunityQuote
@@ -77,6 +84,8 @@ const opportunityImportRowSchema = z.object({
     salesDepartment: z.string().trim().optional(),
     salesRep: z.string().trim().optional(),
     estimatedValue: z.number().min(0, "商機金額不能為負數"),
+    probability: opportunityProbabilitySchema.optional(),
+    probabilityNote: z.string().trim().max(2000).optional(),
     opportunityType: z.enum(opportunityTypes),
     expectedCloseDate: z.string().trim().optional(),
     productNames: z.array(z.string().trim().min(1)).max(100).default([]),
@@ -124,6 +133,16 @@ const canAccessOpportunityInScope = async (user: any, opportunity: any) => {
 const canManageOpportunityInScope = async (user: any, opportunity: any) => {
     if (!await canAccessOpportunityInScope(user, opportunity)) return false;
     return hasAnyRole(user, ["admin", "manager"]) || canManageOpportunity(user, opportunity);
+};
+
+const canConfirmQuoteInScope = async (user: any, opportunity: any) => {
+    if (!await canAccessOpportunityInScope(user, opportunity)) return false;
+    return canConfirmOpportunityQuote(user, opportunity);
+};
+
+const canManageQuoteInScope = async (user: any, opportunity: any) => {
+    if (!await canAccessOpportunityInScope(user, opportunity)) return false;
+    return canManageOpportunity(user, opportunity) || canConfirmOpportunityQuote(user, opportunity);
 };
 
 const getSalesUserFields = async (salesUserId?: string) => {
@@ -199,32 +218,6 @@ const assertSettlementUnlocked = async (month: string, type: "presales" | "proje
     }
 };
 
-const buildSrMembers = (creatorId: string, pmId?: string, techId?: string, presalesAssignments?: any[]) => {
-    const members: Array<{ userId: string; memberRole: "owner" | "assignee" }> = [
-        { userId: creatorId, memberRole: "owner" }
-    ];
-    
-    const addedIds = new Set<string>([creatorId]);
-
-    const addIfUnique = (id: string | undefined, role: "owner" | "assignee") => {
-        if (id && !addedIds.has(id.toString())) {
-            members.push({ userId: id, memberRole: role });
-            addedIds.add(id.toString());
-        }
-    };
-
-    addIfUnique(pmId, "assignee");
-    addIfUnique(techId, "assignee");
-
-    (presalesAssignments || []).forEach((a: any) => {
-        if (a.techId) {
-            addIfUnique(a.techId.toString(), "assignee");
-        }
-    });
-
-    return members;
-};
-
 const ensureOpportunityOwnerMember = async (opportunity: any) => {
     const members = opportunity.members || [];
     const ownerId = opportunity.ownerId?.toString?.() || opportunity.ownerId;
@@ -244,7 +237,7 @@ const getQuoteAndOpportunity = async (quoteId: string) => {
     );
     const opportunity = assertFound(
         await OpportunityModel.findById(quote.opportunityId)
-            .select("ownerId members presalesAssignments status")
+            .select("ownerId salesUserId members presalesAssignments status")
             .lean(),
         "找不到報價所屬商機"
     );
@@ -270,7 +263,7 @@ export const opportunitiesRouter = router({
             });
 
             const items = await OpportunityModel.find(query)
-                .select("opportunityCode title customerName salesUserId salesDepartment salesRep estimatedValue presalesAmount quotedAmount finalDealAmount currency taxIncluded probability opportunityType status expectedCloseDate ownerId ownerNameSnapshot ownerEmailSnapshot ownerDepartmentCodeSnapshot ownerDepartmentNameSnapshot createdAt members presalesAssignments productNames description")
+                .select("opportunityCode title customerName salesUserId salesDepartment salesRep estimatedValue presalesAmount quotedAmount finalDealAmount currency taxIncluded probability probabilityNote opportunityType status expectedCloseDate ownerId ownerNameSnapshot ownerEmailSnapshot ownerDepartmentCodeSnapshot ownerDepartmentNameSnapshot createdAt members presalesAssignments productNames description")
                 .populate("ownerId", "name")
                 .sort({ [sortBy]: direction })
                 .limit(limit + 1)
@@ -296,6 +289,7 @@ export const opportunitiesRouter = router({
                     currency: opp.currency,
                     taxIncluded: opp.taxIncluded,
                     probability: opp.probability,
+                    probabilityNote: opp.probabilityNote || "",
                     opportunityType: getEffectiveOpportunityType(opp),
                     status: opp.status,
                     expectedCloseDate: opp.expectedCloseDate,
@@ -334,7 +328,7 @@ export const opportunitiesRouter = router({
             });
             const exportLimit = 10_000;
             const items = await OpportunityModel.find(query)
-                .select("opportunityCode title customerName salesUserId salesDepartment salesRep estimatedValue presalesAmount quotedAmount finalDealAmount currency taxIncluded probability opportunityType status expectedCloseDate ownerId ownerNameSnapshot ownerEmailSnapshot ownerDepartmentCodeSnapshot ownerDepartmentNameSnapshot createdAt productNames description approvedM365 approvedAzure approvedSecurity")
+                .select("opportunityCode title customerName salesUserId salesDepartment salesRep estimatedValue presalesAmount quotedAmount finalDealAmount currency taxIncluded probability probabilityNote opportunityType status expectedCloseDate ownerId ownerNameSnapshot ownerEmailSnapshot ownerDepartmentCodeSnapshot ownerDepartmentNameSnapshot createdAt productNames description approvedM365 approvedAzure approvedSecurity")
                 .populate("salesUserId", "name email department")
                 .populate("ownerId", "name email department")
                 .sort({ [sortBy]: sortOrder === "desc" ? -1 : 1 })
@@ -360,6 +354,7 @@ export const opportunitiesRouter = router({
                     currency: opportunity.currency || "TWD",
                     taxIncluded: opportunity.taxIncluded === true,
                     probability: opportunity.probability ?? getProbabilityForOpportunityStatus(opportunity.status),
+                    probabilityNote: opportunity.probabilityNote || "",
                     opportunityType: getEffectiveOpportunityType(opportunity),
                     status: opportunity.status,
                     expectedCloseDate: opportunity.expectedCloseDate,
@@ -450,7 +445,7 @@ export const opportunitiesRouter = router({
                             seenIds.add(row.id);
                             const opportunity = assertFound(
                                 await OpportunityModel.findById(row.id)
-                                    .select("ownerId members presalesAssignments status salesUserId salesDepartment salesRep")
+                                    .select("ownerId members presalesAssignments status salesUserId salesDepartment salesRep probability probabilityNote")
                                     .lean(),
                                 "找不到指定的商機 ID"
                             );
@@ -479,6 +474,10 @@ export const opportunitiesRouter = router({
                                         customerName: row.customerName,
                                         ...salesFields,
                                         estimatedValue: row.estimatedValue,
+                                        ...(row.probability !== undefined ? {
+                                            probability: row.probability,
+                                            probabilityNote: row.probabilityNote || ""
+                                        } : row.probabilityNote ? { probabilityNote: row.probabilityNote } : {}),
                                         opportunityType: row.opportunityType,
                                         productNames: row.productNames,
                                         description: row.description || "",
@@ -499,6 +498,27 @@ export const opportunitiesRouter = router({
                                     ...(row.approvedSecurity ? { "資安": "approved" } : {})
                                 }
                             });
+                            if (row.probability !== undefined || row.probabilityNote) {
+                                await recordBusinessHistory({
+                                    entityType: "opportunity",
+                                    entityId: row.id,
+                                    action: "opportunity_probability_updated",
+                                    before: {
+                                        probability: opportunity.probability,
+                                        probabilityNote: opportunity.probabilityNote || ""
+                                    },
+                                    after: {
+                                        probability: row.probability ?? opportunity.probability,
+                                        probabilityNote: row.probability !== undefined
+                                            ? row.probabilityNote || ""
+                                            : row.probabilityNote ?? opportunity.probabilityNote ?? ""
+                                    },
+                                    actorId: ctx.user.id,
+                                    actorRole: ctx.user.role,
+                                    reason: row.probabilityNote,
+                                    source: "import"
+                                });
+                            }
                             result.id = row.id;
                             result.action = "updated";
                             continue;
@@ -528,7 +548,8 @@ export const opportunitiesRouter = router({
                             approvedAzure: row.approvedAzure,
                             approvedSecurity: row.approvedSecurity,
                             status: importedStatus,
-                            probability: getProbabilityForOpportunityStatus(importedStatus),
+                            probability: row.probability ?? getProbabilityForOpportunityStatus(importedStatus),
+                            probabilityNote: row.probabilityNote || "",
                             ownerId: toObjectId(ctx.user.id),
                             ownerNameSnapshot: ctx.user.name || "",
                             ownerEmailSnapshot: ctx.user.email || "",
@@ -555,6 +576,7 @@ export const opportunitiesRouter = router({
                                 customerName: created.customerName,
                                 status: created.status,
                                 probability: created.probability,
+                                probabilityNote: created.probabilityNote,
                                 estimatedValue: created.estimatedValue,
                                 rowNumber: row.rowNumber
                             },
@@ -651,6 +673,7 @@ export const opportunitiesRouter = router({
             estimatedValue: z.number().default(0),
             presalesAmount: z.number().min(0).optional(),
             probability: opportunityProbabilitySchema.optional(),
+            probabilityNote: z.string().trim().max(2000).optional(),
             currency: z.string().trim().min(1).default("TWD"),
             taxIncluded: z.boolean().default(false),
             opportunityType: z.enum(opportunityTypes).default("revenue"),
@@ -711,6 +734,7 @@ export const opportunitiesRouter = router({
                     customerName: result.customerName,
                     status: result.status,
                     probability: result.probability,
+                    probabilityNote: result.probabilityNote,
                     estimatedValue: result.estimatedValue,
                     presalesAmount: result.presalesAmount
                 },
@@ -743,12 +767,23 @@ export const opportunitiesRouter = router({
                 "找不到該商機"
             );
             assertAuthorized(await canAccessOpportunityInScope(ctx.user, opp), "您沒有權限檢視此商機");
+            const project = await findProjectByOpportunityId(input.id)
+                .select("projectCode title status sourceQuoteId conversionMode")
+                .lean();
             return {
                 ...opp,
                 id: opp._id.toString(),
                 ownerId: opp.ownerId.toString(),
                 salesUserId: opp.salesUserId?.toString() || "",
-                opportunityType: getEffectiveOpportunityType(opp)
+                opportunityType: getEffectiveOpportunityType(opp),
+                project: project ? {
+                    id: project._id.toString(),
+                    projectCode: project.projectCode || "",
+                    title: project.title,
+                    status: project.status,
+                    sourceQuoteId: project.sourceQuoteId?.toString() || "",
+                    conversionMode: project.conversionMode || "legacy"
+                } : null
             };
         }),
 
@@ -1099,17 +1134,18 @@ export const opportunitiesRouter = router({
             return { success: true };
         }),
 
-    createSR: roleProcedure(["admin", "manager", "pm", "presales"])
+    createSR: roleProcedure(["admin", "manager", "pm", "presales", "business"])
         .input(z.object({
             opportunityId: z.string(),
             title: z.string().trim().min(1, "專案名稱不可為空"),
-            contractAmount: z.number(),
+            contractAmount: z.number().min(0),
             customerName: z.string().optional(),
             salesUserId: z.string().optional(),
             salesDepartment: z.string().trim().optional(),
             salesRep: z.string().trim().optional(),
             pmId: z.string().optional(),
-            techId: z.string().optional()
+            techId: z.string().optional(),
+            exceptionReason: z.string().trim().max(2000).optional()
         }))
         .mutation(async ({ input, ctx }) => {
             const opportunity = assertFound(
@@ -1118,24 +1154,40 @@ export const opportunitiesRouter = router({
                     .lean(),
                 "找不到該商機"
             );
-            const isPresalesOnly = hasAnyRole(ctx.user, ["presales"]) &&
-                !hasAnyRole(ctx.user, ["admin", "manager", "pm"]);
-            assertAuthorized(
-                await canAccessOpportunityInScope(ctx.user, opportunity) && (
-                    isPresalesOnly
-                        ? isOpportunityOwner(ctx.user, opportunity)
-                        : hasAnyRole(ctx.user, ["admin", "manager"]) || canManageOpportunity(ctx.user, opportunity)
-                ),
-                "您沒有權限從此商機建立 SR"
-            );
+            assertAuthorized(await canAccessOpportunityInScope(ctx.user, opportunity), "您沒有權限從此商機建立專案");
+            const existingProject = await findProjectByOpportunityId(input.opportunityId);
+            if (existingProject) return { id: existingProject._id.toString(), reused: true };
+
+            const acceptedQuote = opportunity.adoptedQuoteId
+                ? await OpportunityQuoteModel.findOne({ _id: opportunity.adoptedQuoteId, status: "accepted" }).lean()
+                : null;
+            if (acceptedQuote) {
+                assertAuthorized(await canConfirmQuoteInScope(ctx.user, opportunity), "您沒有權限完成此報價轉案");
+                const confirmed = await confirmQuoteAndCreateDraftProject({
+                    quoteId: acceptedQuote._id.toString(),
+                    acceptedAt: acceptedQuote.acceptedAt || new Date(),
+                    acceptanceNote: acceptedQuote.acceptanceNote || "由相容轉案入口完成待建專案"
+                }, {
+                    id: ctx.user.id,
+                    role: ctx.user.role,
+                    name: ctx.user.name,
+                    email: ctx.user.email,
+                    department: ctx.user.department
+                });
+                return { id: confirmed.project._id.toString(), reused: !confirmed.created };
+            }
             assertOpportunityConvertible(opportunity);
+
+            const canCreateException = canCreateOpportunityConversionException(ctx.user, opportunity);
+            assertAuthorized(canCreateException, "只有 Admin、範圍內 Manager 或商機 Owner 可以例外轉案");
+            if (!input.exceptionReason?.trim()) {
+                throw new TRPCError({ code: "BAD_REQUEST", message: "沒有客戶確認報價時，例外轉案必須填寫原因" });
+            }
             const salesUserFields = await getSalesUserFields(input.salesUserId);
             const customerName = (input.customerName || opportunity.customerName || "").trim();
             if (!customerName) throw new TRPCError({ code: "BAD_REQUEST", message: "公司名稱不可為空" });
             await ensureCompanyByName(customerName, ctx.user.id);
-            const sourceQuote = opportunity.adoptedQuoteId
-                ? await OpportunityQuoteModel.findById(opportunity.adoptedQuoteId).select("quoteCode").lean()
-                : null;
+            const exceptionAt = new Date();
 
             const conversionResult = await createProjectForOpportunityOnce(input.opportunityId, {
                 title: input.title,
@@ -1146,15 +1198,22 @@ export const opportunitiesRouter = router({
                 externalServiceType: "協銷轉專案",
                 contractAmount: input.contractAmount,
                 finalPrice: input.contractAmount,
+                srType: "project",
                 opportunityId: input.opportunityId,
-                sourceQuoteId: opportunity.adoptedQuoteId,
                 sourceOpportunityCodeSnapshot: opportunity.opportunityCode || "",
-                sourceQuoteCodeSnapshot: sourceQuote?.quoteCode || "",
+                conversionMode: "exception",
+                conversionExceptionReason: input.exceptionReason.trim(),
+                conversionExceptionById: toObjectId(ctx.user.id),
+                conversionExceptionAt: exceptionAt,
                 pmId: input.pmId ? toObjectId(input.pmId) : undefined,
                 createdById: toObjectId(ctx.user.id),
                 createdByNameSnapshot: ctx.user.name || ctx.user.email || "",
                 createdByDepartment: ctx.user.department || "",
-                members: buildSrMembers(ctx.user.id, input.pmId, input.techId, opportunity.presalesAssignments),
+                members: buildOpportunityProjectMembers(opportunity.ownerId.toString(), {
+                    pmId: input.pmId,
+                    techId: input.techId,
+                    presalesAssignments: opportunity.presalesAssignments
+                }),
                 status: "new"
             });
             const result = conversionResult.project;
@@ -1162,19 +1221,20 @@ export const opportunitiesRouter = router({
                 await recordBusinessHistory({
                     entityType: "project",
                     entityId: result._id,
-                    action: "project_created_from_opportunity",
+                    action: "project_created_from_exception",
                     after: {
                         projectCode: result.projectCode,
                         title: result.title,
                         customerName: result.customerName,
                         opportunityId: input.opportunityId,
                         sourceOpportunityCodeSnapshot: opportunity.opportunityCode,
-                        sourceQuoteId: opportunity.adoptedQuoteId,
-                        sourceQuoteCodeSnapshot: sourceQuote?.quoteCode,
-                        contractAmount: input.contractAmount
+                        contractAmount: input.contractAmount,
+                        conversionMode: "exception",
+                        conversionExceptionAt: exceptionAt
                     },
                     actorId: ctx.user.id,
                     actorRole: ctx.user.role,
+                    reason: input.exceptionReason,
                     source: "api"
                 });
             }
@@ -1193,7 +1253,12 @@ export const opportunitiesRouter = router({
                 console.error("[FolderStorage Hook] SR creation folder failed:", err);
             }
 
-            await finalizeOpportunityConversion(input.opportunityId, { id: ctx.user.id, role: ctx.user.role });
+            await finalizeOpportunityConversion(
+                input.opportunityId,
+                { id: ctx.user.id, role: ctx.user.role },
+                exceptionAt,
+                input.exceptionReason.trim()
+            );
 
             if (input.pmId && conversionResult.created) {
                 await createNotification({
@@ -1234,6 +1299,12 @@ export const opportunitiesRouter = router({
             );
             assertAuthorized(await canManageOpportunityInScope(ctx.user, opportunity), "您沒有權限更新商機狀態");
             assertOpportunityEditable(opportunity);
+            if (!canManuallySetOpportunityStatus(input.status)) {
+                throw new TRPCError({
+                    code: "BAD_REQUEST",
+                    message: "報價中、已成交與已轉案狀態必須由報價及轉案流程更新"
+                });
+            }
             if (input.status === "quoting" && input.estimatedValue === undefined) {
                 throw new TRPCError({ code: "BAD_REQUEST", message: "切換為報價中時必須輸入商機金額" });
             }
@@ -1366,7 +1437,7 @@ export const opportunitiesRouter = router({
         .mutation(async ({ input, ctx }) => {
             const opportunity = assertFound(
                 await OpportunityModel.findById(input.id)
-                    .select("ownerId members status probability estimatedValue")
+                    .select("ownerId members status estimatedValue")
                     .lean(),
                 "找不到該商機"
             );
@@ -1379,17 +1450,57 @@ export const opportunitiesRouter = router({
 
             await OpportunityModel.updateOne(
                 { _id: input.id },
-                { $set: { estimatedValue: input.estimatedValue, status: "quoting", probability: 80 } }
+                { $set: { estimatedValue: input.estimatedValue } }
             );
 
             await recordBusinessHistory({
                 entityType: "opportunity",
                 entityId: input.id,
                 action: "opportunity_estimated_amount_updated",
-                before: { estimatedValue: opportunity.estimatedValue, status: opportunity.status, probability: opportunity.probability },
-                after: { estimatedValue: input.estimatedValue, status: "quoting", probability: 80 },
+                before: { estimatedValue: opportunity.estimatedValue },
+                after: { estimatedValue: input.estimatedValue },
                 actorId: ctx.user.id,
                 actorRole: ctx.user.role,
+                source: "api"
+            });
+
+            return { success: true };
+        }),
+
+    updateProbability: protectedProcedure
+        .input(z.object({
+            id: z.string(),
+            probability: opportunityProbabilitySchema,
+            probabilityNote: z.string().trim().max(2000).optional()
+        }))
+        .mutation(async ({ input, ctx }) => {
+            const opportunity = assertFound(
+                await OpportunityModel.findById(input.id)
+                    .select("ownerId members status probability probabilityNote")
+                    .lean(),
+                "找不到該商機"
+            );
+
+            const isBusinessOwner = isOpportunityBusinessOwner(ctx.user, opportunity);
+            const canUpdate = await canAccessOpportunityInScope(ctx.user, opportunity) &&
+                (hasAnyRole(ctx.user, ["admin", "manager", "presales"]) || isBusinessOwner);
+            assertAuthorized(canUpdate, "您沒有權限更新商機成功率");
+            assertOpportunityEditable(opportunity);
+
+            const probabilityNote = input.probabilityNote?.trim() || "";
+            await OpportunityModel.updateOne(
+                { _id: input.id },
+                { $set: { probability: input.probability, probabilityNote } }
+            );
+            await recordBusinessHistory({
+                entityType: "opportunity",
+                entityId: input.id,
+                action: "opportunity_probability_updated",
+                before: { probability: opportunity.probability, probabilityNote: opportunity.probabilityNote || "" },
+                after: { probability: input.probability, probabilityNote },
+                actorId: ctx.user.id,
+                actorRole: ctx.user.role,
+                reason: probabilityNote || undefined,
                 source: "api"
             });
 
@@ -1614,8 +1725,15 @@ export const opportunitiesRouter = router({
                     .lean(),
                 "找不到該商機"
             );
-            assertAuthorized(await canManageOpportunityInScope(ctx.user, opportunity), "您沒有權限新增報價版本");
-            assertOpportunityEditable(opportunity);
+            assertAuthorized(await canManageQuoteInScope(ctx.user, opportunity), "您沒有權限新增報價版本");
+            if (opportunity.status === "converted") {
+                const project = await findProjectByOpportunityId(input.opportunityId).select("status").lean();
+                if (project?.status !== "new") {
+                    throw new TRPCError({ code: "CONFLICT", message: "專案已開始執行，報價或金額變更請改走 CR" });
+                }
+            } else {
+                assertOpportunityEditable(opportunity);
+            }
             const quote = await createOpportunityQuoteVersion(input, { id: ctx.user.id, role: ctx.user.role });
             return { success: true, id: quote._id.toString(), version: quote.version, quoteCode: quote.quoteCode };
         }),
@@ -1624,25 +1742,62 @@ export const opportunitiesRouter = router({
         .input(z.object({ quoteId: z.string() }))
         .mutation(async ({ input, ctx }) => {
             const { opportunity } = await getQuoteAndOpportunity(input.quoteId);
-            assertAuthorized(await canManageOpportunityInScope(ctx.user, opportunity), "您沒有權限送出此報價版本");
+            assertAuthorized(await canManageQuoteInScope(ctx.user, opportunity), "您沒有權限送出此報價版本");
             const quote = await submitOpportunityQuote(input.quoteId, { id: ctx.user.id, role: ctx.user.role });
             return { success: true, status: quote.status };
         }),
 
+    confirmQuoteAcceptance: protectedProcedure
+        .input(z.object({
+            quoteId: z.string(),
+            acceptedAt: z.coerce.date(),
+            acceptanceNote: z.string().trim().max(2000).optional(),
+            replacementReason: z.string().trim().max(2000).optional()
+        }))
+        .mutation(async ({ input, ctx }) => {
+            const { opportunity } = await getQuoteAndOpportunity(input.quoteId);
+            assertAuthorized(await canConfirmQuoteInScope(ctx.user, opportunity), "您沒有權限確認客戶接受此報價");
+            const result = await confirmQuoteAndCreateDraftProject(input, {
+                id: ctx.user.id,
+                role: ctx.user.role,
+                name: ctx.user.name,
+                email: ctx.user.email,
+                department: ctx.user.department
+            });
+            return {
+                success: true,
+                status: "accepted" as const,
+                projectId: result.project._id.toString(),
+                projectCreated: result.created,
+                quoteReplaced: result.replaced
+            };
+        }),
+
+    // 一期相容入口：舊版「採用」等同記錄客戶接受，並建立待建專案。
     adoptQuoteVersion: protectedProcedure
         .input(z.object({ quoteId: z.string() }))
         .mutation(async ({ input, ctx }) => {
             const { opportunity } = await getQuoteAndOpportunity(input.quoteId);
-            assertAuthorized(await canManageOpportunityInScope(ctx.user, opportunity), "您沒有權限採用此報價版本");
-            const quote = await adoptOpportunityQuote(input.quoteId, { id: ctx.user.id, role: ctx.user.role });
-            return { success: true, status: quote.status };
+            assertAuthorized(await canConfirmQuoteInScope(ctx.user, opportunity), "您沒有權限確認客戶接受此報價");
+            const result = await confirmQuoteAndCreateDraftProject({
+                quoteId: input.quoteId,
+                acceptedAt: new Date(),
+                acceptanceNote: "由舊版採用報價入口確認"
+            }, {
+                id: ctx.user.id,
+                role: ctx.user.role,
+                name: ctx.user.name,
+                email: ctx.user.email,
+                department: ctx.user.department
+            });
+            return { success: true, status: "accepted" as const, projectId: result.project._id.toString() };
         }),
 
     voidQuoteVersion: protectedProcedure
         .input(z.object({ quoteId: z.string(), reason: z.string().trim().min(1, "作廢原因不可為空") }))
         .mutation(async ({ input, ctx }) => {
             const { opportunity } = await getQuoteAndOpportunity(input.quoteId);
-            assertAuthorized(await canManageOpportunityInScope(ctx.user, opportunity), "您沒有權限作廢此報價版本");
+            assertAuthorized(await canManageQuoteInScope(ctx.user, opportunity), "您沒有權限作廢此報價版本");
             const quote = await voidOpportunityQuote(input.quoteId, input.reason, { id: ctx.user.id, role: ctx.user.role });
             return { success: true, status: quote.status };
         }),

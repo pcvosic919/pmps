@@ -5,7 +5,7 @@ import { Plus, Briefcase, ChevronRight, Building2, Search, Loader2, Trash2, Down
 import { useDebounce } from "../lib/useDebounce";
 import { useCurrentUser } from "../lib/useCurrentUser";
 import { z } from "zod";
-import { useForm } from "react-hook-form";
+import { useForm, useWatch } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "@/components/ui/form";
@@ -17,7 +17,14 @@ import { FormSection, FormSummaryPanel, StickyFormActions } from "../components/
 import { OpportunityImportDialog } from "../components/opportunities/OpportunityImportDialog";
 import { exportOpportunitiesToXlsx } from "../lib/opportunityExcel";
 
-const OPPORTUNITY_PROBABILITIES = [0, 20, 40, 60, 80, 100] as const;
+const OPPORTUNITY_PROBABILITIES = [
+    { value: 0, label: "0% — 無成交可能／已失敗" },
+    { value: 20, label: "20% — 初步接洽" },
+    { value: 40, label: "40% — 需求已確認" },
+    { value: 60, label: "60% — 方案或協銷進行中" },
+    { value: 80, label: "80% — 報價或客戶決策中" },
+    { value: 100, label: "100% — 客戶確認／確定成交" }
+] as const;
 
 const oppSchema = z.object({
     title: z.string().min(1, "商機名稱不可為空"),
@@ -28,6 +35,7 @@ const oppSchema = z.object({
     estimatedValue: z.number().min(0, "金額不能為負數"),
     presalesAmount: z.number().min(0, "協銷金額不能為負數").optional(),
     probability: z.union([z.literal(0), z.literal(20), z.literal(40), z.literal(60), z.literal(80), z.literal(100)]),
+    probabilityNote: z.string().max(2000, "成交率備註不可超過 2,000 字").optional(),
     opportunityType: z.enum(["revenue", "presales"]),
     productNames: z.array(z.string()).optional(),
     description: z.string().optional(),
@@ -113,6 +121,7 @@ export function OpportunitiesPage() {
             estimatedValue: 0,
             presalesAmount: 0,
             probability: 0,
+            probabilityNote: "",
             opportunityType: "revenue",
             productNames: [],
             description: "",
@@ -121,6 +130,12 @@ export function OpportunitiesPage() {
             approvedSecurity: false
         }
     });
+    const watchedOppType = useWatch({ control: form.control, name: "opportunityType" });
+    const watchedEstimatedValue = Number(useWatch({ control: form.control, name: "estimatedValue" }) || 0);
+    const watchedProducts = useWatch({ control: form.control, name: "productNames" }) || [];
+    const selectedSalesRep = useWatch({ control: form.control, name: "salesRep" });
+    const selectedSalesDepartment = useWatch({ control: form.control, name: "salesDepartment" });
+    const selectedCustomerName = useWatch({ control: form.control, name: "customerName" });
 
     const createOpp = trpc.opportunities.create.useMutation({
         onSuccess: () => {
@@ -160,6 +175,7 @@ export function OpportunitiesPage() {
             estimatedValue: values.estimatedValue,
             presalesAmount: values.presalesAmount,
             probability: values.probability,
+            probabilityNote: values.probabilityNote,
             opportunityType: values.opportunityType,
             productNames: values.productNames,
             description: values.description,
@@ -219,12 +235,6 @@ export function OpportunitiesPage() {
         return labels[status] || status;
     };
 
-    const watchedOppType = form.watch("opportunityType");
-    const watchedEstimatedValue = Number(form.watch("estimatedValue") || 0);
-    const watchedProducts = form.watch("productNames") || [];
-    const selectedSalesRep = form.watch("salesRep");
-    const selectedSalesDepartment = form.watch("salesDepartment");
-
     return (
         <div className="space-y-6">
             <div className="flex flex-col gap-4 bg-card p-6 rounded-xl shadow-sm border border-border/50 lg:flex-row lg:items-center lg:justify-between">
@@ -283,7 +293,7 @@ export function OpportunitiesPage() {
                             <tr className="bg-muted/50 border-b border-border text-[11px] font-bold text-muted-foreground uppercase tracking-widest">
                                 <th className="px-6 py-4">狀態</th>
                                 <th className="px-6 py-4">ID / 商機名稱</th>
-                                <th className="px-6 py-4">成交率</th>
+                                <th className="px-6 py-4">成功率</th>
                                 <th className="px-6 py-4">類型</th>
                                 <th className="px-6 py-4">客戶名稱</th>
                                 <th className="px-6 py-4">業務</th>
@@ -308,9 +318,16 @@ export function OpportunitiesPage() {
                                         </div>
                                     </td>
                                     <td className="px-6 py-4">
-                                        <span className="inline-flex min-w-12 justify-center rounded-full border border-primary/20 bg-primary/5 px-2 py-1 text-xs font-bold text-primary">
-                                            {opp.probability ?? 0}%
-                                        </span>
+                                        <div className="space-y-1">
+                                            <span className="inline-flex min-w-12 justify-center rounded-full border border-primary/20 bg-primary/5 px-2 py-1 text-xs font-bold text-primary">
+                                                {opp.probability ?? 0}%
+                                            </span>
+                                            {(opp as any).probabilityNote && (
+                                                <p className="max-w-40 truncate text-[10px] text-muted-foreground" title={(opp as any).probabilityNote}>
+                                                    {(opp as any).probabilityNote}
+                                                </p>
+                                            )}
+                                        </div>
                                     </td>
                                     <td className="px-6 py-4">
                                         <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold border ${(opp as any).opportunityType === "presales" ? "bg-cyan-100 text-cyan-800 border-cyan-200" : "bg-emerald-100 text-emerald-800 border-emerald-200"}`}>
@@ -433,17 +450,37 @@ export function OpportunitiesPage() {
                                             name="probability"
                                             render={({ field }: any) => (
                                                 <FormItem>
-                                                    <FormLabel>成交率</FormLabel>
+                                                    <FormLabel>商機成功率</FormLabel>
                                                     <Select value={String(field.value)} onValueChange={(value) => field.onChange(Number(value))}>
                                                         <FormControl>
                                                             <SelectTrigger><SelectValue placeholder="選擇成交率" /></SelectTrigger>
                                                         </FormControl>
                                                         <SelectContent>
                                                             {OPPORTUNITY_PROBABILITIES.map((probability) => (
-                                                                <SelectItem key={probability} value={String(probability)}>{probability}%</SelectItem>
+                                                                <SelectItem key={probability.value} value={String(probability.value)}>{probability.label}</SelectItem>
                                                             ))}
                                                         </SelectContent>
                                                     </Select>
+                                                    <p className="text-xs text-muted-foreground">成功率只用於 Pipeline 預測；100% 不會直接建立專案。</p>
+                                                    <FormMessage />
+                                                </FormItem>
+                                            )}
+                                        />
+                                        <FormField
+                                            control={form.control}
+                                            name="probabilityNote"
+                                            render={({ field }: any) => (
+                                                <FormItem className="md:col-span-2">
+                                                    <FormLabel>成交率備註</FormLabel>
+                                                    <FormControl>
+                                                        <textarea
+                                                            {...field}
+                                                            rows={2}
+                                                            maxLength={2000}
+                                                            placeholder="例：客戶已確認預算，待採購流程完成"
+                                                            className="w-full resize-y rounded-md border border-input bg-background px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-primary"
+                                                        />
+                                                    </FormControl>
                                                     <FormMessage />
                                                 </FormItem>
                                             )}
@@ -479,7 +516,7 @@ export function OpportunitiesPage() {
                                                         <BusinessUserPicker
                                                             users={businessUsers}
                                                             selectedUserId={field.value}
-                                                            legacyName={form.watch("salesRep")}
+                                                            legacyName={selectedSalesRep}
                                                             onSelect={(selectedUser) => {
                                                                 field.onChange(selectedUser.id);
                                                                 form.setValue("salesRep", selectedUser.name);
@@ -653,7 +690,7 @@ export function OpportunitiesPage() {
                                 <div className="space-y-4 lg:sticky lg:top-0 lg:self-start">
                                     <FormSummaryPanel
                                         items={[
-                                            { label: "客戶", value: form.watch("customerName") },
+                                            { label: "客戶", value: selectedCustomerName },
                                             { label: "業務", value: selectedSalesRep },
                                             { label: "業務部門", value: selectedSalesDepartment },
                                             { label: "類型", value: opportunityTypeLabels[watchedOppType] },

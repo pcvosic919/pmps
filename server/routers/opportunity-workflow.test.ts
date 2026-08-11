@@ -1,6 +1,11 @@
 import { describe, expect, it } from "vitest";
 import {
     canConvertOpportunityStatus,
+    canConfirmOpportunityQuoteStatus,
+    canConfirmOpportunityQuote,
+    canCreateOpportunityConversionException,
+    canManuallySetOpportunityStatus,
+    canReplaceAcceptedQuoteForProjectStatus,
     getInitialOpportunityStatus,
     getProbabilityForOpportunityStatus,
     getStatusAfterMemberAssignment,
@@ -44,5 +49,30 @@ describe("opportunity workflow", () => {
         expect(getProbabilityForOpportunityStatus("won")).toBe(100);
         expect(getProbabilityForOpportunityStatus("lost")).toBe(0);
         expect(getProbabilityForOpportunityStatus("cancelled")).toBe(0);
+    });
+
+    it("reserves quoting, won and converted for workflow commands", () => {
+        expect(canManuallySetOpportunityStatus("qualified")).toBe(true);
+        expect(canManuallySetOpportunityStatus("lost")).toBe(true);
+        expect(canManuallySetOpportunityStatus("quoting")).toBe(false);
+        expect(canManuallySetOpportunityStatus("won")).toBe(false);
+        expect(canManuallySetOpportunityStatus("converted")).toBe(false);
+    });
+
+    it("only confirms submitted quotes and only replaces them during project setup", () => {
+        expect(canConfirmOpportunityQuoteStatus("draft")).toBe(false);
+        expect(canConfirmOpportunityQuoteStatus("submitted")).toBe(true);
+        expect(canConfirmOpportunityQuoteStatus("accepted")).toBe(true);
+        expect(canReplaceAcceptedQuoteForProjectStatus("new")).toBe(true);
+        expect(canReplaceAcceptedQuoteForProjectStatus("in_progress")).toBe(false);
+    });
+
+    it("limits customer confirmation and exception conversion by responsibility", () => {
+        const opportunity = { ownerId: "owner-1", salesUserId: "sales-1" };
+        expect(canConfirmOpportunityQuote({ id: "sales-1", role: "business" }, opportunity)).toBe(true);
+        expect(canConfirmOpportunityQuote({ id: "other", role: "manager" }, opportunity)).toBe(true);
+        expect(canConfirmOpportunityQuote({ id: "other", role: "tech" }, opportunity)).toBe(false);
+        expect(canCreateOpportunityConversionException({ id: "owner-1", role: "presales" }, opportunity)).toBe(true);
+        expect(canCreateOpportunityConversionException({ id: "sales-1", role: "business" }, opportunity)).toBe(false);
     });
 });

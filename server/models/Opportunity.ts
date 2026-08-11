@@ -29,6 +29,7 @@ export interface IOpportunity extends Document {
     taxIncluded: boolean;
     amountAdjustmentReason?: string;
     probability: OpportunityProbability;
+    probabilityNote?: string;
     presalesHourlyRate?: number;
     opportunityType: OpportunityType;
     status: OpportunityStatus;
@@ -72,6 +73,7 @@ const OpportunitySchema = new Schema<IOpportunity>({
     taxIncluded: { type: Boolean, default: false },
     amountAdjustmentReason: { type: String, trim: true },
     probability: { type: Number, enum: opportunityProbabilities, default: 20, required: true },
+    probabilityNote: { type: String, trim: true, maxlength: 2000 },
     presalesHourlyRate: { type: Number, min: 0 },
     opportunityType: { type: String, enum: opportunityTypes, default: "revenue", required: true },
     status: { type: String, enum: opportunityStatuses, default: "new", required: true },
