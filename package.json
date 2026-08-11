@@ -18,6 +18,7 @@
     "lint": "pnpm -r lint",
     "db:prepare": "tsx scripts/prepare-db.ts",
     "audit:opportunity-conversions": "tsx scripts/audit-opportunity-conversions.ts",
+    "migrate:business-flow-foundation": "tsx scripts/migrate-business-flow-foundation.ts",
     "cosmos:shared-throughput": "bash scripts/prepare-cosmos-shared-throughput.sh"
   },
   "devDependencies": {

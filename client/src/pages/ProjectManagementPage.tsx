@@ -12,8 +12,11 @@ import { useCurrentUser } from "../lib/useCurrentUser";
 const SR_STATUSES = [
     { value: "new", label: "待指派", color: "bg-blue-100 text-blue-800 border-blue-200" },
     { value: "in_progress", label: "執行中", color: "bg-amber-100 text-amber-800 border-amber-200" },
-    { value: "completed", label: "已結案", color: "bg-green-100 text-green-800 border-green-200" },
-    { value: "cancelled", label: "已取消", color: "bg-red-100 text-red-800 border-red-200" },
+    { value: "on_hold", label: "暫停", color: "bg-slate-100 text-slate-800 border-slate-200" },
+    { value: "pending_acceptance", label: "待驗收", color: "bg-violet-100 text-violet-800 border-violet-200" },
+    { value: "closed", label: "已結案", color: "bg-green-100 text-green-800 border-green-200" },
+    { value: "completed", label: "已結案（舊資料）", color: "bg-green-100 text-green-800 border-green-200" },
+    { value: "cancelled", label: "已取消", color: "bg-red-600 text-white border-red-700" },
 ] as const;
 
 type SRStatus = typeof SR_STATUSES[number]["value"];
@@ -45,7 +48,7 @@ export function ProjectManagementPage() {
     const { data: allSrs } = trpc.projects.srList.useQuery({ limit: 200 });
     const { data: openCasesDashboard } = trpc.analytics.getOpenCasesDashboard.useQuery(undefined, { enabled: canSeeOperationsDashboard });
     const { data: pendingWbs } = trpc.projects.getWbsPendingReview.useQuery(undefined, { enabled: canReviewProjects });
-    const updateStatus = trpc.projects.updateSRStatus.useMutation({ onSuccess: () => refetch() });
+    const updateStatus = trpc.projects.updateSRStatus.useMutation({ onSuccess: () => refetch(), onError: error => alert(error.message) });
     const updateFinalPrice = trpc.projects.updateFinalPrice.useMutation({ onSuccess: () => refetch() });
     const deleteSr = trpc.projects.delete.useMutation({ 
         onSuccess: () => refetch(),
@@ -61,6 +64,9 @@ export function ProjectManagementPage() {
         switch (status) {
             case "new": return <Clock className="w-3.5 h-3.5" />;
             case "in_progress": return <RefreshCw className="w-3.5 h-3.5" />;
+            case "on_hold": return <Clock className="w-3.5 h-3.5" />;
+            case "pending_acceptance": return <AlertTriangle className="w-3.5 h-3.5" />;
+            case "closed":
             case "completed": return <CheckCircle2 className="w-3.5 h-3.5" />;
             case "cancelled": return <XCircle className="w-3.5 h-3.5" />;
             default: return null;
@@ -82,7 +88,7 @@ export function ProjectManagementPage() {
 	        total: allSrs?.length ?? 0,
 	        new: allSrs?.filter((s: any) => s.status === "new").length ?? 0,
 	        inProgress: allSrs?.filter((s: any) => s.status === "in_progress").length ?? 0,
-	        completed: allSrs?.filter((s: any) => s.status === "completed").length ?? 0,
+	        completed: allSrs?.filter((s: any) => ["closed", "completed"].includes(s.status)).length ?? 0,
 	    }), [allSrs]);
 	    const selectedProject = (srs ?? []).find((sr: any) => sr.id === selectedProjectId) || (srs ?? [])[0];
 
@@ -258,7 +264,7 @@ export function ProjectManagementPage() {
 	                            <div className="flex items-start justify-between gap-4">
 	                                <div className="flex-1 min-w-0">
                                     <div className="flex items-center gap-3 flex-wrap mb-2">
-                                        <span className="text-xs font-mono text-muted-foreground bg-muted px-2 py-0.5 rounded border">SR-#{sr.id}</span>
+                                        <span className="text-xs font-mono text-muted-foreground bg-muted px-2 py-0.5 rounded border">{sr.projectCode || `SR-#${sr.id}`}</span>
                                         {sr.externalProjectCode && (
                                             <span className="text-xs font-mono text-blue-700 bg-blue-50 px-2 py-0.5 rounded border border-blue-100">{sr.externalProjectCode}</span>
                                         )}
@@ -369,7 +375,12 @@ export function ProjectManagementPage() {
                                                     <button
                                                         key={s.value}
                                                         onClick={() => {
-                                                            updateStatus.mutate({ id: sr.id, status: s.value as SRStatus });
+                                                            const requiresReason = ["on_hold", "closed", "cancelled"].includes(s.value);
+                                                            const reason = requiresReason
+                                                                ? window.prompt(`請輸入「${s.label}」原因`)?.trim()
+                                                                : undefined;
+                                                            if (requiresReason && !reason) return;
+                                                            updateStatus.mutate({ id: sr.id, status: s.value as SRStatus, reason });
                                                             setChangingStatus(null);
                                                         }}
                                                         className={`px-2 py-1 text-xs rounded-full border font-medium ${s.color} hover:opacity-80 transition-opacity`}

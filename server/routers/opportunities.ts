@@ -3,6 +3,7 @@ import { permissionProcedure, router, protectedProcedure, roleProcedure } from "
 import { sharePointService } from "../services/SharePointService";
 import { folderStorageService } from "../services/FolderStorageService";
 import { OpportunityModel } from "../models/Opportunity";
+import { OpportunityQuoteModel } from "../models/OpportunityQuote";
 import { SettlementLockModel } from "../models/SettlementLock";
 import { TimesheetModel } from "../models/Timesheet";
 import { ServiceRequestModel } from "../models/ServiceRequest";
@@ -33,12 +34,20 @@ import {
 } from "./opportunities.listing";
 import {
     canConvertOpportunityStatus,
+    getProbabilityForOpportunityStatus,
     getInitialOpportunityStatus,
     getStatusAfterMemberAssignment,
     getStatusAfterPresalesAssignment,
     isTerminalOpportunityStatus
 } from "./opportunity-workflow";
 import { createProjectForOpportunityOnce, finalizeOpportunityConversion, findProjectByOpportunityId } from "../services/OpportunityConversionService";
+import { listBusinessHistory, recordBusinessHistory } from "../services/BusinessHistoryService";
+import {
+    adoptOpportunityQuote,
+    createOpportunityQuoteVersion,
+    submitOpportunityQuote,
+    voidOpportunityQuote
+} from "../services/OpportunityQuoteService";
 
 const listInput = z.object({
     limit: z.number().min(1).max(100).nullish(),
@@ -47,6 +56,15 @@ const listInput = z.object({
     sortBy: z.enum(opportunitySortFields).optional(),
     sortOrder: z.enum(["asc", "desc"]).optional()
 }).optional();
+
+const opportunityProbabilitySchema = z.union([
+    z.literal(0),
+    z.literal(20),
+    z.literal(40),
+    z.literal(60),
+    z.literal(80),
+    z.literal(100)
+]);
 
 const opportunityImportRowSchema = z.object({
     rowNumber: z.number().int().min(2),
@@ -116,6 +134,19 @@ const getSalesUserFields = async (salesUserId?: string) => {
         salesUserId: salesUser._id,
         salesRep: salesUser.name || "",
         salesDepartment: salesUser.department || ""
+    };
+};
+
+const getOwnerSnapshot = async (ownerId: string) => {
+    const owner = assertFound(
+        await UserModel.findById(ownerId).select("name email department").lean(),
+        "找不到商機 Owner 帳號"
+    );
+    return {
+        ownerNameSnapshot: owner.name || "",
+        ownerEmailSnapshot: owner.email || "",
+        ownerDepartmentCodeSnapshot: owner.department || "",
+        ownerDepartmentNameSnapshot: owner.department || ""
     };
 };
 
@@ -204,6 +235,20 @@ const ensureOpportunityOwnerMember = async (opportunity: any) => {
     return [...members, { userId: toObjectId(ownerId), memberRole: "owner" }];
 };
 
+const getQuoteAndOpportunity = async (quoteId: string) => {
+    const quote = assertFound(
+        await OpportunityQuoteModel.findById(quoteId).lean(),
+        "找不到報價版本"
+    );
+    const opportunity = assertFound(
+        await OpportunityModel.findById(quote.opportunityId)
+            .select("ownerId members presalesAssignments status")
+            .lean(),
+        "找不到報價所屬商機"
+    );
+    return { quote, opportunity };
+};
+
 export const opportunitiesRouter = router({
     list: permissionProcedure("module.opportunities.view", ["admin", "manager", "business", "presales", "tech", "pm"])
         .input(listInput)
@@ -223,7 +268,7 @@ export const opportunitiesRouter = router({
             });
 
             const items = await OpportunityModel.find(query)
-                .select("title customerName salesUserId salesDepartment salesRep estimatedValue opportunityType status expectedCloseDate ownerId createdAt members presalesAssignments productNames description")
+                .select("opportunityCode title customerName salesUserId salesDepartment salesRep estimatedValue presalesAmount quotedAmount finalDealAmount currency taxIncluded probability opportunityType status expectedCloseDate ownerId ownerNameSnapshot ownerEmailSnapshot ownerDepartmentCodeSnapshot ownerDepartmentNameSnapshot createdAt members presalesAssignments productNames description")
                 .populate("ownerId", "name")
                 .sort({ [sortBy]: direction })
                 .limit(limit + 1)
@@ -236,17 +281,28 @@ export const opportunitiesRouter = router({
             return {
                 items: pageItems.map(opp => ({
                     id: opp._id.toString(),
+                    opportunityCode: opp.opportunityCode,
                     title: opp.title,
                     customerName: opp.customerName,
                     salesUserId: opp.salesUserId?.toString() || "",
                     salesDepartment: opp.salesDepartment || "",
                     salesRep: opp.salesRep || "",
                     estimatedValue: opp.estimatedValue,
+                    presalesAmount: opp.presalesAmount,
+                    quotedAmount: opp.quotedAmount,
+                    finalDealAmount: opp.finalDealAmount,
+                    currency: opp.currency,
+                    taxIncluded: opp.taxIncluded,
+                    probability: opp.probability,
                     opportunityType: getEffectiveOpportunityType(opp),
                     status: opp.status,
                     expectedCloseDate: opp.expectedCloseDate,
                     ownerId: (opp.ownerId as any)?._id?.toString() || opp.ownerId?.toString(),
                     ownerName: (opp.ownerId as any)?.name || "—",
+                    ownerNameSnapshot: opp.ownerNameSnapshot,
+                    ownerEmailSnapshot: opp.ownerEmailSnapshot,
+                    ownerDepartmentCodeSnapshot: opp.ownerDepartmentCodeSnapshot,
+                    ownerDepartmentNameSnapshot: opp.ownerDepartmentNameSnapshot,
                     createdAt: opp.createdAt,
                     productNames: opp.productNames || [],
                     description: opp.description || ""
@@ -276,9 +332,9 @@ export const opportunitiesRouter = router({
             });
             const exportLimit = 10_000;
             const items = await OpportunityModel.find(query)
-                .select("title customerName salesUserId salesDepartment salesRep estimatedValue opportunityType status expectedCloseDate ownerId createdAt productNames description approvedM365 approvedAzure approvedSecurity")
+                .select("opportunityCode title customerName salesUserId salesDepartment salesRep estimatedValue presalesAmount quotedAmount finalDealAmount currency taxIncluded probability opportunityType status expectedCloseDate ownerId ownerNameSnapshot ownerEmailSnapshot ownerDepartmentCodeSnapshot ownerDepartmentNameSnapshot createdAt productNames description approvedM365 approvedAzure approvedSecurity")
                 .populate("salesUserId", "name email department")
-                .populate("ownerId", "name")
+                .populate("ownerId", "name email department")
                 .sort({ [sortBy]: sortOrder === "desc" ? -1 : 1 })
                 .limit(exportLimit + 1)
                 .lean();
@@ -289,12 +345,19 @@ export const opportunitiesRouter = router({
                 limit: exportLimit,
                 items: items.slice(0, exportLimit).map((opportunity: any) => ({
                     id: opportunity._id.toString(),
+                    opportunityCode: opportunity.opportunityCode || "",
                     title: opportunity.title,
                     customerName: opportunity.customerName,
                     salesEmail: opportunity.salesUserId?.email || "",
                     salesDepartment: opportunity.salesDepartment || opportunity.salesUserId?.department || "",
                     salesRep: opportunity.salesRep || opportunity.salesUserId?.name || "",
                     estimatedValue: Number(opportunity.estimatedValue || 0),
+                    presalesAmount: Number(opportunity.presalesAmount || 0),
+                    quotedAmount: Number(opportunity.quotedAmount || 0),
+                    finalDealAmount: Number(opportunity.finalDealAmount || 0),
+                    currency: opportunity.currency || "TWD",
+                    taxIncluded: opportunity.taxIncluded === true,
+                    probability: opportunity.probability ?? getProbabilityForOpportunityStatus(opportunity.status),
                     opportunityType: getEffectiveOpportunityType(opportunity),
                     status: opportunity.status,
                     expectedCloseDate: opportunity.expectedCloseDate,
@@ -303,7 +366,10 @@ export const opportunitiesRouter = router({
                     approvedM365: opportunity.approvedM365 === true,
                     approvedAzure: opportunity.approvedAzure === true,
                     approvedSecurity: opportunity.approvedSecurity === true,
-                    ownerName: opportunity.ownerId?.name || "",
+                    ownerName: opportunity.ownerNameSnapshot || opportunity.ownerId?.name || "",
+                    ownerEmail: opportunity.ownerEmailSnapshot || opportunity.ownerId?.email || "",
+                    ownerDepartmentCode: opportunity.ownerDepartmentCodeSnapshot || opportunity.ownerId?.department || "",
+                    ownerDepartmentName: opportunity.ownerDepartmentNameSnapshot || opportunity.ownerId?.department || "",
                     createdAt: opportunity.createdAt
                 }))
             };
@@ -435,6 +501,7 @@ export const opportunitiesRouter = router({
                         }
                         seenCreateKeys.add(createKey);
                         await ensureCompanyByName(row.customerName, ctx.user.id);
+                        const importedStatus = getInitialOpportunityStatus(hasAnyRole(ctx.user, ["presales"]));
                         const created = await OpportunityModel.create({
                             title: row.title,
                             customerName: row.customerName,
@@ -449,9 +516,31 @@ export const opportunitiesRouter = router({
                             approvedM365: row.approvedM365,
                             approvedAzure: row.approvedAzure,
                             approvedSecurity: row.approvedSecurity,
-                            status: getInitialOpportunityStatus(hasAnyRole(ctx.user, ["presales"])),
+                            status: importedStatus,
+                            probability: getProbabilityForOpportunityStatus(importedStatus),
                             ownerId: toObjectId(ctx.user.id),
+                            ownerNameSnapshot: ctx.user.name || "",
+                            ownerEmailSnapshot: ctx.user.email || "",
+                            ownerDepartmentCodeSnapshot: ctx.user.department || "",
+                            ownerDepartmentNameSnapshot: ctx.user.department || "",
                             members: [{ userId: toObjectId(ctx.user.id), memberRole: "owner" }]
+                        });
+                        await recordBusinessHistory({
+                            entityType: "opportunity",
+                            entityId: created._id,
+                            action: "opportunity_imported",
+                            after: {
+                                opportunityCode: created.opportunityCode,
+                                title: created.title,
+                                customerName: created.customerName,
+                                status: created.status,
+                                probability: created.probability,
+                                estimatedValue: created.estimatedValue,
+                                rowNumber: row.rowNumber
+                            },
+                            actorId: ctx.user.id,
+                            actorRole: ctx.user.role,
+                            source: "import"
                         });
                         result.id = created._id.toString();
                         result.action = "inserted";
@@ -526,7 +615,7 @@ export const opportunitiesRouter = router({
         
         const activeCount = await OpportunityModel.countDocuments({
             ...query,
-            status: { $nin: ["won", "lost", "converted"] }
+            status: { $nin: ["won", "lost", "converted", "cancelled"] }
         });
         
         return { count: activeCount };
@@ -534,12 +623,16 @@ export const opportunitiesRouter = router({
 
     create: roleProcedure(["admin", "business", "manager", "presales"])
         .input(z.object({
-            title: z.string(),
-            customerName: z.string(),
+            title: z.string().trim().min(1, "商機名稱不可為空"),
+            customerName: z.string().trim().min(1, "客戶名稱不可為空"),
             salesUserId: z.string().optional(),
             salesDepartment: z.string().trim().optional(),
             salesRep: z.string().trim().optional(),
             estimatedValue: z.number().default(0),
+            presalesAmount: z.number().min(0).optional(),
+            probability: opportunityProbabilitySchema.optional(),
+            currency: z.string().trim().min(1).default("TWD"),
+            taxIncluded: z.boolean().default(false),
             opportunityType: z.enum(opportunityTypes).default("revenue"),
             expectedCloseDate: z.date().optional(),
             customFields: z.array(z.object({
@@ -556,19 +649,40 @@ export const opportunitiesRouter = router({
             const ownerId = ctx.user.id;
             const salesUserFields = await getSalesUserFields(input.salesUserId);
             const initialStatus = getInitialOpportunityStatus(hasAnyRole(ctx.user, ["presales"]));
+            const ownerSnapshot = await getOwnerSnapshot(ownerId);
             await ensureCompanyByName(input.customerName, ownerId);
 
             const result = await OpportunityModel.create({
                 ...input,
                 status: initialStatus,
+                probability: input.probability ?? getProbabilityForOpportunityStatus(initialStatus),
                 salesUserId: salesUserFields?.salesUserId,
                 salesRep: salesUserFields?.salesRep || input.salesRep || "",
                 salesDepartment: salesUserFields?.salesDepartment || input.salesDepartment || "",
                 ownerId: ownerId,
+                ...ownerSnapshot,
                 members: [{
                     userId: ownerId,
                     memberRole: "owner"
                 }]
+            });
+
+            await recordBusinessHistory({
+                entityType: "opportunity",
+                entityId: result._id,
+                action: "opportunity_created",
+                after: {
+                    opportunityCode: result.opportunityCode,
+                    title: result.title,
+                    customerName: result.customerName,
+                    status: result.status,
+                    probability: result.probability,
+                    estimatedValue: result.estimatedValue,
+                    presalesAmount: result.presalesAmount
+                },
+                actorId: ctx.user.id,
+                actorRole: ctx.user.role,
+                source: "api"
             });
 
             // Document folder hook
@@ -650,18 +764,20 @@ export const opportunitiesRouter = router({
                 "您沒有權限新增商機成員"
             );
             if (existingProject) {
-                await finalizeOpportunityConversion(input.opportunityId);
+                await finalizeOpportunityConversion(input.opportunityId, { id: ctx.user.id, role: ctx.user.role });
                 return { id: existingProject._id.toString(), reused: true };
             }
             assertOpportunityEditable(opportunity);
 
             const existingMember = (opportunity.members || []).find((member: any) => member.userId?.toString() === input.userId);
             if (input.memberRole === "owner") {
+                const ownerSnapshot = await getOwnerSnapshot(input.userId);
                 await OpportunityModel.updateOne(
                     { _id: input.opportunityId },
                     {
                         $set: {
                             ownerId: toObjectId(input.userId),
+                            ...ownerSnapshot,
                             "members.$[owners].memberRole": "assignee"
                         }
                     },
@@ -681,6 +797,16 @@ export const opportunitiesRouter = router({
                         { $set: { status: nextStatus } }
                     );
                 }
+                await recordBusinessHistory({
+                    entityType: "opportunity",
+                    entityId: input.opportunityId,
+                    action: input.memberRole === "owner" ? "opportunity_owner_transferred" : "opportunity_member_role_changed",
+                    before: { userId: input.userId, memberRole: existingMember.memberRole, ownerId: opportunity.ownerId },
+                    after: { userId: input.userId, memberRole: input.memberRole, ownerId: input.memberRole === "owner" ? input.userId : opportunity.ownerId },
+                    actorId: ctx.user.id,
+                    actorRole: ctx.user.role,
+                    source: "api"
+                });
                 return { success: true };
             }
 
@@ -693,6 +819,16 @@ export const opportunitiesRouter = router({
                         : {})
                 }
             );
+            await recordBusinessHistory({
+                entityType: "opportunity",
+                entityId: input.opportunityId,
+                action: input.memberRole === "owner" ? "opportunity_owner_transferred" : "opportunity_member_added",
+                before: input.memberRole === "owner" ? { ownerId: opportunity.ownerId } : undefined,
+                after: { userId: input.userId, memberRole: input.memberRole },
+                actorId: ctx.user.id,
+                actorRole: ctx.user.role,
+                source: "api"
+            });
             return { success: true };
         }),
 
@@ -712,11 +848,21 @@ export const opportunitiesRouter = router({
                 "您沒有權限移除此商機成員"
             );
             assertOpportunityEditable(opportunity);
+            const member = (opportunity.members || []).find((item: any) => item._id?.toString() === input.memberId);
 
             await OpportunityModel.updateOne(
                 { "members._id": input.memberId },
                 { $pull: { members: { _id: toObjectId(input.memberId) } } }
             );
+            await recordBusinessHistory({
+                entityType: "opportunity",
+                entityId: opportunity._id,
+                action: "opportunity_member_removed",
+                before: member ? { userId: member.userId, memberRole: member.memberRole } : { memberId: input.memberId },
+                actorId: ctx.user.id,
+                actorRole: ctx.user.role,
+                source: "api"
+            });
             return { success: true };
         }),
 
@@ -845,12 +991,13 @@ export const opportunitiesRouter = router({
         .input(z.object({
             opportunityId: z.string(),
             techId: z.string(),
-            estimatedHours: z.number()
+            estimatedHours: z.number().min(0),
+            hourlyRate: z.number().min(0).optional()
         }))
         .mutation(async ({ input, ctx }) => {
             const opportunity = assertFound(
                 await OpportunityModel.findById(input.opportunityId)
-                    .select("title ownerId members presalesAssignments status")
+                    .select("title ownerId members presalesAssignments status probability presalesHourlyRate")
                     .lean(),
                 "找不到該商機"
             );
@@ -863,13 +1010,17 @@ export const opportunitiesRouter = router({
             assertOpportunityEditable(opportunity);
             assertOpportunityAssignable(opportunity);
 
+            const nextStatus = getStatusAfterPresalesAssignment(opportunity.status);
+            const presalesHourlyRate = opportunity.presalesHourlyRate ?? input.hourlyRate ?? 1000;
             await OpportunityModel.updateOne(
                 { _id: input.opportunityId },
                 {
                     $push: { presalesAssignments: { techId: toObjectId(input.techId), estimatedHours: input.estimatedHours } },
-                    ...(getStatusAfterPresalesAssignment(opportunity.status) !== opportunity.status
-                        ? { $set: { status: getStatusAfterPresalesAssignment(opportunity.status) } }
-                        : {})
+                    $set: {
+                        presalesHourlyRate,
+                        status: nextStatus,
+                        probability: getProbabilityForOpportunityStatus(nextStatus)
+                    }
                 }
             );
 
@@ -891,13 +1042,33 @@ export const opportunitiesRouter = router({
                 message: `您已被指派為商機「${opportunity.title}」的協銷人員，請開始安排支援工時。`,
                 actionUrl: `/opportunities/${input.opportunityId}`
             });
+            await recordBusinessHistory({
+                entityType: "opportunity",
+                entityId: input.opportunityId,
+                action: "presales_assigned",
+                before: {
+                    status: opportunity.status,
+                    probability: opportunity.probability,
+                    presalesHourlyRate: opportunity.presalesHourlyRate
+                },
+                after: {
+                    techId: input.techId,
+                    estimatedHours: input.estimatedHours,
+                    status: nextStatus,
+                    probability: getProbabilityForOpportunityStatus(nextStatus),
+                    presalesHourlyRate
+                },
+                actorId: ctx.user.id,
+                actorRole: ctx.user.role,
+                source: "api"
+            });
             return { success: true };
         }),
 
     createSR: roleProcedure(["admin", "manager", "pm", "presales"])
         .input(z.object({
             opportunityId: z.string(),
-            title: z.string(),
+            title: z.string().trim().min(1, "專案名稱不可為空"),
             contractAmount: z.number(),
             customerName: z.string().optional(),
             salesUserId: z.string().optional(),
@@ -909,7 +1080,7 @@ export const opportunitiesRouter = router({
         .mutation(async ({ input, ctx }) => {
             const opportunity = assertFound(
                 await OpportunityModel.findById(input.opportunityId)
-                    .select("title customerName salesUserId salesDepartment salesRep ownerId members presalesAssignments status")
+                    .select("opportunityCode title customerName salesUserId salesDepartment salesRep ownerId members presalesAssignments status adoptedQuoteId quotedAmount finalDealAmount")
                     .lean(),
                 "找不到該商機"
             );
@@ -925,10 +1096,16 @@ export const opportunitiesRouter = router({
             );
             assertOpportunityConvertible(opportunity);
             const salesUserFields = await getSalesUserFields(input.salesUserId);
+            const customerName = (input.customerName || opportunity.customerName || "").trim();
+            if (!customerName) throw new TRPCError({ code: "BAD_REQUEST", message: "公司名稱不可為空" });
+            await ensureCompanyByName(customerName, ctx.user.id);
+            const sourceQuote = opportunity.adoptedQuoteId
+                ? await OpportunityQuoteModel.findById(opportunity.adoptedQuoteId).select("quoteCode").lean()
+                : null;
 
             const conversionResult = await createProjectForOpportunityOnce(input.opportunityId, {
                 title: input.title,
-                customerName: input.customerName || opportunity.customerName,
+                customerName,
                 salesUserId: salesUserFields?.salesUserId || opportunity.salesUserId,
                 salesDepartment: salesUserFields?.salesDepartment || input.salesDepartment || opportunity.salesDepartment || "",
                 salesRep: salesUserFields?.salesRep || input.salesRep || opportunity.salesRep || "",
@@ -936,6 +1113,9 @@ export const opportunitiesRouter = router({
                 contractAmount: input.contractAmount,
                 finalPrice: input.contractAmount,
                 opportunityId: input.opportunityId,
+                sourceQuoteId: opportunity.adoptedQuoteId,
+                sourceOpportunityCodeSnapshot: opportunity.opportunityCode || "",
+                sourceQuoteCodeSnapshot: sourceQuote?.quoteCode || "",
                 pmId: input.pmId ? toObjectId(input.pmId) : undefined,
                 createdById: toObjectId(ctx.user.id),
                 createdByNameSnapshot: ctx.user.name || ctx.user.email || "",
@@ -944,6 +1124,26 @@ export const opportunitiesRouter = router({
                 status: "new"
             });
             const result = conversionResult.project;
+            if (conversionResult.created) {
+                await recordBusinessHistory({
+                    entityType: "project",
+                    entityId: result._id,
+                    action: "project_created_from_opportunity",
+                    after: {
+                        projectCode: result.projectCode,
+                        title: result.title,
+                        customerName: result.customerName,
+                        opportunityId: input.opportunityId,
+                        sourceOpportunityCodeSnapshot: opportunity.opportunityCode,
+                        sourceQuoteId: opportunity.adoptedQuoteId,
+                        sourceQuoteCodeSnapshot: sourceQuote?.quoteCode,
+                        contractAmount: input.contractAmount
+                    },
+                    actorId: ctx.user.id,
+                    actorRole: ctx.user.role,
+                    source: "api"
+                });
+            }
 
             // Document folder hook
             try {
@@ -959,7 +1159,7 @@ export const opportunitiesRouter = router({
                 console.error("[FolderStorage Hook] SR creation folder failed:", err);
             }
 
-            await finalizeOpportunityConversion(input.opportunityId);
+            await finalizeOpportunityConversion(input.opportunityId, { id: ctx.user.id, role: ctx.user.role });
 
             if (input.pmId && conversionResult.created) {
                 await createNotification({
@@ -986,12 +1186,15 @@ export const opportunitiesRouter = router({
         .input(z.object({
             id: z.string(),
             status: z.enum(opportunityStatuses),
-            estimatedValue: z.number().min(0, "商機金額不能為負數").optional()
+            estimatedValue: z.number().min(0, "商機金額不能為負數").optional(),
+            finalDealAmount: z.number().min(0, "最終成交金額不能為負數").optional(),
+            probability: opportunityProbabilitySchema.optional(),
+            reason: z.string().trim().optional()
         }))
         .mutation(async ({ input, ctx }) => {
             const opportunity = assertFound(
                 await OpportunityModel.findById(input.id)
-                    .select("ownerId members status")
+                    .select("ownerId members status probability estimatedValue quotedAmount finalDealAmount closedAt cancelledAt cancellationReason")
                     .lean(),
                 "找不到該商機"
             );
@@ -1000,16 +1203,53 @@ export const opportunitiesRouter = router({
             if (input.status === "quoting" && input.estimatedValue === undefined) {
                 throw new TRPCError({ code: "BAD_REQUEST", message: "切換為報價中時必須輸入商機金額" });
             }
+            if (input.status === "cancelled" && !input.reason?.trim()) {
+                throw new TRPCError({ code: "BAD_REQUEST", message: "取消商機時必須填寫原因" });
+            }
+
+            const occurredAt = new Date();
+            const probability = input.probability ?? getProbabilityForOpportunityStatus(input.status);
+            const set: Record<string, unknown> = {
+                status: input.status,
+                probability,
+                ...(input.status === "quoting" ? { estimatedValue: input.estimatedValue } : {})
+            };
+            if (input.status === "won") {
+                set.finalDealAmount = input.finalDealAmount ?? opportunity.quotedAmount ?? opportunity.estimatedValue;
+            }
+            if (["converted", "won", "lost", "cancelled"].includes(input.status)) {
+                set.closedAt = occurredAt;
+            }
+            if (input.status === "cancelled") {
+                set.cancelledAt = occurredAt;
+                set.cancellationReason = input.reason?.trim();
+            }
 
             await OpportunityModel.updateOne(
                 { _id: input.id },
-                {
-                    $set: {
-                        status: input.status,
-                        ...(input.status === "quoting" ? { estimatedValue: input.estimatedValue } : {})
-                    }
-                }
+                { $set: set }
             );
+            await recordBusinessHistory({
+                entityType: "opportunity",
+                entityId: input.id,
+                action: "opportunity_status_changed",
+                before: {
+                    status: opportunity.status,
+                    probability: opportunity.probability,
+                    estimatedValue: opportunity.estimatedValue,
+                    finalDealAmount: opportunity.finalDealAmount
+                },
+                after: {
+                    status: input.status,
+                    probability,
+                    ...(input.status === "won" ? { finalDealAmount: set.finalDealAmount } : {}),
+                    ...(input.status === "quoting" ? { estimatedValue: input.estimatedValue } : {})
+                },
+                actorId: ctx.user.id,
+                actorRole: ctx.user.role,
+                reason: input.reason,
+                source: "api"
+            });
             return { success: true };
         }),
 
@@ -1024,7 +1264,7 @@ export const opportunitiesRouter = router({
         .mutation(async ({ input, ctx }) => {
             const opportunity = assertFound(
                 await OpportunityModel.findById(input.id)
-                    .select("ownerId members status")
+                    .select("ownerId members status probability estimatedValue customFields")
                     .lean(),
                 "找不到該商機"
             );
@@ -1035,6 +1275,16 @@ export const opportunitiesRouter = router({
                 { _id: input.id },
                 { $set: { customFields: input.customFields.map((cf) => ({ fieldId: toObjectId(cf.fieldId), value: cf.value })) } }
             );
+            await recordBusinessHistory({
+                entityType: "opportunity",
+                entityId: input.id,
+                action: "opportunity_custom_fields_updated",
+                before: { customFields: opportunity.customFields },
+                after: { customFields: input.customFields },
+                actorId: ctx.user.id,
+                actorRole: ctx.user.role,
+                source: "api"
+            });
             return { success: true };
         }),
 
@@ -1046,7 +1296,7 @@ export const opportunitiesRouter = router({
         .mutation(async ({ input, ctx }) => {
             const opportunity = assertFound(
                 await OpportunityModel.findById(input.id)
-                    .select("ownerId members status")
+                    .select("ownerId members status description")
                     .lean(),
                 "找不到該商機"
             );
@@ -1061,6 +1311,16 @@ export const opportunitiesRouter = router({
                 { _id: input.id },
                 { $set: { description: input.description || "" } }
             );
+            await recordBusinessHistory({
+                entityType: "opportunity",
+                entityId: input.id,
+                action: "opportunity_description_updated",
+                before: { description: opportunity.description },
+                after: { description: input.description || "" },
+                actorId: ctx.user.id,
+                actorRole: ctx.user.role,
+                source: "api"
+            });
             return { success: true };
         }),
 
@@ -1072,7 +1332,7 @@ export const opportunitiesRouter = router({
         .mutation(async ({ input, ctx }) => {
             const opportunity = assertFound(
                 await OpportunityModel.findById(input.id)
-                    .select("ownerId members status")
+                    .select("ownerId members status probability estimatedValue")
                     .lean(),
                 "找不到該商機"
             );
@@ -1085,8 +1345,19 @@ export const opportunitiesRouter = router({
 
             await OpportunityModel.updateOne(
                 { _id: input.id },
-                { $set: { estimatedValue: input.estimatedValue, status: "quoting" } }
+                { $set: { estimatedValue: input.estimatedValue, status: "quoting", probability: 80 } }
             );
+
+            await recordBusinessHistory({
+                entityType: "opportunity",
+                entityId: input.id,
+                action: "opportunity_estimated_amount_updated",
+                before: { estimatedValue: opportunity.estimatedValue, status: opportunity.status, probability: opportunity.probability },
+                after: { estimatedValue: input.estimatedValue, status: "quoting", probability: 80 },
+                actorId: ctx.user.id,
+                actorRole: ctx.user.role,
+                source: "api"
+            });
 
             return { success: true };
         }),
@@ -1099,7 +1370,7 @@ export const opportunitiesRouter = router({
         .mutation(async ({ input, ctx }) => {
             const opportunity = assertFound(
                 await OpportunityModel.findById(input.id)
-                    .select("ownerId members status")
+                    .select("ownerId members status opportunityType")
                     .lean(),
                 "找不到該商機"
             );
@@ -1114,6 +1385,17 @@ export const opportunitiesRouter = router({
                 { _id: input.id },
                 { $set: { opportunityType: input.opportunityType } }
             );
+
+            await recordBusinessHistory({
+                entityType: "opportunity",
+                entityId: input.id,
+                action: "opportunity_type_updated",
+                before: { opportunityType: opportunity.opportunityType },
+                after: { opportunityType: input.opportunityType },
+                actorId: ctx.user.id,
+                actorRole: ctx.user.role,
+                source: "api"
+            });
 
             return { success: true };
         }),
@@ -1150,9 +1432,114 @@ export const opportunitiesRouter = router({
                 }
             );
 
+            await recordBusinessHistory({
+                entityType: "opportunity",
+                entityId: input.id,
+                action: "opportunity_sales_owner_updated",
+                before: { salesUserId: opportunity.salesUserId, salesRep: opportunity.salesRep, salesDepartment: opportunity.salesDepartment },
+                after: salesUserFields,
+                actorId: ctx.user.id,
+                actorRole: ctx.user.role,
+                source: "api"
+            });
+
             return { success: true };
         }),
 
+
+    listQuotes: permissionProcedure("module.opportunities.view", ["admin", "manager", "business", "presales", "tech", "pm"])
+        .input(z.object({ opportunityId: z.string() }))
+        .query(async ({ input, ctx }) => {
+            const opportunity = assertFound(
+                await OpportunityModel.findById(input.opportunityId)
+                    .select("ownerId members presalesAssignments")
+                    .lean(),
+                "找不到該商機"
+            );
+            assertAuthorized(await canAccessOpportunityInScope(ctx.user, opportunity), "您沒有權限檢視報價版本");
+            const quotes = await OpportunityQuoteModel.find({ opportunityId: input.opportunityId })
+                .sort({ version: -1 })
+                .lean();
+            return quotes.map((quote) => ({
+                ...quote,
+                id: quote._id.toString(),
+                opportunityId: quote.opportunityId.toString(),
+                ownerId: quote.ownerId.toString()
+            }));
+        }),
+
+    createQuoteVersion: protectedProcedure
+        .input(z.object({
+            opportunityId: z.string(),
+            name: z.string().trim().min(1, "報價名稱不可為空"),
+            description: z.string().optional(),
+            products: z.array(z.string().trim().min(1)).max(100).default([]),
+            amount: z.number().min(0),
+            currency: z.string().trim().min(1).default("TWD"),
+            taxIncluded: z.boolean().default(false),
+            ownerId: z.string().optional(),
+            validFrom: z.coerce.date().optional(),
+            validUntil: z.coerce.date().optional(),
+            expectedCloseDate: z.coerce.date().optional()
+        }))
+        .mutation(async ({ input, ctx }) => {
+            const opportunity = assertFound(
+                await OpportunityModel.findById(input.opportunityId)
+                    .select("ownerId members presalesAssignments status salesUserId salesRep salesDepartment")
+                    .lean(),
+                "找不到該商機"
+            );
+            assertAuthorized(await canManageOpportunityInScope(ctx.user, opportunity), "您沒有權限新增報價版本");
+            assertOpportunityEditable(opportunity);
+            const quote = await createOpportunityQuoteVersion(input, { id: ctx.user.id, role: ctx.user.role });
+            return { success: true, id: quote._id.toString(), version: quote.version, quoteCode: quote.quoteCode };
+        }),
+
+    submitQuoteVersion: protectedProcedure
+        .input(z.object({ quoteId: z.string() }))
+        .mutation(async ({ input, ctx }) => {
+            const { opportunity } = await getQuoteAndOpportunity(input.quoteId);
+            assertAuthorized(await canManageOpportunityInScope(ctx.user, opportunity), "您沒有權限送出此報價版本");
+            const quote = await submitOpportunityQuote(input.quoteId, { id: ctx.user.id, role: ctx.user.role });
+            return { success: true, status: quote.status };
+        }),
+
+    adoptQuoteVersion: protectedProcedure
+        .input(z.object({ quoteId: z.string() }))
+        .mutation(async ({ input, ctx }) => {
+            const { opportunity } = await getQuoteAndOpportunity(input.quoteId);
+            assertAuthorized(await canManageOpportunityInScope(ctx.user, opportunity), "您沒有權限採用此報價版本");
+            const quote = await adoptOpportunityQuote(input.quoteId, { id: ctx.user.id, role: ctx.user.role });
+            return { success: true, status: quote.status };
+        }),
+
+    voidQuoteVersion: protectedProcedure
+        .input(z.object({ quoteId: z.string(), reason: z.string().trim().min(1, "作廢原因不可為空") }))
+        .mutation(async ({ input, ctx }) => {
+            const { opportunity } = await getQuoteAndOpportunity(input.quoteId);
+            assertAuthorized(await canManageOpportunityInScope(ctx.user, opportunity), "您沒有權限作廢此報價版本");
+            const quote = await voidOpportunityQuote(input.quoteId, input.reason, { id: ctx.user.id, role: ctx.user.role });
+            return { success: true, status: quote.status };
+        }),
+
+    getBusinessHistory: permissionProcedure("module.opportunities.view", ["admin", "manager", "business", "presales", "tech", "pm"])
+        .input(z.object({ opportunityId: z.string(), limit: z.number().min(1).max(500).default(100) }))
+        .query(async ({ input, ctx }) => {
+            const opportunity = assertFound(
+                await OpportunityModel.findById(input.opportunityId)
+                    .select("ownerId members presalesAssignments")
+                    .lean(),
+                "找不到該商機"
+            );
+            assertAuthorized(await canAccessOpportunityInScope(ctx.user, opportunity), "您沒有權限檢視商機歷程");
+            const events = await listBusinessHistory("opportunity", input.opportunityId, input.limit);
+            return events.map((event) => ({
+                ...event,
+                id: event._id.toString(),
+                entityId: event.entityId.toString(),
+                actorId: event.actorId?.toString()
+            }));
+        }),
 
     logPresalesTime: roleProcedure(["admin", "tech", "presales", "pm"])
         .input(z.object({
@@ -1195,6 +1582,15 @@ export const opportunitiesRouter = router({
                 externalAssignmentKey: input.externalAssignmentKey,
                 costAmount: 0
             });
+            await recordBusinessHistory({
+                entityType: "opportunity",
+                entityId: input.opportunityId,
+                action: "presales_time_logged",
+                after: { workDate: input.workDate, hours: input.hours, description: input.description },
+                actorId: ctx.user.id,
+                actorRole: ctx.user.role,
+                source: "api"
+            });
             return { success: true };
         }),
 
@@ -1218,6 +1614,17 @@ export const opportunitiesRouter = router({
             );
 
             await TimesheetModel.deleteOne({ _id: input.id });
+            if (ts.opportunityId) {
+                await recordBusinessHistory({
+                    entityType: "opportunity",
+                    entityId: ts.opportunityId,
+                    action: "presales_timesheet_deleted",
+                    before: { timesheetId: input.id, workDate: ts.workDate, hours: ts.hours, description: ts.description },
+                    actorId: ctx.user.id,
+                    actorRole: ctx.user.role,
+                    source: "api"
+                });
+            }
             return { success: true };
         }),
 
@@ -1268,6 +1675,15 @@ export const opportunitiesRouter = router({
                     }
                 }
             );
+            await recordBusinessHistory({
+                entityType: "opportunity",
+                entityId: input.opportunityId,
+                action: "opportunity_attachment_uploaded",
+                after: { fileName: input.fileName, fileSize: input.fileSize, mimeType: input.mimeType },
+                actorId: ctx.user.id,
+                actorRole: ctx.user.role,
+                source: "api"
+            });
             return { success: true };
         }),
 
@@ -1281,6 +1697,16 @@ export const opportunitiesRouter = router({
             assertFound(opp, "找不到該商機");
             assertOpportunityEditable(opp);
             
+            await recordBusinessHistory({
+                entityType: "opportunity",
+                entityId: input.id,
+                action: "opportunity_permanently_deleted",
+                before: { status: opp.status },
+                actorId: ctx.user.id,
+                actorRole: ctx.user.role,
+                reason: "Demo 限定永久刪除",
+                source: "api"
+            });
             await OpportunityModel.findByIdAndDelete(input.id);
             return { success: true };
         }),

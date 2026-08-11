@@ -21,7 +21,7 @@ export function PmDashboardPage() {
     const getProjectAmount = (project: any) => Number(project.finalPrice ?? project.contractAmount ?? 0);
 
     const activeProjects = useMemo(() => 
-        (projects || []).filter(p => !["completed", "cancelled"].includes(p.status)),
+        (projects || []).filter(p => !["closed", "completed", "cancelled"].includes(p.status)),
     [projects]);
     const financialProjects = useMemo(() =>
         activeProjects.filter(project => project.permissions?.canViewFinancials === true),

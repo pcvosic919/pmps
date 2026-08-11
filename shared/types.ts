@@ -90,10 +90,30 @@ export const opportunityStatuses = [
     "quoting",
     "converted",
     "won",
-    "lost"
+    "lost",
+    "cancelled"
 ] as const;
 
 export type OpportunityStatus = typeof opportunityStatuses[number];
+
+export const opportunityProbabilities = [0, 20, 40, 60, 80, 100] as const;
+export type OpportunityProbability = typeof opportunityProbabilities[number];
+
+export const opportunityQuoteStatuses = ["draft", "submitted", "accepted", "void"] as const;
+export type OpportunityQuoteStatus = typeof opportunityQuoteStatuses[number];
+
+export const businessHistoryEntityTypes = [
+    "opportunity",
+    "opportunity_quote",
+    "project",
+    "wbs",
+    "change_request",
+    "recognition"
+] as const;
+export type BusinessHistoryEntityType = typeof businessHistoryEntityTypes[number];
+
+export const businessHistorySources = ["ui", "api", "import", "migration", "system"] as const;
+export type BusinessHistorySource = typeof businessHistorySources[number];
 
 export const opportunityTypes = [
     "revenue",
@@ -105,6 +125,9 @@ export type OpportunityType = typeof opportunityTypes[number];
 export const srStatuses = [
     "new",
     "in_progress",
+    "on_hold",
+    "pending_acceptance",
+    "closed",
     "completed",
     "cancelled"
 ] as const;
@@ -176,6 +199,10 @@ export interface OpportunityInput {
     salesDepartment?: string;
     salesRep?: string;
     estimatedValue: number;
+    presalesAmount?: number;
+    quotedAmount?: number;
+    finalDealAmount?: number;
+    probability?: OpportunityProbability;
     opportunityType: OpportunityType;
     status: OpportunityStatus;
     expectedCloseDate?: Date;

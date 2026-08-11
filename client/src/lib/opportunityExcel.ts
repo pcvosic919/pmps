@@ -25,12 +25,19 @@ export type OpportunityImportPreviewRow = OpportunityImportPayload & {
 
 export type OpportunityExportRow = {
     id: string;
+    opportunityCode?: string;
     title: string;
     customerName: string;
     salesEmail: string;
     salesDepartment: string;
     salesRep: string;
     estimatedValue: number;
+    presalesAmount?: number;
+    quotedAmount?: number;
+    finalDealAmount?: number;
+    currency?: string;
+    taxIncluded?: boolean;
+    probability?: number;
     opportunityType: string;
     status: string;
     expectedCloseDate?: string | Date | null;
@@ -40,6 +47,9 @@ export type OpportunityExportRow = {
     approvedAzure: boolean;
     approvedSecurity: boolean;
     ownerName: string;
+    ownerEmail?: string;
+    ownerDepartmentCode?: string;
+    ownerDepartmentName?: string;
     createdAt: string | Date;
 };
 
@@ -50,7 +60,8 @@ const statusLabels: Record<string, string> = {
     quoting: "報價中",
     converted: "已轉案",
     won: "已成交",
-    lost: "已失敗"
+    lost: "已失敗",
+    cancelled: "已取消"
 };
 
 const importHeaders = [
@@ -167,6 +178,7 @@ export const downloadOpportunityTemplate = () => {
 export const exportOpportunitiesToXlsx = (rows: OpportunityExportRow[]) => {
     const workbook = XLSX.utils.book_new();
     const dataRows = rows.map((row) => [
+        row.opportunityCode || "",
         row.id,
         row.title,
         row.customerName,
@@ -174,6 +186,12 @@ export const exportOpportunitiesToXlsx = (rows: OpportunityExportRow[]) => {
         row.salesRep,
         row.salesDepartment,
         row.estimatedValue,
+        row.presalesAmount || 0,
+        row.quotedAmount || 0,
+        row.finalDealAmount || 0,
+        row.currency || "TWD",
+        row.taxIncluded ? "Y" : "N",
+        row.probability ?? 0,
         row.opportunityType === "presales" ? "協銷" : "營收型商機",
         formatDate(row.expectedCloseDate),
         row.productNames.join("；"),
@@ -183,12 +201,43 @@ export const exportOpportunitiesToXlsx = (rows: OpportunityExportRow[]) => {
         row.approvedSecurity ? "Y" : "N",
         statusLabels[row.status] || row.status,
         row.ownerName,
+        row.ownerEmail || "",
+        row.ownerDepartmentCode || "",
+        row.ownerDepartmentName || "",
         formatDate(row.createdAt)
     ]);
     appendSheet(workbook, "商機資料", [
-        [...importHeaders, "商機狀態（僅匯出）", "負責人（僅匯出）", "建立日期（僅匯出）"],
+        [
+            "商機代號",
+            "系統 ID",
+            "商機名稱",
+            "客戶名稱",
+            "業務人員 Email",
+            "業務人員",
+            "業務部門",
+            "預估金額",
+            "協銷金額",
+            "報價金額",
+            "最終成交金額",
+            "幣別",
+            "含稅",
+            "成交率 (%)",
+            "商機類型",
+            "預計成交日",
+            "產品名稱",
+            "說明",
+            "M365 核准",
+            "Azure 核准",
+            "Security 核准",
+            "商機狀態",
+            "Owner 姓名",
+            "Owner Email",
+            "Owner 部門代碼",
+            "Owner 部門名稱",
+            "建立日期"
+        ],
         ...dataRows
-    ], [26, 32, 28, 30, 18, 18, 16, 18, 16, 32, 48, 14, 14, 16, 18, 18, 18]);
+    ], [24, 26, 32, 28, 30, 18, 18, 16, 16, 16, 18, 10, 10, 14, 18, 16, 32, 48, 14, 14, 16, 18, 18, 30, 18, 18, 18]);
     XLSX.writeFileXLSX(workbook, makeXlsxFileName("商機資料", formatExportDate()), { compression: true });
 };
 

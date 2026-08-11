@@ -1,5 +1,6 @@
 import mongoose, { Schema, Document } from "mongoose";
 import { attachmentCategories, changeRequestStatuses, memberRoles, srStatuses, srTypes, wbsItemStatuses, wbsVersionStatuses, type ChangeRequestInput, type ChangeRequestStatus, type CustomFieldValue, type DepartmentApproval, type MemberRole, type ServiceRequestAttachment, type SrStatus, type SrType, type WbsItemInput, type WbsVersionInput, type WbsVersionStatus } from "../../shared/types";
+import { generateBusinessCode } from "../services/BusinessCodeService";
 
 export interface IWbsItem extends Omit<WbsItemInput, "assigneeId" | "assigneeIds"> {
     id: mongoose.Types.ObjectId;
@@ -67,7 +68,11 @@ export interface IServiceRequestWbsDraft {
 }
 
 export interface IServiceRequest extends Document {
+    projectCode?: string;
     opportunityId?: mongoose.Types.ObjectId;
+    sourceQuoteId?: mongoose.Types.ObjectId;
+    sourceOpportunityCodeSnapshot?: string;
+    sourceQuoteCodeSnapshot?: string;
     externalProjectCode?: string;
     externalServiceType?: string;
     externalStatus?: string;
@@ -119,6 +124,15 @@ export interface IServiceRequest extends Document {
     localFolderPath?: string;
     archivedAt?: Date;
     archivedById?: mongoose.Types.ObjectId;
+    closedAt?: Date;
+    closedById?: mongoose.Types.ObjectId;
+    closeReason?: string;
+    cancelledAt?: Date;
+    cancelledById?: mongoose.Types.ObjectId;
+    cancellationReason?: string;
+    reopenedAt?: Date;
+    reopenedById?: mongoose.Types.ObjectId;
+    reopenReason?: string;
     projectAuditLogs?: { action: string; userId: mongoose.Types.ObjectId; timestamp: Date; reason?: string }[];
     createdAt: Date;
     updatedAt: Date;
@@ -232,7 +246,11 @@ const PlannedEndDateHistorySchema = new Schema<IServiceRequestPlannedEndDateHist
 }, { _id: false });
 
 const ServiceRequestSchema = new Schema<IServiceRequest>({
+    projectCode: { type: String, trim: true },
     opportunityId: { type: Schema.Types.ObjectId, ref: "Opportunity" },
+    sourceQuoteId: { type: Schema.Types.ObjectId, ref: "OpportunityQuote" },
+    sourceOpportunityCodeSnapshot: { type: String },
+    sourceQuoteCodeSnapshot: { type: String },
     externalProjectCode: { type: String },
     externalServiceType: { type: String },
     externalStatus: { type: String },
@@ -297,6 +315,15 @@ const ServiceRequestSchema = new Schema<IServiceRequest>({
     changeRequests: [ChangeRequestSchema],
     archivedAt: { type: Date },
     archivedById: { type: Schema.Types.ObjectId, ref: "User" },
+    closedAt: { type: Date },
+    closedById: { type: Schema.Types.ObjectId, ref: "User" },
+    closeReason: { type: String, trim: true },
+    cancelledAt: { type: Date },
+    cancelledById: { type: Schema.Types.ObjectId, ref: "User" },
+    cancellationReason: { type: String, trim: true },
+    reopenedAt: { type: Date },
+    reopenedById: { type: Schema.Types.ObjectId, ref: "User" },
+    reopenReason: { type: String, trim: true },
     projectAuditLogs: [AuditLogSchema],
     customFields: [{
         fieldId: { type: Schema.Types.ObjectId, ref: "CustomField" },
@@ -304,6 +331,13 @@ const ServiceRequestSchema = new Schema<IServiceRequest>({
     }]
 }, { timestamps: true });
 
+ServiceRequestSchema.pre("validate", async function () {
+    if (this.isNew && !this.projectCode) {
+        this.projectCode = await generateBusinessCode("PRJ", this.createdAt || new Date());
+    }
+});
+
+ServiceRequestSchema.index({ projectCode: 1 }, { unique: true, sparse: true });
 ServiceRequestSchema.index({ pmId: 1, status: 1, createdAt: -1 });
 ServiceRequestSchema.index(
     { opportunityId: 1 },
@@ -312,6 +346,7 @@ ServiceRequestSchema.index(
         partialFilterExpression: { opportunityId: { $type: "objectId" } }
     }
 );
+ServiceRequestSchema.index({ sourceQuoteId: 1 }, { sparse: true });
 ServiceRequestSchema.index({ "members.userId": 1, createdAt: -1 });
 ServiceRequestSchema.index({ createdByDepartment: 1, createdAt: -1 });
 ServiceRequestSchema.index({ "wbsVersions.items.assigneeId": 1, createdAt: -1 });
@@ -326,6 +361,6 @@ ServiceRequestSchema.index({ salesUserId: 1, createdAt: -1 });
 ServiceRequestSchema.index({ salesDepartment: 1, createdAt: -1 });
 ServiceRequestSchema.index({ "changeRequests.requesterId": 1, createdAt: -1 });
 ServiceRequestSchema.index({ createdAt: -1 });
-ServiceRequestSchema.index({ title: "text", customerName: "text", externalProjectCode: "text" });
+ServiceRequestSchema.index({ projectCode: "text", title: "text", customerName: "text", externalProjectCode: "text" });
 
 export const ServiceRequestModel = mongoose.models.ServiceRequest || mongoose.model<IServiceRequest>("ServiceRequest", ServiceRequestSchema);

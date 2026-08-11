@@ -6,6 +6,7 @@ export interface IUser extends Document {
     name: string;
     password?: string;
     department?: string;
+    employeeCode?: string;
     managedDepartments: string[];
     title?: string;
     role: Role;
@@ -26,6 +27,7 @@ const UserSchema = new Schema<IUser>({
     name: { type: String, required: true },
     password: { type: String },
     department: { type: String },
+    employeeCode: { type: String, trim: true },
     managedDepartments: { type: [String], default: [] },
     title: { type: String },
     role: { type: String, enum: roles, default: "user", required: true },
@@ -58,8 +60,9 @@ UserSchema.index({ role: 1, isActive: 1 });
 UserSchema.index({ name: 1, _id: 1 });
 UserSchema.index({ email: 1, _id: 1 });
 UserSchema.index({ department: 1, _id: 1 });
+UserSchema.index({ employeeCode: 1, _id: 1 });
 UserSchema.index({ createdAt: -1 });
 UserSchema.index({ lastLoginAt: -1 });
-UserSchema.index({ name: "text", email: "text", department: "text" });
+UserSchema.index({ name: "text", email: "text", department: "text", employeeCode: "text" });
 
 export const UserModel = mongoose.models.User || mongoose.model<IUser>("User", UserSchema);

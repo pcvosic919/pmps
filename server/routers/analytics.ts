@@ -134,15 +134,30 @@ const seedReportTemplatesIfNeeded = async () => {
     }
 };
 
-const getWeightedPipelineAmount = (amount: number, status: string | undefined, weights: Record<string, number>) => {
-    const weight = weights[status || ""] ?? 0;
+const getWeightedPipelineAmount = (
+    amount: number,
+    status: string | undefined,
+    weights: Record<string, number>,
+    probability?: number
+) => {
+    const resolvedProbability = Number.isFinite(probability)
+        ? Number(probability)
+        : (weights[status || ""] ?? 0) * 100;
+    if (resolvedProbability < 20 || resolvedProbability > 80) return 0;
+    const weight = resolvedProbability / 100;
     return Math.round((amount || 0) * weight);
 };
+
+const getOpportunityPipelineAmount = (opportunity: any) =>
+    Number(opportunity.quotedAmount ?? opportunity.estimatedValue ?? 0);
 
 const srStatusText: Record<string, string> = {
     new: "新建",
     in_progress: "執行中",
+    on_hold: "暫停",
+    pending_acceptance: "待驗收",
     completed: "已結案",
+    closed: "已結案",
     cancelled: "已取消"
 };
 
@@ -892,7 +907,7 @@ export const analyticsRouter = router({
                 { $match: tsMatch },
                 { $group: { _id: null, totalCost: { $sum: "$costAmount" } } }
             ]),
-            OpportunityModel.find(oppMatch, { estimatedValue: 1, status: 1 }).lean()
+            OpportunityModel.find(oppMatch, { estimatedValue: 1, quotedAmount: 1, probability: 1, status: 1 }).lean()
         ]);
 
         const totals = srTotals[0] ?? { activeProjects: 0, totalRevenue: 0 };
@@ -900,7 +915,7 @@ export const analyticsRouter = router({
         const totalCost = totalCostAgg[0]?.totalCost || 0;
         const totalMargin = totals.totalRevenue - totalCost;
         const weightedPipeline = (pipelineOpps as any[]).reduce(
-            (sum, opp) => sum + getWeightedPipelineAmount(opp.estimatedValue || 0, opp.status, policy.pipelineWeights || defaultPipelineWeights),
+            (sum, opp) => sum + getWeightedPipelineAmount(getOpportunityPipelineAmount(opp), opp.status, policy.pipelineWeights || defaultPipelineWeights, opp.probability),
             0
         );
 
@@ -998,8 +1013,10 @@ export const analyticsRouter = router({
 
             const recognizedSrs = await ServiceRequestModel.find(
                 {
+                    status: { $in: ["closed", "completed"] },
                     $or: [
                         { recognitionMonth: { $regex: `^${year}-` } },
+                        { closedAt: { $gte: yearStart, $lte: yearEnd } },
                         { status: "completed", updatedAt: { $gte: yearStart, $lte: yearEnd } }
                     ]
                 },
@@ -1015,16 +1032,17 @@ export const analyticsRouter = router({
             }
 
             const pipelineOpps = await OpportunityModel.find(
-                { createdAt: { $gte: yearStart, $lte: yearEnd }, status: { $nin: ["lost"] } },
-                { estimatedValue: 1, status: 1, ownerId: 1 }
+                { createdAt: { $gte: yearStart, $lte: yearEnd }, status: { $in: ["new", "qualified", "presales_active", "quoting"] } },
+                { estimatedValue: 1, quotedAmount: 1, probability: 1, status: 1, ownerId: 1 }
             ).lean();
             for (const opp of pipelineOpps as any[]) {
                 const owner = (allUsers as any[]).find(u => u._id.toString() === opp.ownerId?.toString());
                 if (!owner) continue;
                 const dept = owner.department || "未指定";
                 if (deptMap.has(dept)) {
-                    deptMap.get(dept)!.pipelineAmount += opp.estimatedValue || 0;
-                    deptMap.get(dept)!.weightedPipelineAmount += getWeightedPipelineAmount(opp.estimatedValue || 0, opp.status, policy.pipelineWeights || defaultPipelineWeights);
+                    const pipelineAmount = getOpportunityPipelineAmount(opp);
+                    deptMap.get(dept)!.pipelineAmount += pipelineAmount;
+                    deptMap.get(dept)!.weightedPipelineAmount += getWeightedPipelineAmount(pipelineAmount, opp.status, policy.pipelineWeights || defaultPipelineWeights, opp.probability);
                 }
             }
 
@@ -1254,17 +1272,18 @@ export const analyticsRouter = router({
         .query(async () => {
             const year = new Date().getFullYear();
             const [openCasesRows, totalProjects, targetRows, recognizedRows, pipelineRows] = await Promise.all([
-                ServiceRequestModel.countDocuments({ status: { $nin: ["completed", "cancelled"] } }),
+                ServiceRequestModel.countDocuments({ status: { $nin: ["closed", "completed", "cancelled"] } }),
                 ServiceRequestModel.countDocuments(),
                 KpiTargetModel.countDocuments({ year }),
                 ServiceRequestModel.countDocuments({
+                    status: { $in: ["closed", "completed"] },
                     $or: [
                         { recognitionMonth: { $regex: `^${year}-` } },
                         { actualEndDate: { $gte: new Date(year, 0, 1), $lt: new Date(year + 1, 0, 1) } },
                         { recognizedRevenueAmount: { $gt: 0 } }
                     ]
                 }),
-                OpportunityModel.countDocuments({ status: { $nin: ["lost", "won", "converted"] } })
+                OpportunityModel.countDocuments({ status: { $in: ["new", "qualified", "presales_active", "quoting"] } })
             ]);
 
             return {
@@ -1352,7 +1371,7 @@ export const analyticsRouter = router({
                     {
                         ...match,
                         plannedEndDate: { $lt: new Date() },
-                        status: { $nin: ["completed", "cancelled"] }
+                        status: { $nin: ["closed", "completed", "cancelled"] }
                     },
                     { title: 1, customerName: 1, externalProjectCode: 1, externalServiceType: 1, plannedEndDate: 1, completionPercentage: 1 }
                 ).sort({ plannedEndDate: 1 }).limit(10).lean()
@@ -2274,10 +2293,10 @@ export const analyticsRouter = router({
                 let onTime = 0;
                 let total = 0;
                 const rows = srs.map((sr: any) => {
-                    const isComplete = sr.status === "completed";
+                    const isComplete = sr.status === "closed" || sr.status === "completed";
                     const planned = sr.endDate ? new Date(sr.endDate) : null;
                     const isOnTime = isComplete && planned ? new Date() <= planned : isComplete;
-                    if (sr.status === "completed" || sr.status === "in_progress") {
+                    if (["closed", "completed", "in_progress"].includes(sr.status)) {
                         total++;
                         if (isOnTime) onTime++;
                     }
@@ -2335,7 +2354,7 @@ export const analyticsRouter = router({
                 const scopedUser = input.userId
                     ? (await getScopedReportUsers(ctx.user, input.department, input.userId))[0]
                     : null;
-                const srMatch: any = { status: { $nin: ["completed", "cancelled"] } };
+                const srMatch: any = { status: { $nin: ["closed", "completed", "cancelled"] } };
                 const allowedDepartments = await buildDepartmentAccessFilter(ctx.user, input.department);
                 if (allowedDepartments !== null) {
                     if (allowedDepartments.length === 0) {
@@ -2477,11 +2496,10 @@ export const analyticsRouter = router({
                 if (scopedUser) srMatch.pmId = scopedUser._id;
 
                 const oppMatch: any = {
-                    status: { $nin: ["lost", "won", "converted"] },
-                    estimatedValue: { $gt: 0 },
-                    $or: [
-                        { opportunityType: "revenue" },
-                        { opportunityType: { $exists: false } }
+                    status: { $in: ["new", "qualified", "presales_active", "quoting"] },
+                    $and: [
+                        { $or: [{ opportunityType: "revenue" }, { opportunityType: { $exists: false } }] },
+                        { $or: [{ quotedAmount: { $gt: 0 } }, { estimatedValue: { $gt: 0 } }] }
                     ]
                 };
                 if (departmentFilter) {
@@ -2504,7 +2522,7 @@ export const analyticsRouter = router({
                         .lean(),
                     OpportunityModel.find(oppMatch)
                         .populate("ownerId", "name department")
-                        .select("title customerName salesDepartment salesRep estimatedValue opportunityType status ownerId")
+                        .select("title customerName salesDepartment salesRep estimatedValue quotedAmount probability opportunityType status ownerId")
                         .lean(),
                     TimesheetModel.find(presalesMatch)
                         .populate("techId", "name department")
@@ -2565,7 +2583,7 @@ export const analyticsRouter = router({
                         if (personKey) addRevenueBucket(previousProjectByPerson, personKey, recognizedAmount, recognitionDate);
                     }
 
-                    if (sr.status === "completed") {
+                    if (sr.status === "closed" || sr.status === "completed") {
                         if (!sr.recognitionMonth) {
                             addAnomaly(anomaliesByDept, department, `已結案缺認列月份：${sr.title}`);
                             if (personKey) addAnomaly(anomaliesByPerson, personKey, `已結案缺認列月份：${sr.title}`);
@@ -2579,7 +2597,7 @@ export const analyticsRouter = router({
                         }
                     }
 
-                    if (sr.status !== "completed" && sr.status !== "cancelled") {
+                    if (!["closed", "completed", "cancelled"].includes(sr.status)) {
                         const openAmount = Math.max(0, getProjectStatisticAmount(sr) - Math.max(0, recognizedAmount));
                         addAmount(openSrPipelineByDept, department, openAmount);
                         if (personKey) {
@@ -2592,8 +2610,8 @@ export const analyticsRouter = router({
 
                 for (const opportunity of opportunities as any[]) {
                     const department = getKpiDepartment(opportunity);
-                    const rawAmount = Number(opportunity.estimatedValue || 0);
-                    const weightedAmount = getWeightedPipelineAmount(rawAmount, opportunity.status, policy.pipelineWeights || defaultPipelineWeights);
+                    const rawAmount = getOpportunityPipelineAmount(opportunity);
+                    const weightedAmount = getWeightedPipelineAmount(rawAmount, opportunity.status, policy.pipelineWeights || defaultPipelineWeights, opportunity.probability);
                     addAmount(opportunityPipelineByDept, department, rawAmount);
                     addAmount(weightedOpportunityPipelineByDept, department, weightedAmount);
                     const ownerKey = opportunity.ownerId?._id?.toString();

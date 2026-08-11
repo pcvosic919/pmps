@@ -17,6 +17,8 @@ import { FormSection, FormSummaryPanel, StickyFormActions } from "../components/
 import { OpportunityImportDialog } from "../components/opportunities/OpportunityImportDialog";
 import { exportOpportunitiesToXlsx } from "../lib/opportunityExcel";
 
+const OPPORTUNITY_PROBABILITIES = [0, 20, 40, 60, 80, 100] as const;
+
 const oppSchema = z.object({
     title: z.string().min(1, "商機名稱不可為空"),
     customerName: z.string().min(1, "客戶名稱不可為空"),
@@ -24,6 +26,8 @@ const oppSchema = z.object({
     salesDepartment: z.string().optional(),
     salesRep: z.string().optional(),
     estimatedValue: z.number().min(0, "金額不能為負數"),
+    presalesAmount: z.number().min(0, "協銷金額不能為負數").optional(),
+    probability: z.union([z.literal(0), z.literal(20), z.literal(40), z.literal(60), z.literal(80), z.literal(100)]),
     opportunityType: z.enum(["revenue", "presales"]),
     productNames: z.array(z.string()).optional(),
     description: z.string().optional(),
@@ -107,6 +111,8 @@ export function OpportunitiesPage() {
             salesDepartment: "",
             salesRep: "",
             estimatedValue: 0,
+            presalesAmount: 0,
+            probability: 0,
             opportunityType: "revenue",
             productNames: [],
             description: "",
@@ -152,6 +158,8 @@ export function OpportunitiesPage() {
             salesDepartment: values.salesDepartment,
             salesRep: values.salesRep,
             estimatedValue: values.estimatedValue,
+            presalesAmount: values.presalesAmount,
+            probability: values.probability,
             opportunityType: values.opportunityType,
             productNames: values.productNames,
             description: values.description,
@@ -192,6 +200,7 @@ export function OpportunitiesPage() {
             case 'won': return 'bg-green-100 text-green-800 border-green-200 dark:bg-green-900/30 dark:text-green-300 dark:border-green-800';
             case 'converted': return 'bg-indigo-100 text-indigo-800 border-indigo-200 dark:bg-indigo-900/30 dark:text-indigo-300 dark:border-indigo-800';
             case 'lost': return 'bg-red-100 text-red-800 border-red-200 dark:bg-red-900/30 dark:text-red-300 dark:border-red-800';
+            case 'cancelled': return 'bg-red-600 text-white border-red-700 dark:bg-red-700 dark:text-white dark:border-red-600';
             default: return 'bg-gray-100 text-gray-800 border-gray-200';
         }
     };
@@ -204,7 +213,8 @@ export function OpportunitiesPage() {
             quoting: "報價中",
             won: "已成交",
             converted: "已轉案",
-            lost: "已失敗"
+            lost: "已失敗",
+            cancelled: "已取消"
         };
         return labels[status] || status;
     };
@@ -273,6 +283,7 @@ export function OpportunitiesPage() {
                             <tr className="bg-muted/50 border-b border-border text-[11px] font-bold text-muted-foreground uppercase tracking-widest">
                                 <th className="px-6 py-4">狀態</th>
                                 <th className="px-6 py-4">ID / 商機名稱</th>
+                                <th className="px-6 py-4">成交率</th>
                                 <th className="px-6 py-4">類型</th>
                                 <th className="px-6 py-4">客戶名稱</th>
                                 <th className="px-6 py-4">業務</th>
@@ -292,9 +303,14 @@ export function OpportunitiesPage() {
                                     </td>
                                     <td className="px-6 py-4">
                                         <div className="flex flex-col">
-                                            <span className="text-[10px] font-mono text-muted-foreground mb-0.5">#{opp.id}</span>
+                                            <span className="text-[10px] font-mono text-muted-foreground mb-0.5">{opp.opportunityCode || `#${opp.id}`}</span>
                                             <span className="text-sm font-bold text-foreground group-hover:text-primary transition-colors line-clamp-1">{opp.title}</span>
                                         </div>
+                                    </td>
+                                    <td className="px-6 py-4">
+                                        <span className="inline-flex min-w-12 justify-center rounded-full border border-primary/20 bg-primary/5 px-2 py-1 text-xs font-bold text-primary">
+                                            {opp.probability ?? 0}%
+                                        </span>
                                     </td>
                                     <td className="px-6 py-4">
                                         <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold border ${(opp as any).opportunityType === "presales" ? "bg-cyan-100 text-cyan-800 border-cyan-200" : "bg-emerald-100 text-emerald-800 border-emerald-200"}`}>
@@ -315,8 +331,11 @@ export function OpportunitiesPage() {
                                     </td>
                                     <td className="px-6 py-4">
                                         <span className="text-sm font-mono font-bold text-foreground">
-                                            {opp.estimatedValue.toLocaleString()}
+                                            {Number(opp.finalDealAmount ?? opp.quotedAmount ?? opp.estimatedValue).toLocaleString()}
                                         </span>
+                                        {opp.presalesAmount !== undefined && opp.presalesAmount > 0 && (
+                                            <div className="mt-1 text-[10px] text-muted-foreground">協銷 {opp.presalesAmount.toLocaleString()}</div>
+                                        )}
                                     </td>
                                     <td className="px-6 py-4 text-sm font-medium text-primary/80">
                                         {(opp as any).ownerName || "—"}
@@ -352,7 +371,7 @@ export function OpportunitiesPage() {
                             ))}
                             {(!opps || opps.length === 0) && (
                                 <tr>
-                                                <td colSpan={9} className="px-6 py-12 text-center text-muted-foreground italic">
+                                                <td colSpan={10} className="px-6 py-12 text-center text-muted-foreground italic">
                                         <div className="flex flex-col items-center justify-center opacity-50">
                                             <Briefcase className="w-10 h-10 mb-2" />
                                             <p>尚無商機資料</p>
@@ -405,6 +424,26 @@ export function OpportunitiesPage() {
                                                     <FormControl>
                                                         <Input placeholder="例：M365 導入協銷" {...field} />
                                                     </FormControl>
+                                                    <FormMessage />
+                                                </FormItem>
+                                            )}
+                                        />
+                                        <FormField
+                                            control={form.control}
+                                            name="probability"
+                                            render={({ field }: any) => (
+                                                <FormItem>
+                                                    <FormLabel>成交率</FormLabel>
+                                                    <Select value={String(field.value)} onValueChange={(value) => field.onChange(Number(value))}>
+                                                        <FormControl>
+                                                            <SelectTrigger><SelectValue placeholder="選擇成交率" /></SelectTrigger>
+                                                        </FormControl>
+                                                        <SelectContent>
+                                                            {OPPORTUNITY_PROBABILITIES.map((probability) => (
+                                                                <SelectItem key={probability} value={String(probability)}>{probability}%</SelectItem>
+                                                            ))}
+                                                        </SelectContent>
+                                                    </Select>
                                                     <FormMessage />
                                                 </FormItem>
                                             )}
@@ -496,6 +535,27 @@ export function OpportunitiesPage() {
                                                 </FormItem>
                                             )}
                                         />
+                                        {watchedOppType === "presales" && (
+                                            <FormField
+                                                control={form.control}
+                                                name="presalesAmount"
+                                                render={({ field }: any) => (
+                                                    <FormItem>
+                                                        <FormLabel>協銷金額 (NT$)</FormLabel>
+                                                        <FormControl>
+                                                            <Input
+                                                                type="number"
+                                                                min={0}
+                                                                {...field}
+                                                                onChange={(event: React.ChangeEvent<HTMLInputElement>) => field.onChange(Number(event.target.value))}
+                                                            />
+                                                        </FormControl>
+                                                        <p className="text-xs text-muted-foreground">與預估金額、報價金額及最終成交金額分開保存。</p>
+                                                        <FormMessage />
+                                                    </FormItem>
+                                                )}
+                                            />
+                                        )}
                                     </FormSection>
 
                                     <FormSection title="產品與核准項目" description="勾選相關產品與核准範圍，作為協銷與後續分析依據。">

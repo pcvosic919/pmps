@@ -97,12 +97,17 @@ export function WbsManagementPage() {
     const [editedPointValue, setEditedPointValue] = useState(0);
 
     const { data: sr, isLoading, error } = trpc.projects.srById.useQuery({ id: srId }, { enabled: !!srId });
+    const projectLocked = ["closed", "completed", "cancelled"].includes(sr?.status || "");
     const { data: savedDraft, isFetched: isDraftFetched } = trpc.projects.getWbsDraft.useQuery({ srId }, { enabled: !!srId });
     const { data: techs } = trpc.users.techList.useQuery();
     const { data: allUsers } = trpc.users.list.useQuery({ limit: 500 });
     const { data: attachments, refetch: refetchAttachments } = trpc.projects.srAttachmentsList.useQuery({ srId }, { enabled: !!srId });
     const { data: projectMembers, refetch: refetchProjectMembers } = trpc.projects.getSrMembers.useQuery({ srId }, { enabled: !!srId });
     const { data: wbsQuote, refetch: refetchWbsQuote } = trpc.projects.generateWbsQuote.useQuery({ srId }, { enabled: false });
+    const { data: projectHistory, refetch: refetchProjectHistory, isFetching: isFetchingProjectHistory } = trpc.projects.getBusinessHistory.useQuery(
+        { projectId: srId, limit: 100 },
+        { enabled: !!srId }
+    );
 
     // Review state...
 
@@ -156,7 +161,7 @@ export function WbsManagementPage() {
     }, [draftHydrated, isDraftFetched, savedDraft]);
 
     useEffect(() => {
-        if (!draftHydrated || !isBuildingVersion) return;
+        if (!draftHydrated || !isBuildingVersion || projectLocked) return;
         const timer = window.setTimeout(() => {
             saveDraftMutation.mutate({
                 srId,
@@ -170,7 +175,7 @@ export function WbsManagementPage() {
             });
         }, 2000);
         return () => window.clearTimeout(timer);
-    }, [draftHydrated, draftItems, isBuildingVersion, srId]);
+    }, [draftHydrated, draftItems, isBuildingVersion, projectLocked, srId]);
 
     useEffect(() => {
         const warnBeforeUnload = (event: BeforeUnloadEvent) => {
@@ -301,32 +306,47 @@ export function WbsManagementPage() {
     const normalizeImportDate = (value?: Date) => value ? value.toISOString().slice(0, 10) : "";
     const isHeadingItem = (item: Pick<WbsDraftItem, "level">) => (item.level || 0) === 0;
     const getImportText = (value: any, fallback = "") => value == null || value === "" ? fallback : String(value).trim();
-    const findUserByText = (value?: string) => {
-        const assigneeText = String(value || "").trim().toLowerCase();
-        if (!assigneeText) return undefined;
-        return techs?.find(t =>
-            [t.id, t.name, t.email].some(candidate => String(candidate || "").trim().toLowerCase() === assigneeText)
-        ) || allUsers?.items?.find((item: any) =>
-            [item.id, item.name, item.email].some(candidate => String(candidate || "").trim().toLowerCase() === assigneeText)
-        );
-    };
-    const findUsersByTextList = (value?: string) => Array.from(new Set(String(value || "")
+    const splitAssigneeTextList = (value?: string) => Array.from(new Set(String(value || "")
         .split(/[,，;；\n]/)
-        .map(item => findUserByText(item)?.id)
-        .filter(Boolean))) as string[];
+        .map((item) => item.trim())
+        .filter(Boolean)));
+    const getExcelAssigneeText = (row: Record<string, any>) => {
+        const directValue = row['指派人員帳號(多人)'] || row['指派人員帳號'] || row['負責人'] || row['Assignee'];
+        if (directValue) return String(directValue);
+        for (const key of Object.keys(row)) {
+            if (key.startsWith('[') && key.endsWith(']天數') && row[key]) {
+                return key.substring(1, key.indexOf(']'));
+            }
+        }
+        return "";
+    };
 
     const handleExcelImport = (e: React.ChangeEvent<HTMLInputElement>) => {
         const file = e.target.files?.[0];
         if (!file) return;
 
         const reader = new FileReader();
-        reader.onload = (event) => {
+        reader.onload = async (event) => {
             try {
                 const data = new Uint8Array(event.target?.result as ArrayBuffer);
                 const workbook = XLSX.read(data, { type: 'array' });
                 const sheetName = workbook.SheetNames[0];
                 const worksheet = workbook.Sheets[sheetName];
                 const json = XLSX.utils.sheet_to_json(worksheet);
+                const assigneeInputs = Array.from(new Set(json.flatMap((row: any) => splitAssigneeTextList(getExcelAssigneeText(row)))));
+                const resolution = assigneeInputs.length > 0
+                    ? await utils.users.resolveAssignmentUsers.fetch({ context: "wbs", values: assigneeInputs })
+                    : { items: [] };
+                const resolutionErrors = resolution.items.filter((item: any) => item.error);
+                if (resolutionErrors.length > 0) {
+                    const details = resolutionErrors.slice(0, 5).map((item: any) => `${item.input}：${item.error}`).join("；");
+                    toast.error(`WBS 指派人員解析失敗：${details}${resolutionErrors.length > 5 ? `；另有 ${resolutionErrors.length - 5} 筆` : ""}`);
+                    e.target.value = '';
+                    return;
+                }
+                const resolvedUserIds = new Map(resolution.items
+                    .filter((item: any) => item.user?.id)
+                    .map((item: any) => [String(item.input).trim().toLocaleLowerCase("zh-TW"), item.user.id]));
                 const importedSrIds = Array.from(new Set(json.map((row: any) => String(row['SR ID'] || "").trim()).filter(Boolean)));
                 const mismatchedSrIds = importedSrIds.filter(id => id !== String(sr?.id || ""));
                 if (mismatchedSrIds.length > 0) {
@@ -337,17 +357,9 @@ export function WbsManagementPage() {
 
                 const importedItems: WbsDraftItem[] = json.map((row: any) => {
                     // Extract assignee from columns like "[John]天數" or fallback to "負責人"
-                    let assigneeName = row['負責人'] || row['指派人員帳號'] || row['Assignee'];
-                    if (!assigneeName) {
-                        for (const key of Object.keys(row)) {
-                            if (key.startsWith('[') && key.endsWith(']天數') && row[key]) {
-                                assigneeName = key.substring(1, key.indexOf(']'));
-                                break;
-                            }
-                        }
-                    }
-                    const multiAssigneeIds = findUsersByTextList(row['指派人員帳號(多人)'] || row['指派人員帳號'] || row['負責人'] || row['Assignee']);
-                    const assignee = findUserByText(assigneeName) || (multiAssigneeIds[0] ? findUserByText(multiAssigneeIds[0]) : undefined);
+                    const multiAssigneeIds = splitAssigneeTextList(getExcelAssigneeText(row))
+                        .map((value) => resolvedUserIds.get(value.toLocaleLowerCase("zh-TW")))
+                        .filter(Boolean) as string[];
 
                     // Determine level based on "工作項次" (e.g. "1" -> 0, "1.1" -> 1)
                     let level = Number(row['階層'] || row['Level'] || 0);
@@ -362,7 +374,7 @@ export function WbsManagementPage() {
                         title: getImportText(row['工作項目'] || row['項目名稱'] || row['Title'] || row['項目'] || row['專案階段'], '未命名項目'),
                         estimatedHours: level === 0 ? 0 : rawEstimatedHours,
                         actualHours: 0,
-                        assigneeId: assignee?.id || multiAssigneeIds[0],
+                        assigneeId: multiAssigneeIds[0],
                         assigneeIds: multiAssigneeIds,
                         level: level,
                         startDate: parseExcelDate(row['起始時間'] || row['預計執行日']),
@@ -464,12 +476,12 @@ export function WbsManagementPage() {
 	            { key: "overdue", label: "逾期未完成", count: overdue.length, examples: overdue.slice(0, 3).map((item: any) => item.title) }
 	        ].filter(item => item.count > 0);
 	    })();
-	    const canEditSalesOwner = sr.permissions?.canOperate === true;
-	    const canManageProjectMembers = sr.permissions?.canManageMembers === true;
+	    const canEditSalesOwner = sr.permissions?.canOperate === true && !projectLocked;
+	    const canManageProjectMembers = sr.permissions?.canManageMembers === true && !projectLocked;
 	    const canViewFinancials = sr.permissions?.canViewFinancials === true;
-	    const canEditFinancials = sr.permissions?.canEditFinancials === true;
-	    const canEditWbs = sr.permissions?.canEditWbs === true;
-	    const canReviewSubmittedWbs = sr.permissions?.canReview === true;
+	    const canEditFinancials = sr.permissions?.canEditFinancials === true && !projectLocked;
+	    const canEditWbs = sr.permissions?.canEditWbs === true && !projectLocked;
+	    const canReviewSubmittedWbs = sr.permissions?.canReview === true && !projectLocked;
 
     const getStatusColor = (status: string) => {
         switch (status) {
@@ -1018,7 +1030,7 @@ export function WbsManagementPage() {
                 </Link>
                 <div className="flex-1">
                     <h2 className="text-2xl font-bold flex items-center flex-wrap gap-2">
-                        SR-#{sr.id} WBS 管理
+                        {sr.projectCode || `SR-#${sr.id}`} WBS 管理
                         <span className="text-sm font-medium px-2.5 py-0.5 rounded-full bg-primary/10 text-primary border border-primary/20">{sr.title}</span>
                     </h2>
                 </div>
@@ -1026,6 +1038,36 @@ export function WbsManagementPage() {
                     <Receipt className="w-4 h-4" /> WBS 轉報價單
                 </button>
             </div>
+
+            {projectLocked && (
+                <div className={`rounded-xl border p-4 text-sm font-medium ${sr.status === "cancelled" ? "border-red-300 bg-red-50 text-red-700" : "border-amber-300 bg-amber-50 text-amber-800"}`}>
+                    此專案目前為「{sr.status === "cancelled" ? "已取消" : "已結案"}」，基本資料、金額、WBS、工時與 CR 已鎖定；需透過授權重啟流程後才能修改。
+                </div>
+            )}
+
+            <details className="rounded-xl border border-border bg-card shadow-sm">
+                <summary className="cursor-pointer list-none p-4">
+                    <div className="flex items-center justify-between gap-3">
+                        <div>
+                            <h3 className="font-semibold">專案操作歷程</h3>
+                            <p className="mt-1 text-xs text-muted-foreground">包含狀態、Owner、成員、WBS、CR、工時與財務異動。</p>
+                        </div>
+                        <button type="button" onClick={(event) => { event.preventDefault(); void refetchProjectHistory(); }} className="rounded-lg border px-3 py-1.5 text-xs hover:bg-muted">
+                            {isFetchingProjectHistory ? "更新中..." : "重新整理"}
+                        </button>
+                    </div>
+                </summary>
+                <div className="max-h-96 divide-y divide-border/50 overflow-y-auto border-t border-border/50">
+                    {(projectHistory || []).map((event: any) => (
+                        <div key={event.id} className="grid gap-1 p-3 text-sm md:grid-cols-[180px_1fr_auto]">
+                            <span className="text-xs text-muted-foreground">{new Date(event.occurredAt).toLocaleString()}</span>
+                            <div><p className="font-medium">{event.action}</p>{event.reason && <p className="text-xs text-muted-foreground">原因：{event.reason}</p>}</div>
+                            <span className="text-xs text-muted-foreground">{event.actorRole || event.source}</span>
+                        </div>
+                    ))}
+                    {(!projectHistory || projectHistory.length === 0) && <div className="p-5 text-center text-sm text-muted-foreground">尚無操作歷程</div>}
+                </div>
+            </details>
 
             <div className="grid md:grid-cols-3 gap-6">
                 {/* Left Column: Info + Attachments */}
@@ -1735,6 +1777,7 @@ export function WbsManagementPage() {
                                                                     <label>指派給 (人員)</label>
                                                                     <UserSearchPicker
                                                                         users={techs || []}
+                                                                        assignmentContext="wbs"
                                                                         selectedUserId={item.assigneeId}
                                                                         placeholder="搜尋姓名或 Email..."
                                                                         onSelect={(selectedUser) => handleSetPrimaryAssignee(idx, selectedUser.id)}
@@ -1758,6 +1801,7 @@ export function WbsManagementPage() {
                                                                     <UserSearchPicker
                                                                         key={`${idx}-${(item.assigneeIds || []).join(",")}`}
                                                                         users={techs || []}
+                                                                        assignmentContext="wbs"
                                                                         selectedUserId=""
                                                                         placeholder="新增其他指派人員..."
                                                                         onSelect={(selectedUser) => handleAddDraftAssignee(idx, selectedUser.id)}
@@ -1909,6 +1953,7 @@ export function WbsManagementPage() {
                                 <label className="block text-sm font-medium mb-1">選擇使用者</label>
                                 <UserSearchPicker
                                     users={allUsers?.items || []}
+                                    assignmentContext="project_member"
                                     selectedUserId={projectMemberUserId}
                                     placeholder="搜尋姓名或 Email..."
                                     onSelect={(selectedUser) => setProjectMemberUserId(selectedUser.id)}
@@ -2135,6 +2180,7 @@ export function WbsManagementPage() {
 	                                    <label className="block text-sm font-semibold mb-1.5 text-foreground/90">指派對象</label>
 	                                    <UserSearchPicker
 	                                        users={techs || []}
+	                                        assignmentContext="issue_assignee"
 	                                        selectedUserId={newIssueData.assigneeId}
 	                                        placeholder="搜尋姓名或 Email..."
 	                                        onSelect={(selectedUser) => setNewIssueData({ ...newIssueData, assigneeId: selectedUser.id })}

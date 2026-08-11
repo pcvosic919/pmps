@@ -7,8 +7,20 @@ import { decodeCursor, encodeCursor, toObjectId } from "../_core/cursor";
 import { assertEntraSyncConfigured, getEntraSettings, pruneStaleEntraUsersJob, syncEntraUsersJob } from "../_core/entra";
 import { hashPassword } from "../_core/password";
 import { canDeleteRecord } from "../_core/authorization";
+import mongoose from "mongoose";
 
 const userSortFields = ["name", "email", "role", "createdAt"] as const;
+const assignmentContexts = ["project_pm", "project_owner", "project_member", "presales", "wbs", "issue_assignee"] as const;
+type AssignmentContext = typeof assignmentContexts[number];
+
+const assignmentRoles: Record<AssignmentContext, readonly string[]> = {
+    project_pm: ["pm"],
+    project_owner: ["admin", "manager", "presales", "pm"],
+    project_member: ["admin", "manager", "presales", "pm", "tech", "business", "user"],
+    presales: ["presales", "tech", "pm"],
+    wbs: ["tech", "presales", "pm"],
+    issue_assignee: ["tech", "presales", "pm"]
+};
 
 const userListInput = z.object({
     limit: z.number().min(1).max(500).nullish(),
@@ -42,6 +54,26 @@ export const buildUserListQuery = (search?: string, departments: string[] = []) 
 
     if (clauses.length === 0) return {};
     if (clauses.length === 1) return clauses[0];
+    return { $and: clauses };
+};
+
+export const buildAssignmentCandidateQuery = (context: AssignmentContext, search?: string) => {
+    const clauses: Record<string, unknown>[] = [
+        { isActive: { $ne: false } },
+        { role: { $in: assignmentRoles[context] } }
+    ];
+    const keyword = search?.trim();
+    if (keyword) {
+        const pattern = new RegExp(escapeRegExp(keyword), "i");
+        clauses.push({
+            $or: [
+                { name: pattern },
+                { email: pattern },
+                { department: pattern },
+                { employeeCode: pattern }
+            ]
+        });
+    }
     return { $and: clauses };
 };
 
@@ -110,12 +142,127 @@ export const usersRouter = router({
             };
         }),
 
+    assignmentCandidates: protectedProcedure
+        .input(z.object({
+            context: z.enum(assignmentContexts),
+            search: z.string().trim().optional(),
+            cursor: z.string().nullish(),
+            limit: z.number().min(1).max(100).default(30),
+            includeIds: z.array(z.string()).max(100).default([])
+        }))
+        .query(async ({ input }) => {
+            const cursor = input.cursor ? decodeCursor(input.cursor) : null;
+            let query: Record<string, unknown> = buildAssignmentCandidateQuery(input.context, input.search);
+            if (cursor) {
+                query = {
+                    $and: [
+                        query,
+                        {
+                            $or: [
+                                { name: { $gt: cursor.value } },
+                                { name: cursor.value, _id: { $gt: toObjectId(cursor.id) } }
+                            ]
+                        }
+                    ]
+                };
+            }
+
+            const [candidateRows, includedRows] = await Promise.all([
+                UserModel.find(query)
+                    .select("name email employeeCode department title role isActive provider")
+                    .sort({ name: 1, _id: 1 })
+                    .limit(input.limit + 1)
+                    .lean(),
+                input.includeIds.length > 0
+                    ? UserModel.find({ _id: { $in: input.includeIds.map(toObjectId) } })
+                        .select("name email employeeCode department title role isActive provider")
+                        .lean()
+                    : []
+            ]);
+
+            const hasMore = candidateRows.length > input.limit;
+            const pageRows = hasMore ? candidateRows.slice(0, input.limit) : candidateRows;
+            const lastRow = pageRows[pageRows.length - 1];
+            const allowedRoles = new Set(assignmentRoles[input.context]);
+            const byId = new Map<string, any>();
+            for (const row of [...includedRows, ...pageRows]) byId.set(row._id.toString(), row);
+
+            return {
+                items: [...byId.values()].map((user) => {
+                    const roleEligible = allowedRoles.has(user.role);
+                    const active = user.isActive !== false;
+                    return {
+                        id: user._id.toString(),
+                        name: user.name,
+                        email: user.email,
+                        employeeCode: user.employeeCode,
+                        department: user.department,
+                        title: user.title,
+                        role: user.role,
+                        provider: user.provider,
+                        isActive: active,
+                        eligible: active && roleEligible,
+                        unavailableReason: !active ? "帳號已停用" : !roleEligible ? "角色不符合此指派情境" : undefined
+                    };
+                }),
+                nextCursor: hasMore && lastRow
+                    ? encodeCursor(lastRow._id, lastRow.name)
+                    : undefined
+            };
+        }),
+
+    resolveAssignmentUsers: protectedProcedure
+        .input(z.object({
+            context: z.enum(assignmentContexts),
+            values: z.array(z.string().trim().min(1)).min(1).max(1000)
+        }))
+        .query(async ({ input }) => {
+            const uniqueValues = [...new Set(input.values.map((value) => value.trim()).filter(Boolean))];
+            const objectIds = uniqueValues.filter(mongoose.isValidObjectId).map(toObjectId);
+            const users = await UserModel.find({
+                isActive: { $ne: false },
+                role: { $in: assignmentRoles[input.context] },
+                $or: [
+                    ...(objectIds.length > 0 ? [{ _id: { $in: objectIds } }] : []),
+                    { email: { $in: uniqueValues } },
+                    { name: { $in: uniqueValues } },
+                    { employeeCode: { $in: uniqueValues } }
+                ]
+            })
+                .collation({ locale: "en", strength: 2 })
+                .select("name email employeeCode department title role isActive provider")
+                .lean();
+
+            const normalized = (value: unknown) => String(value || "").trim().toLocaleLowerCase("zh-TW");
+            return {
+                items: uniqueValues.map((value) => {
+                    const key = normalized(value);
+                    const matches = users.filter((user) => [user._id, user.name, user.email, user.employeeCode]
+                        .some((candidate) => normalized(candidate) === key));
+                    if (matches.length === 0) return { input: value, error: "找不到符合且可指派的啟用帳號" };
+                    if (matches.length > 1) return { input: value, error: "符合多個帳號，請改用完整 Email 或員工代碼" };
+                    const user = matches[0];
+                    return {
+                        input: value,
+                        user: {
+                            id: user._id.toString(),
+                            name: user.name,
+                            email: user.email,
+                            employeeCode: user.employeeCode,
+                            department: user.department,
+                            role: user.role
+                        }
+                    };
+                })
+            };
+        }),
+
     pmList: protectedProcedure.query(async () => {
         const users = await UserModel.find({
             isActive: { $ne: false },
             role: "pm"
         })
-            .select("name email department title role isActive provider")
+            .select("name email employeeCode department title role isActive provider")
             .lean();
         return users.map(u => ({ ...u, id: u._id.toString() }));
     }),
@@ -125,7 +272,7 @@ export const usersRouter = router({
             isActive: { $ne: false },
             role: "tech"
         })
-            .select("name email department title role isActive provider costRate")
+            .select("name email employeeCode department title role isActive provider costRate")
             .lean();
         return users.map(u => ({ ...u, id: u._id.toString() }));
     }),
@@ -136,7 +283,7 @@ export const usersRouter = router({
             isActive: { $ne: false },
             role: { $in: resourceRoles }
         })
-            .select("name email department title role isActive provider costRate skills")
+            .select("name email employeeCode department title role isActive provider costRate skills")
             .sort({ department: 1, name: 1 })
             .lean();
         return users.map(u => ({ ...u, id: u._id.toString() }));
@@ -147,7 +294,7 @@ export const usersRouter = router({
             isActive: { $ne: false },
             lastLoginAt: { $exists: true, $ne: null }
         })
-            .select("name email department title role isActive provider lastLoginAt")
+            .select("name email employeeCode department title role isActive provider lastLoginAt")
             .sort({ lastLoginAt: -1 })
             .limit(50)
             .lean();
@@ -160,7 +307,7 @@ export const usersRouter = router({
             isActive: { $ne: false },
             role: { $in: allowedRoles }
         })
-            .select("name email department title role isActive provider")
+            .select("name email employeeCode department title role isActive provider")
             .lean();
         return users.map(u => ({ ...u, id: u._id.toString() }));
     }),
@@ -171,6 +318,7 @@ export const usersRouter = router({
             email: z.string().email(),
             password: z.string().optional(),
             department: z.string().optional(),
+            employeeCode: z.string().trim().optional(),
             role: z.enum(roles).default("user"),
             isActive: z.boolean().default(true)
         }))

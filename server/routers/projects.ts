@@ -7,6 +7,7 @@ import { SettlementLockModel } from "../models/SettlementLock";
 import { TimesheetModel } from "../models/Timesheet";
 import { UserModel } from "../models/User";
 import { OpportunityModel } from "../models/Opportunity";
+import { OpportunityQuoteModel } from "../models/OpportunityQuote";
 import { CalendarTaskModel } from "../models/CalendarTask";
 import { IssueModel } from "../models/Issue";
 import mongoose from "mongoose";
@@ -47,6 +48,12 @@ import { toObjectId } from "../_core/cursor";
 import { ensureCompanyByName } from "../_core/companies";
 import { writeLocalAttachment } from "../_core/attachments";
 import { createProjectForOpportunityOnce, finalizeOpportunityConversion, findProjectByOpportunityId } from "../services/OpportunityConversionService";
+import { listBusinessHistory, recordBusinessHistory } from "../services/BusinessHistoryService";
+import {
+    assertProjectStatusTransition,
+    isProjectLocked,
+    projectStatusRequiresReason
+} from "../services/ProjectWorkflowService";
 
 const getMonthKey = (value: Date) => value.toISOString().slice(0, 7);
 const optionalDateInput = z.preprocess(
@@ -179,6 +186,12 @@ const getCompletionPercentageForStatus = (status: "not_started" | "in_progress" 
 
 const idString = (value: any) => value?._id?.toString?.() || value?.toString?.() || "";
 
+const assertProjectEditable = (serviceRequest: { status?: string }) => {
+    if (isProjectLocked(serviceRequest.status)) {
+        throw new TRPCError({ code: "BAD_REQUEST", message: "已結案或已取消的專案必須先重啟才能修改" });
+    }
+};
+
 const getSrMemberRole = (sr: any, userId: string) =>
     (sr.members || []).find((member: any) => idString(member.userId) === userId)?.memberRole;
 
@@ -196,7 +209,7 @@ const buildSrActivityAssignment = (sr: any, assignee: any, options?: { isPmView?
         remainingDays: 0,
         estimatedHours: 1,
         actualHours: 0,
-        status: sr.status === "completed" ? "completed" : sr.status === "in_progress" ? "in_progress" : "not_started",
+        status: ["closed", "completed"].includes(sr.status) ? "completed" : sr.status === "in_progress" ? "in_progress" : "not_started",
         description: sr.billingAllocation || "",
         code: sr.externalProjectCode || "",
         srTitle: sr.title,
@@ -425,6 +438,7 @@ export const projectsRouter = router({
             query,
             {
                 _id: 1,
+                projectCode: 1,
                 title: 1,
                 customerName: 1,
                 contractAmount: 1,
@@ -442,6 +456,9 @@ export const projectsRouter = router({
                 createdAt: 1,
                 createdById: 1,
                 opportunityId: 1,
+                sourceQuoteId: 1,
+                sourceOpportunityCodeSnapshot: 1,
+                sourceQuoteCodeSnapshot: 1,
                 members: 1,
                 wbsVersions: 1,
                 changeRequests: 1,
@@ -491,7 +508,7 @@ export const projectsRouter = router({
         
         const activeCount = await ServiceRequestModel.countDocuments({
             ...query,
-            status: { $nin: ["completed", "cancelled"] }
+            status: { $nin: ["closed", "completed", "cancelled"] }
         });
         
         return { count: activeCount };
@@ -499,8 +516,8 @@ export const projectsRouter = router({
 
     createSR: permissionProcedure("project.create_sr", ["admin", "manager", "pm", "presales"])
         .input(z.object({
-            title: z.string(),
-            customerName: z.string().optional(),
+            title: z.string().trim().min(1, "專案名稱不可為空"),
+            customerName: z.string().trim().optional(),
             contractAmount: z.number(),
             finalPrice: z.number().min(0).optional(),
             srType: z.enum(srTypes).default("project"),
@@ -516,7 +533,6 @@ export const projectsRouter = router({
             reviewDate: z.coerce.date().optional(),
             warrantyExpiresAt: z.coerce.date().optional(),
             billingAllocation: z.string().trim().optional(),
-            recognitionMonth: z.string().trim().optional(),
             joinPmAsMember: z.boolean().default(true),
             opportunityId: z.string().optional()
         }))
@@ -528,10 +544,13 @@ export const projectsRouter = router({
             let oppSalesUserId: any = undefined;
             let oppSalesDepartment = "";
             let oppSalesRep = "";
+            let sourceOpportunityCodeSnapshot = "";
+            let sourceQuoteId: mongoose.Types.ObjectId | undefined;
+            let sourceQuoteCodeSnapshot = "";
             if (input.opportunityId) {
                 const opportunity = assertFound(
                     await OpportunityModel.findById(input.opportunityId)
-                        .select("customerName salesUserId salesDepartment salesRep ownerId members presalesAssignments status")
+                        .select("opportunityCode customerName salesUserId salesDepartment salesRep ownerId members presalesAssignments status adoptedQuoteId")
                         .lean(),
                     "找不到該商機"
                 );
@@ -539,6 +558,14 @@ export const projectsRouter = router({
                 oppSalesUserId = opportunity.salesUserId;
                 oppSalesDepartment = opportunity.salesDepartment || "";
                 oppSalesRep = opportunity.salesRep || "";
+                sourceOpportunityCodeSnapshot = opportunity.opportunityCode || "";
+                sourceQuoteId = opportunity.adoptedQuoteId;
+                if (sourceQuoteId) {
+                    const sourceQuote = await OpportunityQuoteModel.findById(sourceQuoteId)
+                        .select("quoteCode")
+                        .lean();
+                    sourceQuoteCodeSnapshot = sourceQuote?.quoteCode || "";
+                }
                 const isPresalesOnly = hasAnyRole(ctx.user, ["presales"]) && !hasAnyRole(ctx.user, ["admin", "manager", "pm"]);
                 const opportunityScope = await getAccessibleOpportunityQuery(ctx.user as any);
                 const isInOpportunityScope = hasAnyRole(ctx.user, ["admin"]) || !!await OpportunityModel.exists({
@@ -552,7 +579,7 @@ export const projectsRouter = router({
                     "您只能將自己擁有或有權限的商機轉為專案"
                 );
                 if (existingOpportunityProject) {
-                    await finalizeOpportunityConversion(input.opportunityId);
+                    await finalizeOpportunityConversion(input.opportunityId, { id: ctx.user.id, role: ctx.user.role });
                     return { id: existingOpportunityProject._id.toString(), reused: true };
                 }
                 if (opportunity.status === "converted") {
@@ -561,9 +588,15 @@ export const projectsRouter = router({
                 if (opportunity.status === "lost") {
                     throw new TRPCError({ code: "BAD_REQUEST", message: "已失敗的商機不可建立 SR" });
                 }
+                if (opportunity.status === "cancelled") {
+                    throw new TRPCError({ code: "BAD_REQUEST", message: "已取消的商機不可建立 SR" });
+                }
             }
             const salesUserFields = await getSalesUserFields(input.salesUserId);
-            const customerName = input.customerName || oppCustomerName;
+            const customerName = (input.customerName || oppCustomerName).trim();
+            if (!customerName) {
+                throw new TRPCError({ code: "BAD_REQUEST", message: "公司名稱不可為空" });
+            }
             await ensureCompanyByName(customerName, ctx.user.id);
 
             const projectAttributes = {
@@ -575,7 +608,6 @@ export const projectsRouter = router({
                 externalServiceType: input.externalServiceType || input.srType,
                 contractAmount: input.contractAmount,
                 finalPrice: input.finalPrice ?? input.contractAmount,
-                recognitionMonth: input.recognitionMonth || undefined,
                 srType: input.srType,
                 totalPoints: input.totalPoints,
                 pointValue: input.pointValue,
@@ -595,6 +627,9 @@ export const projectsRouter = router({
                     reason: "建立專案時設定"
                 }] : [],
                 opportunityId: input.opportunityId ? new mongoose.Types.ObjectId(input.opportunityId) : undefined,
+                sourceQuoteId,
+                sourceOpportunityCodeSnapshot,
+                sourceQuoteCodeSnapshot,
                 status: "new",
                 members: buildSrMembers(ctx.user.id, input.pmId, input.joinPmAsMember)
             };
@@ -602,6 +637,29 @@ export const projectsRouter = router({
                 ? await createProjectForOpportunityOnce(input.opportunityId, projectAttributes)
                 : { project: await ServiceRequestModel.create(projectAttributes), created: true };
             const sr = conversionResult.project;
+
+            if (conversionResult.created) {
+                await recordBusinessHistory({
+                    entityType: "project",
+                    entityId: sr._id,
+                    action: input.opportunityId ? "project_created_from_opportunity" : "project_created",
+                    after: {
+                        projectCode: sr.projectCode,
+                        title: sr.title,
+                        customerName: sr.customerName,
+                        status: sr.status,
+                        contractAmount: sr.contractAmount,
+                        finalPrice: sr.finalPrice,
+                        opportunityId: sr.opportunityId,
+                        sourceQuoteId: sr.sourceQuoteId,
+                        sourceOpportunityCodeSnapshot: sr.sourceOpportunityCodeSnapshot,
+                        sourceQuoteCodeSnapshot: sr.sourceQuoteCodeSnapshot
+                    },
+                    actorId: ctx.user.id,
+                    actorRole: ctx.user.role,
+                    source: "api"
+                });
+            }
 
             // Document folder hook
             try {
@@ -618,7 +676,7 @@ export const projectsRouter = router({
             }
 
             if (input.opportunityId) {
-                await finalizeOpportunityConversion(input.opportunityId);
+                await finalizeOpportunityConversion(input.opportunityId, { id: ctx.user.id, role: ctx.user.role });
             }
 
             if (input.pmId && conversionResult.created) {
@@ -683,6 +741,7 @@ export const projectsRouter = router({
             const opportunity = sr.opportunityId
                 ? await OpportunityModel.findById(sr.opportunityId).select("ownerId members presalesAssignments").lean()
                 : null;
+            assertProjectEditable(sr);
             assertAuthorized(
                 await canManageProjectMembers(ctx.user, sr, opportunity),
                 "您沒有權限管理此專案成員"
@@ -693,16 +752,36 @@ export const projectsRouter = router({
             }
             const existingMember = (sr.members || []).find((member: any) => idString(member.userId) === input.userId);
             if (existingMember) {
+                const previousRole = existingMember.memberRole;
                 await ServiceRequestModel.updateOne(
                     { _id: input.srId, "members.userId": toObjectId(input.userId) },
                     { $set: { "members.$.memberRole": input.memberRole } }
                 );
+                await recordBusinessHistory({
+                    entityType: "project",
+                    entityId: input.srId,
+                    action: "project_member_role_changed",
+                    before: { userId: input.userId, memberRole: previousRole },
+                    after: { userId: input.userId, memberRole: input.memberRole },
+                    actorId: ctx.user.id,
+                    actorRole: ctx.user.role,
+                    source: "api"
+                });
                 return { success: true };
             }
             await ServiceRequestModel.updateOne(
                 { _id: input.srId },
                 { $push: { members: { userId: toObjectId(input.userId), memberRole: input.memberRole } } }
             );
+            await recordBusinessHistory({
+                entityType: "project",
+                entityId: input.srId,
+                action: "project_member_added",
+                after: { userId: input.userId, memberRole: input.memberRole },
+                actorId: ctx.user.id,
+                actorRole: ctx.user.role,
+                source: "api"
+            });
             return { success: true };
         }),
 
@@ -717,6 +796,7 @@ export const projectsRouter = router({
             const opportunity = sr.opportunityId
                 ? await OpportunityModel.findById(sr.opportunityId).select("ownerId members presalesAssignments").lean()
                 : null;
+            assertProjectEditable(sr);
             assertAuthorized(
                 await canManageProjectMembers(ctx.user, sr, opportunity),
                 "您沒有權限管理此專案成員"
@@ -730,13 +810,23 @@ export const projectsRouter = router({
                 { _id: input.srId },
                 { $pull: { members: { _id: toObjectId(input.memberId) } } }
             );
+            await recordBusinessHistory({
+                entityType: "project",
+                entityId: input.srId,
+                action: "project_member_removed",
+                before: { userId: idString(member.userId), memberRole: member.memberRole },
+                actorId: ctx.user.id,
+                actorRole: ctx.user.role,
+                source: "api"
+            });
             return { success: true };
         }),
 
     updateSRStatus: permissionProcedure("project.edit", ["admin", "manager", "pm", "presales"])
         .input(z.object({
             id: z.string(),
-            status: z.enum(srStatuses)
+            status: z.enum(srStatuses),
+            reason: z.string().trim().optional()
         }))
         .mutation(async ({ input, ctx }) => {
             const sr = assertFound(
@@ -753,11 +843,110 @@ export const projectsRouter = router({
                 "您沒有權限更新服務請求狀態"
             );
 
+            if (projectStatusRequiresReason(input.status) && !input.reason?.trim()) {
+                throw new TRPCError({ code: "BAD_REQUEST", message: `專案狀態轉為 ${input.status} 時必須填寫原因` });
+            }
+            try {
+                assertProjectStatusTransition(sr.status, input.status, input.reason);
+            } catch (error) {
+                throw new TRPCError({
+                    code: "BAD_REQUEST",
+                    message: error instanceof Error ? error.message : "不允許的專案狀態轉換"
+                });
+            }
+
+            const occurredAt = new Date();
+            const set: Record<string, unknown> = { status: input.status };
+            if (input.status === "closed" || input.status === "completed") {
+                set.closedAt = occurredAt;
+                set.closedById = toObjectId(ctx.user.id);
+                set.closeReason = input.reason?.trim() || (input.status === "completed" ? "相容舊結案流程" : undefined);
+            }
+            if (input.status === "cancelled") {
+                set.cancelledAt = occurredAt;
+                set.cancelledById = toObjectId(ctx.user.id);
+                set.cancellationReason = input.reason?.trim();
+            }
+
             await ServiceRequestModel.updateOne(
                 { _id: input.id },
-                { $set: { status: input.status } }
+                { $set: set }
             );
+            await recordBusinessHistory({
+                entityType: "project",
+                entityId: input.id,
+                action: "project_status_changed",
+                before: { status: sr.status, closedAt: sr.closedAt, cancelledAt: sr.cancelledAt },
+                after: { status: input.status, ...set },
+                actorId: ctx.user.id,
+                actorRole: ctx.user.role,
+                reason: input.reason,
+                source: "api"
+            });
             return { success: true };
+        }),
+
+    reopenProject: permissionProcedure("project.edit", ["admin", "manager", "pm", "presales"])
+        .input(z.object({
+            id: z.string(),
+            reason: z.string().trim().min(1, "重啟原因不可為空"),
+            status: z.enum(["in_progress", "pending_acceptance"]).default("in_progress")
+        }))
+        .mutation(async ({ input, ctx }) => {
+            const sr = assertFound(
+                await ServiceRequestModel.findById(input.id).lean(),
+                "找不到該服務請求"
+            );
+            const opportunity = sr.opportunityId
+                ? await OpportunityModel.findById(sr.opportunityId)
+                    .select("ownerId members presalesAssignments")
+                    .lean()
+                : null;
+            assertAuthorized(await canOperateProject(ctx.user, sr, opportunity), "您沒有權限重啟此專案");
+            if (sr.status !== "closed" && sr.status !== "completed") {
+                throw new TRPCError({ code: "BAD_REQUEST", message: "只有已結案專案可以重啟" });
+            }
+            const reopenedAt = new Date();
+            await ServiceRequestModel.updateOne(
+                { _id: input.id, status: sr.status },
+                {
+                    $set: {
+                        status: input.status,
+                        reopenedAt,
+                        reopenedById: toObjectId(ctx.user.id),
+                        reopenReason: input.reason
+                    }
+                }
+            );
+            await recordBusinessHistory({
+                entityType: "project",
+                entityId: input.id,
+                action: "project_reopened",
+                before: { status: sr.status, closedAt: sr.closedAt },
+                after: { status: input.status, reopenedAt },
+                actorId: ctx.user.id,
+                actorRole: ctx.user.role,
+                reason: input.reason,
+                source: "api"
+            });
+            return { success: true };
+        }),
+
+    getBusinessHistory: permissionProcedure("module.projects.view", ["admin", "manager", "pm", "presales", "tech"])
+        .input(z.object({ projectId: z.string(), limit: z.number().min(1).max(500).default(100) }))
+        .query(async ({ input, ctx }) => {
+            const sr = assertFound(await ServiceRequestModel.findById(input.projectId).lean(), "找不到該服務請求");
+            const opportunity = sr.opportunityId
+                ? await OpportunityModel.findById(sr.opportunityId).select("ownerId members presalesAssignments").lean()
+                : null;
+            assertAuthorized(await canViewProject(ctx.user, sr, opportunity), "您沒有權限檢視專案歷程");
+            const events = await listBusinessHistory("project", input.projectId, input.limit);
+            return events.map((event) => ({
+                ...event,
+                id: event._id.toString(),
+                entityId: event.entityId.toString(),
+                actorId: event.actorId?.toString()
+            }));
         }),
 
     getWbsPendingReview: permissionProcedure("wbs.review", ["admin", "manager", "pm", "presales"])
@@ -810,6 +999,7 @@ export const projectsRouter = router({
         .mutation(async ({ ctx, input }) => {
             const sr = await ServiceRequestModel.findOne({ "wbsVersions._id": input.id });
             if (!sr) throw new TRPCError({ code: "NOT_FOUND", message: "找不到該 WBS 版本" });
+            assertProjectEditable(sr);
 
             const opportunity = sr.opportunityId
                 ? await OpportunityModel.findById(sr.opportunityId)
@@ -880,6 +1070,17 @@ export const projectsRouter = router({
 
             sr.markModified("wbsVersions");
             await sr.save();
+            await recordBusinessHistory({
+                entityType: "project",
+                entityId: sr._id,
+                action: "wbs_version_reviewed",
+                before: { wbsVersionId: input.id, status: "submitted" },
+                after: { wbsVersionId: input.id, status: version.status, action: input.action },
+                actorId: ctx.user.id,
+                actorRole: ctx.user.role,
+                reason: input.rejectionReason,
+                source: "api"
+            });
 
             const recipients = [sr.pmId?.toString(), version.submittedBy?.toString()]
                 .filter((value): value is string => !!value);
@@ -1143,11 +1344,15 @@ export const projectsRouter = router({
         }))
         .mutation(async ({ input, ctx }) => {
             const sr: any = assertFound(await ServiceRequestModel.findById(input.id), "找不到該專案");
+            assertProjectEditable(sr);
             const opportunity = sr.opportunityId
                 ? await OpportunityModel.findById(sr.opportunityId).select("ownerId members presalesAssignments").lean()
                 : null;
             assertAuthorized(await canOperateProject(ctx.user, sr, opportunity), "您沒有權限修改專案基本資料");
             const { id, ...changes } = input;
+            const before = Object.fromEntries(
+                Object.keys(changes).map((key) => [key, idString(sr[key])])
+            );
             const update: Record<string, unknown> = {
                 ...changes,
                 salesUserId: changes.salesUserId ? toObjectId(changes.salesUserId) : undefined,
@@ -1172,6 +1377,16 @@ export const projectsRouter = router({
                 { action: "project_basics_updated", userId: toObjectId(ctx.user.id), timestamp: new Date() }
             ];
             await sr.save();
+            await recordBusinessHistory({
+                entityType: "project",
+                entityId: input.id,
+                action: "project_basics_updated",
+                before,
+                after: Object.fromEntries(Object.keys(update).map((key) => [key, idString(sr[key])])),
+                actorId: ctx.user.id,
+                actorRole: ctx.user.role,
+                source: "api"
+            });
             return { success: true };
         }),
 
@@ -1179,6 +1394,7 @@ export const projectsRouter = router({
         .input(z.object({ srId: z.string(), newOwnerUserId: z.string() }))
         .mutation(async ({ input, ctx }) => {
             const sr: any = assertFound(await ServiceRequestModel.findById(input.srId), "找不到該專案");
+            assertProjectEditable(sr);
             const opportunity = sr.opportunityId
                 ? await OpportunityModel.findById(sr.opportunityId).select("ownerId members presalesAssignments").lean()
                 : null;
@@ -1212,6 +1428,16 @@ export const projectsRouter = router({
                 { action: "project_owner_transferred", userId: toObjectId(ctx.user.id), timestamp: new Date(), reason: targetUser.name }
             ];
             await sr.save();
+            await recordBusinessHistory({
+                entityType: "project",
+                entityId: input.srId,
+                action: "project_owner_transferred",
+                before: { ownerUserId: currentOwner ? idString(currentOwner.userId) : undefined },
+                after: { ownerUserId: input.newOwnerUserId, ownerName: targetUser.name },
+                actorId: ctx.user.id,
+                actorRole: ctx.user.role,
+                source: "api"
+            });
             return { success: true };
         }),
 
@@ -1230,6 +1456,16 @@ export const projectsRouter = router({
                 { action: "project_archived", userId: toObjectId(ctx.user.id), timestamp: new Date(), reason: input.reason }
             ];
             await sr.save();
+            await recordBusinessHistory({
+                entityType: "project",
+                entityId: input.id,
+                action: "project_archived",
+                after: { archivedAt: sr.archivedAt },
+                actorId: ctx.user.id,
+                actorRole: ctx.user.role,
+                reason: input.reason,
+                source: "api"
+            });
             return { success: true };
         }),
 
@@ -1248,6 +1484,16 @@ export const projectsRouter = router({
                 { action: "project_restored", userId: toObjectId(ctx.user.id), timestamp: new Date() }
             ];
             await sr.save();
+            await recordBusinessHistory({
+                entityType: "project",
+                entityId: input.id,
+                action: "project_restored",
+                before: { archived: true },
+                after: { archived: false },
+                actorId: ctx.user.id,
+                actorRole: ctx.user.role,
+                source: "api"
+            });
             return { success: true };
         }),
 
@@ -1259,10 +1505,11 @@ export const projectsRouter = router({
         .mutation(async ({ input, ctx }) => {
             const sr = assertFound(
                 await ServiceRequestModel.findById(input.id)
-                    .select("pmId members wbsVersions.items.assigneeId changeRequests opportunityId")
+                    .select("status pmId members wbsVersions.items.assigneeId changeRequests opportunityId salesUserId salesRep salesDepartment")
                     .lean(),
                 "找不到該服務請求"
             );
+            assertProjectEditable(sr);
             const opportunity = sr.opportunityId
                 ? await OpportunityModel.findById(sr.opportunityId)
                     .select("ownerId members presalesAssignments")
@@ -1275,21 +1522,33 @@ export const projectsRouter = router({
                 { _id: input.id },
                 { $set: salesUserFields }
             );
+            await recordBusinessHistory({
+                entityType: "project",
+                entityId: input.id,
+                action: "project_sales_owner_changed",
+                before: { salesUserId: idString(sr.salesUserId), salesRep: sr.salesRep, salesDepartment: sr.salesDepartment },
+                after: { ...salesUserFields, salesUserId: input.salesUserId },
+                actorId: ctx.user.id,
+                actorRole: ctx.user.role,
+                source: "api"
+            });
             return { success: true };
         }),
 
     updateFinalPrice: permissionProcedure("project.financials.edit", ["admin", "manager", "pm", "presales", "business", "tech"])
         .input(z.object({
             id: z.string(),
-            finalPrice: z.number().min(0)
+            finalPrice: z.number().min(0),
+            reason: z.string().trim().optional()
         }))
         .mutation(async ({ input, ctx }) => {
             const sr = assertFound(
                 await ServiceRequestModel.findById(input.id)
-                    .select("pmId members createdById wbsVersions.items.assigneeId changeRequests opportunityId")
+                    .select("status pmId members createdById wbsVersions.items.assigneeId changeRequests opportunityId finalPrice")
                     .lean(),
                 "找不到該服務請求"
             );
+            assertProjectEditable(sr);
             const opportunity = sr.opportunityId
                 ? await OpportunityModel.findById(sr.opportunityId)
                     .select("ownerId members presalesAssignments")
@@ -1307,6 +1566,17 @@ export const projectsRouter = router({
                     }
                 }
             );
+            await recordBusinessHistory({
+                entityType: "project",
+                entityId: input.id,
+                action: "project_final_price_updated",
+                before: { finalPrice: sr.finalPrice },
+                after: { finalPrice: input.finalPrice },
+                actorId: ctx.user.id,
+                actorRole: ctx.user.role,
+                reason: input.reason,
+                source: "api"
+            });
             return { success: true };
         }),
 
@@ -1321,10 +1591,11 @@ export const projectsRouter = router({
         .mutation(async ({ input, ctx }) => {
             const sr: any = assertFound(
                 await ServiceRequestModel.findById(input.id)
-                    .select("pmId members createdById wbsVersions.items.assigneeId changeRequests opportunityId srType contractAmount finalPrice totalPoints pointValue")
+                    .select("status pmId members createdById wbsVersions.items.assigneeId changeRequests opportunityId srType contractAmount finalPrice totalPoints pointValue")
                     .lean(),
                 "找不到該服務請求"
             );
+            assertProjectEditable(sr);
             const opportunity = sr.opportunityId
                 ? await OpportunityModel.findById(sr.opportunityId)
                     .select("ownerId members presalesAssignments")
@@ -1374,6 +1645,21 @@ export const projectsRouter = router({
                     }
                 }
             );
+            await recordBusinessHistory({
+                entityType: "project",
+                entityId: input.id,
+                action: "project_financials_updated",
+                before: {
+                    contractAmount: sr.contractAmount,
+                    finalPrice: sr.finalPrice,
+                    totalPoints: sr.totalPoints,
+                    pointValue: sr.pointValue
+                },
+                after: financialFields,
+                actorId: ctx.user.id,
+                actorRole: ctx.user.role,
+                source: "api"
+            });
             return { success: true };
         }),
 
@@ -1415,9 +1701,10 @@ export const projectsRouter = router({
         .mutation(async ({ input, ctx }) => {
             const sr: any = assertFound(
                 await ServiceRequestModel.findById(input.srId)
-                    .select("pmId members wbsVersions.items.assigneeId changeRequests opportunityId wbsDrafts"),
+                    .select("status pmId members wbsVersions.items.assigneeId changeRequests opportunityId wbsDrafts"),
                 "找不到該專案"
             );
+            assertProjectEditable(sr);
             const opportunity = sr.opportunityId
                 ? await OpportunityModel.findById(sr.opportunityId).select("ownerId members presalesAssignments").lean()
                 : null;
@@ -1449,10 +1736,11 @@ export const projectsRouter = router({
         .mutation(async ({ input, ctx }) => {
             const sr: any = assertFound(
                 await ServiceRequestModel.findById(input.srId)
-                    .select("createdById pmId members wbsVersions.items.assigneeId changeRequests opportunityId")
+                    .select("status createdById pmId members wbsVersions.items.assigneeId changeRequests opportunityId")
                     .lean(),
                 "找不到該專案"
             );
+            assertProjectEditable(sr);
             const opportunity = sr.opportunityId
                 ? await OpportunityModel.findById(sr.opportunityId).select("ownerId members presalesAssignments").lean()
                 : null;
@@ -1473,6 +1761,7 @@ export const projectsRouter = router({
         .mutation(async ({ ctx, input }) => {
             const sr = await ServiceRequestModel.findById(input.srId);
             if (!sr) throw new TRPCError({ code: "NOT_FOUND", message: "找不到該服務請求" });
+            assertProjectEditable(sr);
             const opportunity = sr.opportunityId
                 ? await OpportunityModel.findById(sr.opportunityId)
                     .select("ownerId members presalesAssignments")
@@ -1536,6 +1825,15 @@ export const projectsRouter = router({
                     $pull: { wbsDrafts: { userId: toObjectId(ctx.user.id) } }
                 }
             );
+            await recordBusinessHistory({
+                entityType: "project",
+                entityId: input.srId,
+                action: "wbs_version_submitted",
+                after: { versionNumber: input.versionNumber, itemCount: input.items.length, status: "submitted" },
+                actorId: ctx.user.id,
+                actorRole: ctx.user.role,
+                source: "api"
+            });
 
             const managerIds = await getManagerIds(departmentApprovals.map((approval) => approval.department));
             await createNotifications(managerIds.map((userId) => ({
@@ -1602,6 +1900,7 @@ export const projectsRouter = router({
         .mutation(async ({ ctx, input }) => {
             const sr = await ServiceRequestModel.findById(input.srId);
             if (!sr) throw new TRPCError({ code: "NOT_FOUND", message: "找不到該服務請求" });
+            assertProjectEditable(sr);
             const opportunity = sr.opportunityId
                 ? await OpportunityModel.findById(sr.opportunityId)
                     .select("ownerId members presalesAssignments")
@@ -1627,6 +1926,21 @@ export const projectsRouter = router({
             });
 
             await sr.save();
+            await recordBusinessHistory({
+                entityType: "project",
+                entityId: input.srId,
+                action: "change_request_created",
+                after: {
+                    changeRequestId: crId.toString(),
+                    hoursAdjustment: input.hoursAdjustment,
+                    amountAdjustment: input.amountAdjustment,
+                    status: "pending_business"
+                },
+                actorId: ctx.user.id,
+                actorRole: ctx.user.role,
+                reason: input.reason,
+                source: "api"
+            });
 
             if (sr.pmId) {
                 await createNotification({
@@ -1650,6 +1964,7 @@ export const projectsRouter = router({
         .mutation(async ({ ctx, input }) => {
             const sr = await ServiceRequestModel.findOne({ "_id": input.srId, "changeRequests._id": input.crId });
             if (!sr) throw new TRPCError({ code: "NOT_FOUND", message: "找不到該變更請求" });
+            assertProjectEditable(sr);
             const opportunity = sr.opportunityId
                 ? await OpportunityModel.findById(sr.opportunityId)
                     .select("ownerId members presalesAssignments")
@@ -1724,6 +2039,17 @@ export const projectsRouter = router({
             });
 
             await sr.save();
+            await recordBusinessHistory({
+                entityType: "project",
+                entityId: input.srId,
+                action: "change_request_reviewed",
+                before: { changeRequestId: input.crId, status: reviewStage },
+                after: { changeRequestId: input.crId, status: cr.status, result: input.action },
+                actorId: ctx.user.id,
+                actorRole: ctx.user.role,
+                reason: input.rejectionReason,
+                source: "api"
+            });
 
             await createNotification({
                 userId: cr.requesterId.toString(),
@@ -1944,6 +2270,7 @@ export const projectsRouter = router({
         .mutation(async ({ ctx, input }) => {
             const sr = await ServiceRequestModel.findById(input.srId);
             if (!sr) throw new TRPCError({ code: "NOT_FOUND", message: "找不到專案" });
+            assertProjectEditable(sr);
             
             const effectiveVersion = getEffectiveWbsVersion(sr);
             if (!effectiveVersion) throw new TRPCError({ code: "BAD_REQUEST", message: "沒有生效的 WBS 版本" });
@@ -1976,6 +2303,7 @@ export const projectsRouter = router({
         .mutation(async ({ ctx, input }) => {
             const sr = await ServiceRequestModel.findById(input.srId);
             if (!sr) throw new TRPCError({ code: "NOT_FOUND", message: "找不到專案" });
+            assertProjectEditable(sr);
 
             const effectiveVersion = getEffectiveWbsVersion(sr);
             if (!effectiveVersion) throw new TRPCError({ code: "BAD_REQUEST", message: "沒有生效的 WBS 版本" });
@@ -2195,6 +2523,7 @@ export const projectsRouter = router({
                 await ServiceRequestModel.findById(input.srId),
                 "找不到該服務請求"
             );
+            assertProjectEditable(sr);
             const srAccessView = assertFound(
                 await ServiceRequestModel.findById(input.srId)
                     .select("createdById pmId members srType wbsVersions.items.assigneeId changeRequests opportunityId")
@@ -2262,6 +2591,20 @@ export const projectsRouter = router({
                 sr.status = "in_progress";
             }
             await sr.save();
+            await recordBusinessHistory({
+                entityType: "project",
+                entityId: input.srId,
+                action: "project_time_logged",
+                after: {
+                    workDate: input.workDate,
+                    hours: input.hours,
+                    wbsItemId: input.wbsItemId,
+                    taskStatus: input.taskStatus
+                },
+                actorId: ctx.user.id,
+                actorRole: ctx.user.role,
+                source: "api"
+            });
             return { success: true };
         }),
 

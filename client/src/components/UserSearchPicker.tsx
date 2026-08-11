@@ -11,7 +11,12 @@ export type PickerUser = {
     title?: string;
     role?: string;
     isActive?: boolean;
+    employeeCode?: string;
+    eligible?: boolean;
+    unavailableReason?: string;
 };
+
+export type AssignmentContext = "project_pm" | "project_owner" | "project_member" | "presales" | "wbs" | "issue_assignee";
 
 type UserSearchPickerProps = {
     users?: PickerUser[];
@@ -23,12 +28,13 @@ type UserSearchPickerProps = {
     onSelect: (user: PickerUser) => void;
     onClear?: () => void;
     filterUser?: (user: PickerUser) => boolean;
+    assignmentContext?: AssignmentContext;
 };
 
 const buildUserLabel = (user?: PickerUser, fallback = "") => {
     if (!user) return fallback;
     const emailPrefix = user.email?.split("@")[0];
-    return [user.name, emailPrefix, user.department].filter(Boolean).join(" / ");
+    return [user.name, emailPrefix, user.department, user.unavailableReason].filter(Boolean).join(" / ");
 };
 
 const normalizeSearchText = (value: string) =>
@@ -56,6 +62,7 @@ const getUserSearchValues = (user: PickerUser) => [
     user.department,
     user.title,
     user.role,
+    user.employeeCode,
     `${user.name || ""} ${user.email || ""} ${user.department || ""} ${user.title || ""}`
 ].filter(Boolean).map((value) => String(value));
 
@@ -89,7 +96,8 @@ export function UserSearchPicker({
     clearLabel = "清除人員",
     onSelect,
     onClear,
-    filterUser
+    filterUser,
+    assignmentContext
 }: UserSearchPickerProps) {
     const [searchTerm, setSearchTerm] = useState("");
     const [isOpen, setIsOpen] = useState(false);
@@ -100,21 +108,38 @@ export function UserSearchPicker({
 
     const { data: searchedUsersData, isFetching: isSearching } = trpc.users.list.useQuery(
         { limit: 50, search: debouncedSearchTerm, sortBy: "email" },
-        { enabled: shouldSearchServer }
+        { enabled: shouldSearchServer && !assignmentContext }
+    );
+    const { data: assignmentData, isFetching: isSearchingAssignments } = trpc.users.assignmentCandidates.useQuery(
+        {
+            context: assignmentContext || "project_member",
+            search: debouncedSearchTerm || undefined,
+            limit: 50,
+            includeIds: selectedUserId ? [selectedUserId] : []
+        },
+        { enabled: Boolean(assignmentContext) && (isOpen || Boolean(selectedUserId)) }
     );
 
     const mergedUsers = useMemo(() => {
         const userMap = new Map<string, PickerUser>();
         for (const user of users || []) userMap.set(user.id, user);
         for (const user of searchedUsersData?.items || []) userMap.set(user.id, user);
+        for (const user of assignmentData?.items || []) {
+            if (!user.id) continue;
+            userMap.set(user.id, {
+                ...user,
+                id: user.id,
+                name: user.name || user.email || "未知使用者"
+            });
+        }
         return Array.from(userMap.values());
-    }, [searchedUsersData?.items, users]);
+    }, [assignmentData?.items, searchedUsersData?.items, users]);
 
     const activeUsers = useMemo(
-        () => mergedUsers.filter((user) => user.isActive !== false && (!filterUser || filterUser(user))),
+        () => mergedUsers.filter((user) => user.isActive !== false && user.eligible !== false && (!filterUser || filterUser(user))),
         [filterUser, mergedUsers]
     );
-    const selectedUserFromList = activeUsers.find((user) => user.id === selectedUserId);
+    const selectedUserFromList = mergedUsers.find((user) => user.id === selectedUserId);
     const selectedUser = selectedUserFromList ||
         (selectedUserSnapshot?.id === selectedUserId ? selectedUserSnapshot : undefined);
     const selectedLabel = buildUserLabel(selectedUser, legacyName || "");
@@ -183,7 +208,7 @@ export function UserSearchPicker({
                 <div className="absolute z-[210] mt-1 w-full max-h-[min(16rem,calc(100vh-8rem))] overflow-y-auto rounded-lg border border-border bg-card shadow-lg">
                     {filteredUsers.length === 0 ? (
                         <div className="px-3 py-2 text-sm text-muted-foreground">
-                            {isSearching ? "搜尋帳號中..." : "找不到符合的帳號"}
+                            {isSearching || isSearchingAssignments ? "搜尋帳號中..." : "找不到符合的帳號"}
                         </div>
                     ) : (
                         filteredUsers.map((user) => (

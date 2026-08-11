@@ -30,7 +30,6 @@ const srSchema = z.object({
     reviewDate: optionalDate,
     warrantyExpiresAt: optionalDate,
     billingAllocation: z.string().optional(),
-    recognitionMonth: z.string().optional(),
     srType: z.enum(["project", "maintenance", "other_activity"]).default("project"),
     contractAmount: z.number().min(0, "合約金額不能為負").optional(),
     finalPrice: z.number().min(0, "合約最終金額不能為負").optional(),
@@ -109,7 +108,7 @@ export function ServiceRequestsPage() {
             title: "", customerName: "", srType: "project", contractAmount: 0, finalPrice: undefined,
             salesUserId: "", salesDepartment: "", salesRep: "",
             externalServiceType: "專案服務", plannedStartDate: "", plannedEndDate: "", reviewDate: "", warrantyExpiresAt: "",
-            billingAllocation: "", recognitionMonth: "",
+            billingAllocation: "",
             totalPoints: 0, pointValue: 500, 
             pmId: "", joinPmAsMember: true 
         }
@@ -144,8 +143,11 @@ export function ServiceRequestsPage() {
         switch (status) {
             case 'new': return 'bg-blue-100 text-blue-800 border-blue-200 dark:bg-blue-900/30 dark:text-blue-300 dark:border-blue-800';
             case 'in_progress': return 'bg-amber-100 text-amber-800 border-amber-200 dark:bg-amber-900/30 dark:text-amber-300 dark:border-amber-800';
+            case 'on_hold': return 'bg-slate-100 text-slate-800 border-slate-200 dark:bg-slate-800 dark:text-slate-200 dark:border-slate-700';
+            case 'pending_acceptance': return 'bg-violet-100 text-violet-800 border-violet-200 dark:bg-violet-900/30 dark:text-violet-300 dark:border-violet-800';
+            case 'closed':
             case 'completed': return 'bg-green-100 text-green-800 border-green-200 dark:bg-green-900/30 dark:text-green-300 dark:border-green-800';
-            case 'cancelled': return 'bg-gray-100 text-gray-800 border-gray-200 dark:bg-gray-800 dark:text-gray-300 dark:border-gray-700';
+            case 'cancelled': return 'bg-red-600 text-white border-red-700 dark:bg-red-700 dark:text-white dark:border-red-600';
             default: return 'bg-gray-100 text-gray-800 border-gray-200';
         }
     };
@@ -154,7 +156,10 @@ export function ServiceRequestsPage() {
         const labels: Record<string, string> = {
             new: "待指派",
             in_progress: "執行中",
-            completed: "已結案",
+            on_hold: "暫停",
+            pending_acceptance: "待驗收",
+            closed: "已結案",
+            completed: "已結案（舊資料）",
             cancelled: "已取消"
         };
         return labels[status] || status;
@@ -474,19 +479,6 @@ export function ServiceRequestsPage() {
                                         />
                                         <FormField
                                             control={form.control}
-                                            name="recognitionMonth"
-                                            render={({ field }: any) => (
-                                                <FormItem>
-                                                    <FormLabel>認列月份</FormLabel>
-                                                    <FormControl>
-                                                        <Input type="month" {...field} />
-                                                    </FormControl>
-                                                    <FormMessage />
-                                                </FormItem>
-                                            )}
-                                        />
-                                        <FormField
-                                            control={form.control}
                                             name="billingAllocation"
                                             render={({ field }: any) => (
                                                 <FormItem>
@@ -587,6 +579,7 @@ export function ServiceRequestsPage() {
                                                                 const rightIsPm = right.role === "pm";
                                                                 return Number(rightIsPm) - Number(leftIsPm) || left.name.localeCompare(right.name, "zh-Hant");
                                                             })}
+                                                            assignmentContext="project_pm"
                                                             selectedUserId={field.value}
                                                             placeholder="可選，搜尋 PM 或輸入 Email 前綴..."
                                                             onSelect={(selectedUser) => field.onChange(selectedUser.id)}

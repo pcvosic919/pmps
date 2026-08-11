@@ -20,12 +20,38 @@ const OPP_STATUSES = [
     { value: "converted", label: "已轉案", color: "bg-indigo-100 text-indigo-800 border-indigo-200" },
     { value: "won", label: "已成交", color: "bg-green-100 text-green-800 border-green-200" },
     { value: "lost", label: "已失敗", color: "bg-red-100 text-red-800 border-red-200" },
+    { value: "cancelled", label: "已取消", color: "bg-red-600 text-white border-red-700" },
 ] as const;
 
 const OPP_TYPES = [
     { value: "revenue", label: "營收型商機" },
     { value: "presales", label: "協銷" },
 ] as const;
+
+const QUOTE_STATUS_LABELS: Record<string, string> = {
+    draft: "草稿",
+    submitted: "已送出",
+    accepted: "已採用",
+    void: "已作廢"
+};
+
+const HISTORY_ACTION_LABELS: Record<string, string> = {
+    opportunity_created: "建立商機",
+    opportunity_status_changed: "變更商機狀態",
+    opportunity_owner_transferred: "移轉 Owner",
+    opportunity_member_added: "新增商機成員",
+    opportunity_member_removed: "移除商機成員",
+    opportunity_member_role_changed: "調整成員角色",
+    opportunity_sales_owner_updated: "調整業務歸屬",
+    opportunity_estimated_amount_updated: "調整預估金額",
+    opportunity_description_updated: "更新商機說明",
+    opportunity_custom_fields_updated: "更新自訂欄位",
+    opportunity_attachment_uploaded: "上傳附件",
+    presales_time_logged: "填寫協銷工時",
+    quote_version_created: "建立報價版本",
+    quote_adopted: "採用報價版本",
+    opportunity_converted: "商機轉專案"
+};
 
 
 export function OpportunityDetailPage() {
@@ -40,6 +66,7 @@ export function OpportunityDetailPage() {
     const [showAssignModal, setShowAssignModal] = useState(false);
     const [assignTechId, setAssignTechId] = useState("");
     const [assignHours, setAssignHours] = useState("8");
+    const [assignHourlyRate, setAssignHourlyRate] = useState("1000");
     const [assignError, setAssignError] = useState("");
 
     const [showTimesheetModal, setShowTimesheetModal] = useState(false);
@@ -80,6 +107,14 @@ export function OpportunityDetailPage() {
     const [editedSalesDepartment, setEditedSalesDepartment] = useState("");
     const [isDraggingFile, setIsDraggingFile] = useState(false);
     const [isUploadingFile, setIsUploadingFile] = useState(false);
+    const [showQuoteForm, setShowQuoteForm] = useState(false);
+    const [quoteName, setQuoteName] = useState("");
+    const [quoteAmount, setQuoteAmount] = useState("");
+    const [quoteDescription, setQuoteDescription] = useState("");
+    const [quoteProducts, setQuoteProducts] = useState("");
+    const [quoteExpectedCloseDate, setQuoteExpectedCloseDate] = useState("");
+    const [quoteTaxIncluded, setQuoteTaxIncluded] = useState(false);
+    const [quoteError, setQuoteError] = useState("");
 
     // ------ Queries ------
     const { data: opp, isLoading: isOppLoading, refetch: refetchOpp } = trpc.opportunities.getById.useQuery({ id }, { enabled: !!id });
@@ -91,6 +126,14 @@ export function OpportunityDetailPage() {
     const { data: techUsers } = trpc.users.techList.useQuery();
     const { data: allUsers } = trpc.users.list.useQuery({ limit: 500 });
     const { data: customFieldDefs } = trpc.system.getCustomFields.useQuery();
+    const { data: quotes, refetch: refetchQuotes } = trpc.opportunities.listQuotes.useQuery(
+        { opportunityId: id },
+        { enabled: !!id }
+    );
+    const { data: historyEvents, refetch: refetchHistory, isFetching: isFetchingHistory } = trpc.opportunities.getBusinessHistory.useQuery(
+        { opportunityId: id, limit: 100 },
+        { enabled: !!id }
+    );
 
     const oppFields = customFieldDefs?.filter((f: any) => f.entityType === "opportunity") || [];
     const getFieldValue = (fieldId: string) => {
@@ -99,7 +142,7 @@ export function OpportunityDetailPage() {
 
     // ------ Mutations ------
     const assignMutation = trpc.opportunities.assignPresales.useMutation({
-        onSuccess: () => { refetchAssignments(); refetchOpp(); setShowAssignModal(false); setAssignTechId(""); setAssignHours("8"); setAssignError(""); },
+        onSuccess: () => { refetchAssignments(); refetchOpp(); setShowAssignModal(false); setAssignTechId(""); setAssignHours("8"); setAssignHourlyRate("1000"); setAssignError(""); },
         onError: (err) => setAssignError(err.message || "指派失敗")
     });
 
@@ -177,12 +220,44 @@ export function OpportunityDetailPage() {
         onError: (err) => setSrError(err.message || "建立 SR 失敗")
     });
 
+    const resetQuoteForm = () => {
+        setShowQuoteForm(false);
+        setQuoteName("");
+        setQuoteAmount("");
+        setQuoteDescription("");
+        setQuoteProducts("");
+        setQuoteExpectedCloseDate("");
+        setQuoteTaxIncluded(false);
+        setQuoteError("");
+    };
+    const createQuoteMutation = trpc.opportunities.createQuoteVersion.useMutation({
+        onSuccess: async () => {
+            await Promise.all([refetchQuotes(), refetchOpp()]);
+            resetQuoteForm();
+        },
+        onError: (error) => setQuoteError(error.message || "建立報價版本失敗")
+    });
+    const submitQuoteMutation = trpc.opportunities.submitQuoteVersion.useMutation({
+        onSuccess: () => refetchQuotes(),
+        onError: (error) => alert(error.message)
+    });
+    const adoptQuoteMutation = trpc.opportunities.adoptQuoteVersion.useMutation({
+        onSuccess: async () => { await Promise.all([refetchQuotes(), refetchOpp()]); },
+        onError: (error) => alert(error.message)
+    });
+    const voidQuoteMutation = trpc.opportunities.voidQuoteVersion.useMutation({
+        onSuccess: () => refetchQuotes(),
+        onError: (error) => alert(error.message)
+    });
+
     // ------ Handlers ------
     const handleAssign = () => {
         if (!assignTechId) { setAssignError("請選擇技術員"); return; }
         const hours = parseFloat(assignHours);
         if (isNaN(hours) || hours <= 0) { setAssignError("請輸入有效時數"); return; }
-        assignMutation.mutate({ opportunityId: id, techId: assignTechId, estimatedHours: hours });
+        const hourlyRate = parseFloat(assignHourlyRate);
+        if (isNaN(hourlyRate) || hourlyRate < 0) { setAssignError("請輸入有效協銷時薪"); return; }
+        assignMutation.mutate({ opportunityId: id, techId: assignTechId, estimatedHours: hours, hourlyRate });
     };
 
     const handleLogTime = () => {
@@ -277,9 +352,10 @@ export function OpportunityDetailPage() {
     if (!opp) return <div className="p-8 text-center text-red-500">找不到商機</div>;
 
     const currentStatus = OPP_STATUSES.find(s => s.value === opp.status) ?? OPP_STATUSES[0];
-    const isTerminal = ["converted", "won", "lost"].includes(opp.status);
-    const canConvertOpportunity = !["converted", "lost"].includes(opp.status);
+    const isTerminal = ["converted", "won", "lost", "cancelled"].includes(opp.status);
+    const canConvertOpportunity = !["converted", "lost", "cancelled"].includes(opp.status);
     const isBusinessOwner = hasRole("business") && opp.ownerId === user?.id;
+    const canManageQuotes = !isTerminal && (hasRole("admin") || hasRole("manager") || hasRole("presales") || isBusinessOwner);
     const canEditSalesOwner = hasRole("admin") || hasRole("manager") || hasRole("presales") || isBusinessOwner;
     const canEditOpportunityMembers = hasRole("admin") || hasRole("manager") || hasRole("presales") || user?.id === opp.ownerId;
     const canReportTime = hasRole("admin") || hasRole("manager") || hasRole("pm") || hasRole("presales") || hasRole("tech");
@@ -312,7 +388,7 @@ export function OpportunityDetailPage() {
                                 case 'qualified': return 1;
                                 case 'presales_active': return 2;
                                 case 'quoting': return 3;
-                                case 'won': case 'lost': case 'converted': return 4;
+                                case 'won': case 'lost': case 'converted': case 'cancelled': return 4;
                                 default: return 0;
                             }
                         })() / 4) * 100}% - ${(() => {
@@ -336,7 +412,7 @@ export function OpportunityDetailPage() {
                             case 'qualified': return 1;
                             case 'presales_active': return 2;
                             case 'quoting': return 3;
-                            case 'won': case 'lost': case 'converted': return 4;
+                            case 'won': case 'lost': case 'converted': case 'cancelled': return 4;
                             default: return 0;
                         }
                     })();
@@ -354,7 +430,7 @@ export function OpportunityDetailPage() {
                                 {isCompleted ? <Check className="w-4 h-4" /> : index + 1}
                             </div>
                             <span className={`text-xs mt-1.5 font-semibold ${isActive || isCompleted ? 'text-foreground' : 'text-muted-foreground'}`}>
-                                {step.value === "final" && (opp.status === "won" || opp.status === "lost" || opp.status === "converted")
+                                {step.value === "final" && (opp.status === "won" || opp.status === "lost" || opp.status === "converted" || opp.status === "cancelled")
                                     ? currentStatus.label
                                     : step.label}
                             </span>
@@ -400,7 +476,18 @@ export function OpportunityDetailPage() {
                                                                 setShowStatusDropdown(false);
                                                                 return;
                                                             }
-                                                            updateStatusMutation.mutate({ id, status: s.value });
+                                                            const reason = s.value === "cancelled"
+                                                                ? window.prompt("請輸入取消原因")?.trim()
+                                                                : undefined;
+                                                            if (s.value === "cancelled" && !reason) return;
+                                                            let finalDealAmount: number | undefined;
+                                                            if (s.value === "won") {
+                                                                const value = window.prompt("請確認最終成交金額", String((opp as any).quotedAmount ?? opp.estimatedValue ?? 0));
+                                                                if (value === null) return;
+                                                                finalDealAmount = Number(value);
+                                                                if (!Number.isFinite(finalDealAmount) || finalDealAmount < 0) return alert("請輸入有效的最終成交金額");
+                                                            }
+                                                            updateStatusMutation.mutate({ id, status: s.value, reason, finalDealAmount });
                                                         }}
                                                         className={`w-full text-left px-3 py-1.5 text-xs font-medium hover:bg-muted transition-colors ${s.color.replace('border-', '')} rounded-none first:rounded-t-md last:rounded-b-md`}
                                                     >
@@ -429,7 +516,7 @@ export function OpportunityDetailPage() {
                                         setShowSRModal(true);
                                         setSrTitle(`${opp.title} ${opp.customerName} - SR`);
                                         setSrCustomerName(opp.customerName || "");
-                                        setSrAmount(opp.estimatedValue.toString());
+                                        setSrAmount(String((opp as any).finalDealAmount ?? (opp as any).quotedAmount ?? opp.estimatedValue ?? 0));
                                         setSrSalesUserId((opp as any).salesUserId || "");
                                         setSrSalesDepartment((opp as any).salesDepartment || "");
                                         setSrSalesRep((opp as any).salesRep || "");
@@ -440,7 +527,7 @@ export function OpportunityDetailPage() {
                                 className="flex items-center gap-2 px-4 py-2 bg-primary text-primary-foreground rounded-lg hover:bg-primary/90 transition-colors text-sm font-medium shadow-sm disabled:opacity-50"
                             >
                                 <FileText className="w-4 h-4" />
-                                {opp.status === "converted" ? "已轉案" : opp.status === "lost" ? "已失敗，無法建立專案" : "一鍵建立報價單 / 專案"}
+                                {opp.status === "converted" ? "已轉案" : opp.status === "lost" ? "已失敗，無法建立專案" : opp.status === "cancelled" ? "已取消，無法建立專案" : "一鍵建立報價單 / 專案"}
                             </button>
                         )}
                         {canDelete && !isTerminal && (
@@ -459,8 +546,8 @@ export function OpportunityDetailPage() {
                 </div>
                 <div className="grid grid-cols-1 md:grid-cols-4 gap-6 pt-6 border-t border-border/50">
                     <div className="space-y-1">
-                        <span className="text-sm text-muted-foreground">商機 ID</span>
-                        <p className="font-semibold">#{opp.id}</p>
+                        <span className="text-sm text-muted-foreground">商機代號</span>
+                        <p className="font-mono font-semibold">{(opp as any).opportunityCode || `#${opp.id}`}</p>
                     </div>
                     <div className="space-y-1">
                         <span className="text-sm text-muted-foreground">商機類型</span>
@@ -481,7 +568,7 @@ export function OpportunityDetailPage() {
                     </div>
                     <div className="space-y-1">
                         <div className="flex items-center justify-between gap-3">
-                            <span className="text-sm text-muted-foreground">商機金額</span>
+                            <span className="text-sm text-muted-foreground">預估金額</span>
                             {(isBusinessOwner || hasRole("admin") || hasRole("manager") || hasRole("presales")) && !isTerminal && (
                                 <button
                                     onClick={() => {
@@ -496,6 +583,22 @@ export function OpportunityDetailPage() {
                             )}
                         </div>
                         <p className="font-semibold text-lg text-primary">NT$ {opp.estimatedValue.toLocaleString()}</p>
+                    </div>
+                    <div className="space-y-1">
+                        <span className="text-sm text-muted-foreground">協銷金額</span>
+                        <p className="font-semibold">NT$ {Number((opp as any).presalesAmount || 0).toLocaleString()}</p>
+                    </div>
+                    <div className="space-y-1">
+                        <span className="text-sm text-muted-foreground">目前報價金額</span>
+                        <p className="font-semibold">NT$ {Number((opp as any).quotedAmount || 0).toLocaleString()}</p>
+                    </div>
+                    <div className="space-y-1">
+                        <span className="text-sm text-muted-foreground">最終成交金額</span>
+                        <p className="font-semibold text-green-700">NT$ {Number((opp as any).finalDealAmount || 0).toLocaleString()}</p>
+                    </div>
+                    <div className="space-y-1">
+                        <span className="text-sm text-muted-foreground">成交率</span>
+                        <p className="font-semibold text-primary">{(opp as any).probability ?? 0}%</p>
                     </div>
                     <div className="space-y-1">
                         <span className="text-sm text-muted-foreground flex items-center"><Calendar className="w-4 h-4 mr-1" />建立日期</span>
@@ -601,13 +704,166 @@ export function OpportunityDetailPage() {
                 )}
             </div>
 
+            <div className="rounded-xl border border-border/50 bg-card shadow-sm">
+                <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border/50 p-4">
+                    <div>
+                        <h3 className="font-bold flex items-center"><FileText className="mr-2 h-5 w-5 text-primary" />報價版本</h3>
+                        <p className="mt-1 text-xs text-muted-foreground">每次報價建立獨立版本，保留協銷內容與歷次議價依據。</p>
+                    </div>
+                    {canManageQuotes && (
+                        <button
+                            type="button"
+                            onClick={() => {
+                                setShowQuoteForm((value) => !value);
+                                setQuoteName(`${opp.title} 報價`);
+                                setQuoteAmount(String((opp as any).quotedAmount ?? opp.estimatedValue ?? 0));
+                                setQuoteProducts((opp.productNames || []).join(", "));
+                                setQuoteExpectedCloseDate(opp.expectedCloseDate ? new Date(opp.expectedCloseDate).toISOString().slice(0, 10) : "");
+                                setQuoteError("");
+                            }}
+                            className="inline-flex items-center rounded-lg bg-primary px-3 py-2 text-xs font-semibold text-primary-foreground hover:bg-primary/90"
+                        >
+                            <Plus className="mr-1 h-4 w-4" />新增報價版本
+                        </button>
+                    )}
+                </div>
+
+                {showQuoteForm && canManageQuotes && (
+                    <div className="grid gap-3 border-b border-border/50 bg-muted/20 p-4 md:grid-cols-2">
+                        <label className="space-y-1 text-sm">
+                            <span className="font-medium">報價名稱 *</span>
+                            <input value={quoteName} onChange={(event) => setQuoteName(event.target.value)} className="w-full rounded-lg border bg-background px-3 py-2" />
+                        </label>
+                        <label className="space-y-1 text-sm">
+                            <span className="font-medium">報價金額 *</span>
+                            <input type="number" min="0" value={quoteAmount} onChange={(event) => setQuoteAmount(event.target.value)} className="w-full rounded-lg border bg-background px-3 py-2" />
+                        </label>
+                        <label className="space-y-1 text-sm">
+                            <span className="font-medium">產品（以逗號分隔）</span>
+                            <input value={quoteProducts} onChange={(event) => setQuoteProducts(event.target.value)} className="w-full rounded-lg border bg-background px-3 py-2" />
+                        </label>
+                        <label className="space-y-1 text-sm">
+                            <span className="font-medium">預計成交日</span>
+                            <input type="date" value={quoteExpectedCloseDate} onChange={(event) => setQuoteExpectedCloseDate(event.target.value)} className="w-full rounded-lg border bg-background px-3 py-2" />
+                        </label>
+                        <label className="space-y-1 text-sm md:col-span-2">
+                            <span className="font-medium">報價說明</span>
+                            <textarea value={quoteDescription} onChange={(event) => setQuoteDescription(event.target.value)} className="min-h-20 w-full rounded-lg border bg-background px-3 py-2" />
+                        </label>
+                        <label className="flex items-center gap-2 text-sm">
+                            <input type="checkbox" checked={quoteTaxIncluded} onChange={(event) => setQuoteTaxIncluded(event.target.checked)} />
+                            含稅
+                        </label>
+                        <div className="flex items-center justify-end gap-2">
+                            <button type="button" onClick={resetQuoteForm} className="rounded-lg border px-3 py-2 text-sm hover:bg-muted">取消</button>
+                            <button
+                                type="button"
+                                disabled={createQuoteMutation.isPending}
+                                onClick={() => {
+                                    const amount = Number(quoteAmount);
+                                    if (!quoteName.trim()) return setQuoteError("請輸入報價名稱");
+                                    if (!Number.isFinite(amount) || amount < 0) return setQuoteError("請輸入有效的報價金額");
+                                    createQuoteMutation.mutate({
+                                        opportunityId: id,
+                                        name: quoteName.trim(),
+                                        description: quoteDescription.trim() || undefined,
+                                        products: quoteProducts.split(/[,，]/).map((value) => value.trim()).filter(Boolean),
+                                        amount,
+                                        currency: "TWD",
+                                        taxIncluded: quoteTaxIncluded,
+                                        expectedCloseDate: quoteExpectedCloseDate ? new Date(`${quoteExpectedCloseDate}T00:00:00+08:00`) : undefined
+                                    });
+                                }}
+                                className="rounded-lg bg-primary px-3 py-2 text-sm font-semibold text-primary-foreground disabled:opacity-50"
+                            >
+                                建立版本
+                            </button>
+                        </div>
+                        {quoteError && <p className="text-sm text-red-600 md:col-span-2">{quoteError}</p>}
+                    </div>
+                )}
+
+                <div className="divide-y divide-border/50">
+                    {(quotes || []).map((quote: any) => (
+                        <div key={quote.id} className="flex flex-wrap items-center justify-between gap-3 p-4">
+                            <div className="min-w-0">
+                                <div className="flex flex-wrap items-center gap-2">
+                                    <span className="font-mono text-xs text-muted-foreground">{quote.quoteCode}</span>
+                                    <span className={`rounded-full border px-2 py-0.5 text-[10px] font-bold ${quote.status === "accepted" ? "border-green-200 bg-green-100 text-green-800" : quote.status === "void" ? "border-red-200 bg-red-100 text-red-700" : "border-blue-200 bg-blue-50 text-blue-700"}`}>
+                                        {QUOTE_STATUS_LABELS[quote.status] || quote.status}
+                                    </span>
+                                </div>
+                                <p className="mt-1 font-semibold">V{quote.version} · {quote.name}</p>
+                                <p className="mt-1 text-xs text-muted-foreground">
+                                    {quote.currency} {Number(quote.amount || 0).toLocaleString()} · {quote.taxIncluded ? "含稅" : "未稅"}
+                                    {quote.expectedCloseDate ? ` · 預計成交 ${new Date(quote.expectedCloseDate).toLocaleDateString()}` : ""}
+                                </p>
+                            </div>
+                            {canManageQuotes && quote.status !== "void" && (
+                                <div className="flex flex-wrap gap-2">
+                                    {quote.status === "draft" && (
+                                        <button type="button" onClick={() => submitQuoteMutation.mutate({ quoteId: quote.id })} className="rounded-lg border px-3 py-1.5 text-xs hover:bg-muted">送出</button>
+                                    )}
+                                    {quote.status !== "accepted" && (
+                                        <button type="button" onClick={() => adoptQuoteMutation.mutate({ quoteId: quote.id })} className="rounded-lg bg-green-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-green-700">採用</button>
+                                    )}
+                                    {quote.status !== "accepted" && (
+                                        <button
+                                            type="button"
+                                            onClick={() => {
+                                                const reason = window.prompt("請輸入報價作廢原因")?.trim();
+                                                if (reason) voidQuoteMutation.mutate({ quoteId: quote.id, reason });
+                                            }}
+                                            className="rounded-lg border border-red-200 px-3 py-1.5 text-xs text-red-600 hover:bg-red-50"
+                                        >作廢</button>
+                                    )}
+                                </div>
+                            )}
+                        </div>
+                    ))}
+                    {(!quotes || quotes.length === 0) && <div className="p-6 text-center text-sm text-muted-foreground">尚未建立報價版本</div>}
+                </div>
+            </div>
+
+            <details className="rounded-xl border border-border/50 bg-card shadow-sm">
+                <summary className="cursor-pointer list-none p-4">
+                    <div className="flex items-center justify-between gap-3">
+                        <div>
+                            <h3 className="font-bold flex items-center"><Clock className="mr-2 h-5 w-5 text-primary" />商機操作歷程</h3>
+                            <p className="mt-1 text-xs text-muted-foreground">永久保存重要商務異動；安全 Audit 仍獨立記錄登入、拒絕與匯出事件。</p>
+                        </div>
+                        <button
+                            type="button"
+                            onClick={(event) => { event.preventDefault(); void refetchHistory(); }}
+                            className="rounded-lg border px-3 py-1.5 text-xs hover:bg-muted"
+                        >{isFetchingHistory ? "更新中..." : "重新整理"}</button>
+                    </div>
+                </summary>
+                <div className="divide-y divide-border/50 border-t border-border/50">
+                    {(historyEvents || []).map((event: any) => (
+                        <div key={event.id} className="grid gap-1 p-4 text-sm md:grid-cols-[180px_1fr_auto] md:items-center">
+                            <span className="text-xs text-muted-foreground">{new Date(event.occurredAt).toLocaleString()}</span>
+                            <div>
+                                <p className="font-medium">{HISTORY_ACTION_LABELS[event.action] || event.action}</p>
+                                {event.reason && <p className="mt-1 text-xs text-muted-foreground">原因：{event.reason}</p>}
+                            </div>
+                            <span className="text-xs text-muted-foreground">{event.actorRole || event.source}</span>
+                        </div>
+                    ))}
+                    {(!historyEvents || historyEvents.length === 0) && <div className="p-6 text-center text-sm text-muted-foreground">尚無操作歷程</div>}
+                </div>
+            </details>
+
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
                 {/* 協銷指派 */}
                 <div className="bg-card border border-border/50 rounded-xl shadow-sm overflow-hidden flex flex-col">
                     <div className="p-4 border-b border-border/50 bg-muted/30 flex justify-between items-center">
-                        <h3 className="font-bold flex items-center"><Briefcase className="w-5 h-5 mr-2 text-primary" />協銷指派</h3>
+                        <div>
+                            <h3 className="font-bold flex items-center"><Briefcase className="w-5 h-5 mr-2 text-primary" />協銷指派</h3>
+                            <p className="mt-1 text-[11px] text-muted-foreground">共用時薪：NT$ {Number((opp as any).presalesHourlyRate ?? 1000).toLocaleString()}</p>
+                        </div>
                         {!hasRole("business") && (
-                            <button onClick={() => { if (!isTerminal) { setShowAssignModal(true); setAssignError(""); } }}
+                            <button onClick={() => { if (!isTerminal) { setAssignHourlyRate(String((opp as any).presalesHourlyRate ?? 1000)); setShowAssignModal(true); setAssignError(""); } }}
                                 disabled={isTerminal}
                                 className="text-xs font-medium text-primary hover:text-primary/80 flex items-center px-2 py-1 rounded hover:bg-primary/10 transition-colors disabled:opacity-50">
                                 <Plus className="w-3 h-3 mr-1" /> 新增指派
@@ -622,6 +878,7 @@ export function OpportunityDetailPage() {
                                         <div>
                                             <p className="font-medium text-sm">{getTechName(a.techId)}</p>
                                             <p className="text-xs text-muted-foreground">預估時數: {a.estimatedHours} 小時</p>
+                                            <p className="text-xs text-muted-foreground">系統金額: NT$ {(Number(a.estimatedHours || 0) * Number((opp as any).presalesHourlyRate ?? 1000)).toLocaleString()}</p>
                                         </div>
                                     </div>
                                 ))}
@@ -820,6 +1077,7 @@ export function OpportunityDetailPage() {
 	                                <label className="block text-sm font-medium mb-1">選擇技術員 / 售前人員</label>
 	                                <UserSearchPicker
 	                                    users={presalesList || []}
+	                                    assignmentContext="presales"
 	                                    selectedUserId={assignTechId}
 	                                    placeholder="搜尋姓名或 Email..."
 	                                    onSelect={(selectedUser) => setAssignTechId(selectedUser.id)}
@@ -833,6 +1091,19 @@ export function OpportunityDetailPage() {
                                 <label className="block text-sm font-medium mb-1">預估時數（小時）</label>
                                 <input type="number" min="0.5" step="0.5" value={assignHours} onChange={e => setAssignHours(e.target.value)}
                                     className="w-full border border-border rounded-lg px-3 py-2 bg-background text-sm focus:outline-none focus:ring-2 focus:ring-primary/50" />
+                            </div>
+                            <div>
+                                <label className="block text-sm font-medium mb-1">本商機協銷時薪</label>
+                                <input
+                                    type="number"
+                                    min="0"
+                                    step="100"
+                                    value={assignHourlyRate}
+                                    disabled={(opp as any).presalesHourlyRate !== undefined}
+                                    onChange={e => setAssignHourlyRate(e.target.value)}
+                                    className="w-full border border-border rounded-lg px-3 py-2 bg-background text-sm focus:outline-none focus:ring-2 focus:ring-primary/50 disabled:opacity-60"
+                                />
+                                <p className="mt-1 text-xs text-muted-foreground">首次指派時保存；同一商機後續所有協銷人員共用此時薪。</p>
                             </div>
                             {assignError && <p className="text-sm text-red-500 bg-red-50 dark:bg-red-950/30 px-3 py-2 rounded-lg">{assignError}</p>}
                         </div>
@@ -860,6 +1131,7 @@ export function OpportunityDetailPage() {
 	                                <label className="block text-sm font-medium mb-1">選擇使用者</label>
 	                                <UserSearchPicker
 	                                    users={allUsers?.items || []}
+	                                    assignmentContext="project_member"
 	                                    selectedUserId={memberUserId}
 	                                    placeholder="搜尋姓名或 Email..."
 	                                    onSelect={(selectedUser) => setMemberUserId(selectedUser.id)}

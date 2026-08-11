@@ -18,6 +18,9 @@ import { SystemSettingModel } from "../server/models/Settings";
 import { TimesheetModel } from "../server/models/Timesheet";
 import { UserModel } from "../server/models/User";
 import { AuditEventModel } from "../server/models/AuditEvent";
+import { BusinessHistoryEventModel } from "../server/models/BusinessHistoryEvent";
+import { BusinessSequenceModel } from "../server/models/BusinessSequence";
+import { OpportunityQuoteModel } from "../server/models/OpportunityQuote";
 
 const envFile = process.env.NODE_ENV === "test" ? ".env.test" : ".env.local";
 const pathsToTry = [
@@ -48,6 +51,9 @@ const appModels = [
     SettlementSnapshotModel,
     SettlementAuditLogModel,
     AuditEventModel,
+    BusinessHistoryEventModel,
+    BusinessSequenceModel,
+    OpportunityQuoteModel,
 ];
 
 function shouldSyncIndexes() {
