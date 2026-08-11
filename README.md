@@ -192,6 +192,9 @@ docker compose run --rm web \
 | `JWT_SECRET` | **是** | JWT 與通知 SSE 短效 Token 簽章密鑰，未設定時服務不會啟動 |
 | `AUDIT_IP_HASH_SALT` | 否 | Audit 使用者互動紀錄的 IP 雜湊 salt；正式環境建議設定獨立且穩定的高強度字串 |
 | `DEMO_LOGIN_ENABLED` | 否 | 設為 `true` 時允許登入頁顯示並使用 Demo 快速登入（建議僅測試環境） |
+| `BREAKGLASS_ENABLED` | 否 | Platform Owner 緊急登入開關，預設為啟用；正式確認資料庫帳號可用後建議設為 `false` |
+| `BREAKGLASS_EMAIL` | 否 | 緊急登入帳號，預設為 `adminpmp@demo.com` |
+| `BREAKGLASS_PASSWORD_HASH` | 否 | 可覆寫緊急登入的後端 scrypt 雜湊；不得提供給前端或寫入公開文件 |
 | `API_ENCRYPTION_KEY` | 否 | 若設定，前後端 tRPC payload 會以此 key 加解密 |
 | `REQUEST_BODY_LIMIT` | 否 | Express JSON body 上限，預設 `50mb`，Excel/附件匯入較大時可調整 |
 | `ENTRA_ENABLED` | 否 | 設為 `true` 可作為 Entra ID 開關的後備值；正式建議仍由系統設定頁維護 |
@@ -545,6 +548,8 @@ Authorization: Bearer <pmp_auth_token>
 - `demo_presales2@demo.com`
 
 > Demo 密碼不寫入前端或版本庫。執行 `seed:demo` 前請透過 `DEMO_PASSWORD` 環境變數提供；既有 Platform Owner 遷移則保留原密碼雜湊。
+
+> `adminpmp@demo.com` 同時提供資料庫無法連線時的 Break-glass 登入。前端只預填帳號，密碼僅由後端雜湊驗證；確認正式資料庫帳號可正常使用後，請以 `BREAKGLASS_ENABLED=false` 關閉緊急入口。
 
 > ⚠️ `DEMO_LOGIN_ENABLED` 建議只在測試環境開啟；正式環境請關閉。
 > ⚠️ 若缺少 `JWT_SECRET`，登入 API 會拒絕簽發 Token，前端將只顯示通用錯誤訊息，不會直接暴露內部環境變數名稱。
