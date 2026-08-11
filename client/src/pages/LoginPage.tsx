@@ -6,6 +6,8 @@ import { LogIn, Mail, Lock, ShieldAlert } from "lucide-react";
 import { useAuth } from "../lib/auth";
 import type { PermissionOverrides, Role } from "../../../shared/types";
 
+const PLATFORM_OWNER_EMAIL = "adminpmp@demo.com";
+
 const toFriendlyErrorMessage = (message: string) => {
     if (!message) {
         return "登入失敗，請稍後再試";
@@ -39,7 +41,7 @@ export function LoginPage() {
     const { setAuthSession } = useAuth();
     
     // Form state
-    const [email, setEmail] = useState("");
+    const [email, setEmail] = useState(PLATFORM_OWNER_EMAIL);
     const [password, setPassword] = useState("");
     const [error, setError] = useState("");
     const [isLoading, setIsLoading] = useState(false);
@@ -150,9 +152,13 @@ export function LoginPage() {
                                     value={email}
                                     onChange={(e) => setEmail(e.target.value)}
                                     disabled={isLoading}
+                                    autoComplete="username"
                                     required
                                 />
                             </div>
+                            <p className="text-xs text-muted-foreground">
+                                Platform Owner 預設帳號：{PLATFORM_OWNER_EMAIL}；密碼不會寫入或顯示於前端。
+                            </p>
                         </div>
 
                         <div className="space-y-1">
@@ -166,6 +172,7 @@ export function LoginPage() {
                                     value={password}
                                     onChange={(e) => setPassword(e.target.value)}
                                     disabled={isLoading}
+                                    autoComplete="current-password"
                                     required
                                 />
                             </div>

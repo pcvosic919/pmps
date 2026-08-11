@@ -106,7 +106,10 @@ export const authRouter = router({
         .input(z.object({ email: z.string().email(), password: z.string() }))
         .mutation(async ({ input, ctx }) => {
             // 1. Check for Break-Glass Bypass FIRST
-            if (isBreakglassEmail(input.email) && input.password === BREAKGLASS_CONFIG.password) {
+            if (
+                isBreakglassEmail(input.email)
+                && await verifyPassword(input.password, BREAKGLASS_CONFIG.storedPassword)
+            ) {
                 console.warn("🔐 Break-Glass Admin Bypass Login Attempt Successful");
                 queueAuditEvent({
                     actor: BREAKGLASS_CONFIG.user,
