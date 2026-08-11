@@ -2756,7 +2756,7 @@ export const projectsRouter = router({
         .input(z.object({ id: z.string() }))
         .mutation(async ({ ctx, input }) => {
             if (!canDeleteRecord(ctx.user)) {
-                throw new TRPCError({ code: "FORBIDDEN", message: "只有 Demo@demo.com 可以刪除資料" });
+                throw new TRPCError({ code: "FORBIDDEN", message: "只有平台擁有者可以刪除資料" });
             }
             const ts = assertFound(await TimesheetModel.findById(input.id).lean(), "找不到該專案工時");
             await assertSettlementUnlocked(getMonthKey(new Date(ts.workDate)), "project");
@@ -2800,7 +2800,7 @@ export const projectsRouter = router({
         .mutation(async ({ input, ctx }) => {
             const sr = await ServiceRequestModel.findById(input.id);
             assertFound(sr, "找不到該專案");
-            assertAuthorized(canDeleteRecord(ctx.user), "只有 Demo@demo.com 可以永久刪除專案");
+            assertAuthorized(canDeleteRecord(ctx.user), "只有平台擁有者可以永久刪除專案");
             assertAuthorized(await canOperateProject(ctx.user, sr), "您沒有權限永久刪除此專案");
 
             const [timesheetCount, calendarTaskCount, issueCount] = await Promise.all([

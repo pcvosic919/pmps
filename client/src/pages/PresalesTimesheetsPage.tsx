@@ -9,7 +9,7 @@ export function PresalesTimesheetsPage() {
     const utils = trpc.useContext();
     const { user } = useCurrentUser();
     const canViewAllTimesheets = !!user && (user.role === "manager" || user.role === "pm");
-    const canDelete = user?.email?.trim().toLowerCase() === "demo@demo.com";
+    const canDelete = user?.isPlatformOwner === true;
     const [isSubmitting, setIsSubmitting] = useState(false);
     const [viewMode, setViewMode] = useState<"list" | "week" | "month">("list");
 

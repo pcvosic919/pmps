@@ -9,6 +9,7 @@ export type SessionTokenPayload = {
     email: string;
     role: Role;
     name: string;
+    sessionVersion: number;
     tokenType: typeof SESSION_TOKEN_TYPE;
 };
 
@@ -25,8 +26,13 @@ export const getJwtSecret = () => {
     return secret;
 };
 
-export const signSessionToken = (payload: Omit<SessionTokenPayload, "tokenType">) =>
-    jwt.sign({ ...payload, tokenType: SESSION_TOKEN_TYPE }, getJwtSecret(), { expiresIn: "12h" });
+export const signSessionToken = (
+    payload: Omit<SessionTokenPayload, "tokenType" | "sessionVersion"> & { sessionVersion?: number }
+) => jwt.sign(
+    { ...payload, sessionVersion: payload.sessionVersion || 0, tokenType: SESSION_TOKEN_TYPE },
+    getJwtSecret(),
+    { expiresIn: "12h" }
+);
 
 export const verifySessionToken = (token: string) => {
     const decoded = jwt.verify(token, getJwtSecret()) as Partial<SessionTokenPayload>;
@@ -39,6 +45,7 @@ export const verifySessionToken = (token: string) => {
         email: decoded.email,
         role: decoded.role,
         name: decoded.name,
+        sessionVersion: Number.isInteger(decoded.sessionVersion) ? Number(decoded.sessionVersion) : 0,
         tokenType: SESSION_TOKEN_TYPE
     } satisfies SessionTokenPayload;
 };

@@ -17,11 +17,13 @@ import {
     FolderKanban,
     Globe,
     LayoutDashboard,
+    KeyRound,
     LogOut,
     Menu,
     Search,
     Settings,
     Settings2,
+    SlidersHorizontal,
     ShieldCheck,
     ShieldAlert,
     TrendingUp,
@@ -34,6 +36,7 @@ import { useCurrentUser } from "../lib/useCurrentUser";
 import { useAuth } from "../lib/auth";
 import { trpc } from "../lib/trpc";
 import type { FeaturePermission, Role } from "../../../shared/types";
+import { usePlatformConfiguration } from "../lib/usePlatformConfiguration";
 
 interface AppLayoutProps {
     children: React.ReactNode;
@@ -53,7 +56,7 @@ type NavItem = {
     roles?: string[];
     permission?: FeaturePermission;
     badge?: "notifications";
-    auditOnly?: boolean;
+    platformOwnerOnly?: boolean;
 };
 
 type NavGroup = {
@@ -125,8 +128,8 @@ const navGroups: NavGroup[] = [
         label: "公式設定",
         items: [
             { icon: CreditCard, label: "費率設定", href: "/cost-rates", roles: ["admin", "manager"] },
-            { icon: Settings2, label: "自訂欄位", href: "/custom-fields", roles: ["admin", "manager"] },
-            { icon: TrendingUp, label: "利潤中心公式", href: "/formula/profit-center", roles: ["admin", "manager"] },
+            { icon: Settings2, label: "自訂欄位", href: "/custom-fields", platformOwnerOnly: true },
+            { icon: TrendingUp, label: "利潤中心公式", href: "/formula/profit-center", platformOwnerOnly: true },
         ],
     },
     {
@@ -136,8 +139,9 @@ const navGroups: NavGroup[] = [
             { icon: Settings, label: "帳號管理", href: "/users", roles: ["admin"] },
             { icon: ShieldAlert, label: "指派資料檢查", href: "/assignment-integrity", roles: ["admin"] },
             { icon: Building2, label: "公司管理", href: "/companies", roles: ["admin"] },
-            { icon: Settings, label: "系統設定", href: "/system-settings", roles: ["admin"] },
-            { icon: ShieldCheck, label: "Audit 稽核中心", href: "/audit", auditOnly: true },
+            { icon: Settings, label: "系統設定", href: "/system-settings", platformOwnerOnly: true },
+            { icon: SlidersHorizontal, label: "平台控制中心", href: "/platform-control", platformOwnerOnly: true },
+            { icon: ShieldCheck, label: "Audit 稽核中心", href: "/audit", platformOwnerOnly: true },
         ],
     },
 ];
@@ -163,11 +167,20 @@ export function AppLayout({ children }: AppLayoutProps) {
         { limit: 20 },
         { staleTime: 30_000, refetchOnWindowFocus: true }
     );
-    const { data: settings } = trpc.system.getSettings.useQuery(undefined, {
+    const { data: settings } = trpc.system.getPublicSettings.useQuery(undefined, {
         staleTime: 300_000,
     });
+    const platform = usePlatformConfiguration();
     const trackLogout = trpc.audit.trackLogout.useMutation();
     const companyName = settings?.companyName || "PMP System";
+    const brandName = platform.getString("text.brandName", "PMPS");
+    const brandSubtitle = platform.getString("text.brandSubtitle", "專案管理平台");
+    const sidebarWidth = platform.getNumber("layout.sidebarWidth", 288);
+    const compactSidebarWidth = platform.getNumber("layout.compactSidebarWidth", 80);
+    const contentMaxWidth = platform.getNumber("layout.contentMaxWidth", 1600);
+    const pagePadding = platform.getNumber("layout.pagePadding", 24);
+    const fontScale = platform.getNumber("layout.fontScale", 1);
+    const dialogSize = platform.getString("layout.dialogSize", "lg");
     const unreadCount = notifications?.filter((item) => !item.isRead).length ?? 0;
 
     const hasRole = (role: string) =>
@@ -177,7 +190,7 @@ export function AppLayout({ children }: AppLayoutProps) {
         .map((group) => ({
             ...group,
             items: group.items.filter((item) =>
-                item.auditOnly && user?.email?.trim().toLowerCase() !== "demo@demo.com"
+                item.platformOwnerOnly && !user?.isPlatformOwner
                     ? false
                     : item.permission
                     ? hasPermission(item.permission, (item.roles || []) as Role[])
@@ -187,8 +200,22 @@ export function AppLayout({ children }: AppLayoutProps) {
         .filter((group) => group.items.length > 0);
 
     const visibleTopNavItems = topNavItems.filter(
-        (item) => item.href !== "/system-settings" || hasRole("admin")
+        (item) => item.href !== "/system-settings" || user?.isPlatformOwner
     );
+
+    useEffect(() => {
+        const root = document.documentElement;
+        const previous = root.style.fontSize;
+        const previousDialogWidth = root.style.getPropertyValue("--pmps-dialog-max-width");
+        const dialogWidths: Record<string, string> = { sm: "24rem", md: "28rem", lg: "32rem", xl: "48rem", full: "calc(100vw - 2rem)" };
+        root.style.fontSize = `${16 * Math.min(1.25, Math.max(0.85, fontScale))}px`;
+        root.style.setProperty("--pmps-dialog-max-width", dialogWidths[dialogSize] || dialogWidths.lg);
+        return () => {
+            root.style.fontSize = previous;
+            if (previousDialogWidth) root.style.setProperty("--pmps-dialog-max-width", previousDialogWidth);
+            else root.style.removeProperty("--pmps-dialog-max-width");
+        };
+    }, [dialogSize, fontScale]);
 
     const [expandedGroups, setExpandedGroups] = useState<Record<string, boolean>>(() =>
         Object.fromEntries(navGroups.map((group) => [group.key, true]))
@@ -248,7 +275,7 @@ export function AppLayout({ children }: AppLayoutProps) {
                     <item.icon className={cn("h-5 w-5 flex-shrink-0", !compact && "mr-3")} />
                     {!compact && (
                         <>
-                            <span className="truncate">{item.label}</span>
+                            <span className="truncate">{platform.getString(`text.nav.${item.href.replace(/[^A-Za-z0-9]+/g, "_")}`, item.label)}</span>
                             {badgeCount > 0 && (
                                 <span className="ml-auto inline-flex min-w-5 items-center justify-center rounded-full bg-destructive px-1.5 py-0.5 text-[10px] font-semibold text-destructive-foreground">
                                     {badgeCount > 99 ? "99+" : badgeCount}
@@ -265,8 +292,8 @@ export function AppLayout({ children }: AppLayoutProps) {
         <>
             <div className="h-14 flex items-center justify-between px-4 border-b border-border">
                 <div className="min-w-0">
-                    {(sidebarOpen || mobile) && <span className="font-bold text-primary truncate">Dispatch System</span>}
-                    {(sidebarOpen || mobile) && <p className="text-[11px] text-muted-foreground mt-0.5">依角色顯示可存取模組</p>}
+                    {(sidebarOpen || mobile) && <span className="font-bold text-primary truncate">{brandName}</span>}
+                    {(sidebarOpen || mobile) && <p className="text-[11px] text-muted-foreground mt-0.5">{brandSubtitle}</p>}
                 </div>
                 <button
                     onClick={() => mobile ? setMobileSidebarOpen(false) : setSidebarOpen(!sidebarOpen)}
@@ -289,7 +316,7 @@ export function AppLayout({ children }: AppLayoutProps) {
                                         onClick={() => setExpandedGroups((current) => ({ ...current, [group.key]: !isExpanded }))}
                                         className="w-full px-4 text-left text-[11px] font-semibold uppercase tracking-wide text-muted-foreground/80 flex items-center justify-between"
                                     >
-                                        <span>{group.label}</span>
+                                        <span>{platform.getString(`text.navGroup.${group.key}`, group.label)}</span>
                                         <ChevronDown className={cn("h-4 w-4 transition-transform", isExpanded && "rotate-180")} />
                                     </button>
                                     {isExpanded && (
@@ -336,10 +363,8 @@ export function AppLayout({ children }: AppLayoutProps) {
             )}
 
             <aside
-                className={cn(
-                    "hidden md:flex bg-card border-r border-border shadow-sm transition-all duration-300 flex-col relative z-20",
-                    sidebarOpen ? "w-72" : "w-20"
-                )}
+                className="hidden md:flex bg-card border-r border-border shadow-sm transition-all duration-300 flex-col relative z-20"
+                style={{ width: sidebarOpen ? sidebarWidth : compactSidebarWidth }}
             >
                 {renderSidebarContent()}
             </aside>
@@ -382,7 +407,7 @@ export function AppLayout({ children }: AppLayoutProps) {
                                         )}
                                         title={item.helper}
                                     >
-                                        {item.label}
+                                        {platform.getString(`text.topNav.${item.href?.replace(/[^A-Za-z0-9]+/g, "_") || "item"}`, item.label)}
                                     </a>
                                 </Link>
                             ))}
@@ -448,7 +473,7 @@ export function AppLayout({ children }: AppLayoutProps) {
                                         <div className="mt-2 text-[11px] text-muted-foreground">目前角色：{user?.role || "—"}</div>
                                     </div>
                                     <div className="mt-2 space-y-1">
-                                        {hasRole("admin") && (
+                                        {user?.isPlatformOwner && (
                                             <Link href="/system-settings">
                                                 <a className="flex items-center rounded-lg px-3 py-2 text-sm text-muted-foreground hover:bg-muted hover:text-foreground">
                                                     <Settings className="mr-2 h-4 w-4" />
@@ -456,6 +481,20 @@ export function AppLayout({ children }: AppLayoutProps) {
                                                 </a>
                                             </Link>
                                         )}
+                                        {user?.isPlatformOwner && (
+                                            <Link href="/platform-control">
+                                                <a className="flex items-center rounded-lg px-3 py-2 text-sm text-muted-foreground hover:bg-muted hover:text-foreground">
+                                                    <SlidersHorizontal className="mr-2 h-4 w-4" />
+                                                    平台控制中心
+                                                </a>
+                                            </Link>
+                                        )}
+                                        <Link href="/account-security">
+                                            <a className="flex items-center rounded-lg px-3 py-2 text-sm text-muted-foreground hover:bg-muted hover:text-foreground">
+                                                <KeyRound className="mr-2 h-4 w-4" />
+                                                帳號安全
+                                            </a>
+                                        </Link>
                                         <Link href="/notifications">
                                             <a className="flex items-center rounded-lg px-3 py-2 text-sm text-muted-foreground hover:bg-muted hover:text-foreground">
                                                 <Bell className="mr-2 h-4 w-4" />
@@ -479,8 +518,10 @@ export function AppLayout({ children }: AppLayoutProps) {
                     </div>
                 </header>
 
-                <main className="flex-1 overflow-auto p-4 md:p-6 bg-muted/20">
-                    {children}
+                <main className="flex-1 overflow-auto bg-muted/20" style={{ padding: pagePadding }}>
+                    <div className="mx-auto w-full" style={{ maxWidth: contentMaxWidth > 0 ? contentMaxWidth : undefined }}>
+                        {children}
+                    </div>
                 </main>
             </div>
             <GlobalSearch open={globalSearchOpen} onOpenChange={setGlobalSearchOpen} />

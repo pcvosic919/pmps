@@ -25,10 +25,11 @@ type DemoUserSeed = {
     email: string;
     name: string;
     role: Role;
+    isPlatformOwner?: boolean;
 };
 
 const demoUsers: DemoUserSeed[] = [
-    { email: "demo@demo.com", name: "Local Demo", role: "admin" },
+    { email: "adminpmp@demo.com", name: "PMPS Platform Owner", role: "admin", isPlatformOwner: true },
     { email: "demo_admin@demo.com", name: "Demo Admin", role: "admin" },
     { email: "demo_manager@demo.com", name: "Demo Manager", role: "manager" },
     { email: "demo_business@demo.com", name: "Demo Business", role: "business" },
@@ -62,6 +63,10 @@ const demoOpportunities = [
 ] as const;
 
 async function seed() {
+    const demoPassword = process.env.DEMO_PASSWORD;
+    if (!demoPassword) {
+        throw new Error("DEMO_PASSWORD is required when seeding demo accounts.");
+    }
     console.log("Seeding MongoDB database at", getMongoUri());
 
     try {
@@ -82,13 +87,14 @@ async function seed() {
             }
         }
 
-        const hashedPassword = await hashPassword("password123");
+        const hashedPassword = await hashPassword(demoPassword);
         const createdUsers = await UserModel.insertMany(
             demoUsers.map((user) => ({
                 ...user,
                 password: hashedPassword,
                 provider: "manual",
                 isActive: true,
+                isPlatformOwner: user.isPlatformOwner === true,
             }))
         );
         console.log("Users seeded successfully.");
@@ -96,7 +102,7 @@ async function seed() {
         await SystemSettingModel.insertMany(demoSystemSettings);
         console.log("System settings seeded successfully.");
 
-        const adminUser = createdUsers.find((user) => user.email === "demo@demo.com") || createdUsers[0];
+        const adminUser = createdUsers.find((user) => user.email === "adminpmp@demo.com") || createdUsers[0];
         if (!adminUser) {
             throw new Error("Demo admin user was not created.");
         }

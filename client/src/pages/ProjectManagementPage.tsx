@@ -28,7 +28,7 @@ export function ProjectManagementPage() {
     const canSeeOperationsDashboard = hasRole("admin") || hasRole("manager") || hasRole("pm");
     const canOperateProject = (sr: any) => sr.permissions?.canOperate === true;
     const canArchiveProject = (sr: any) => sr.permissions?.canArchive === true;
-    const canDelete = user?.email?.trim().toLowerCase() === "demo@demo.com";
+    const canDelete = user?.isPlatformOwner === true;
 	    const [search, setSearch] = useState("");
     const [filterStatus, setFilterStatus] = useState<string>("all");
     const [showArchived, setShowArchived] = useState(false);

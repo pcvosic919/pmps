@@ -57,7 +57,7 @@ export function UserManagementPage() {
     const [sortOrder, setSortOrder] = useState<"asc" | "desc">("asc");
     const [selectedDepartments, setSelectedDepartments] = useState<string[]>([]);
     const { user: currentUser } = useCurrentUser();
-    const canDelete = currentUser?.email?.trim().toLowerCase() === "demo@demo.com";
+    const canDelete = currentUser?.isPlatformOwner === true;
 
     const debouncedSearchTerm = useDebounce(searchTerm, 500);
     const { data: departments = [], isLoading: isLoadingDepartments } = trpc.users.getDepartments.useQuery();

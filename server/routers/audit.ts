@@ -60,11 +60,11 @@ const buildFilter = (input: z.infer<typeof filterInput>) => {
     return filter;
 };
 
-const assertAuditViewer = (email?: string) => {
-    if (!canViewAudit({ email })) {
+const assertAuditViewer = (user: { isPlatformOwner?: boolean }) => {
+    if (!canViewAudit(user)) {
         throw new TRPCError({
             code: "FORBIDDEN",
-            message: "只有 demo@demo.com 可以查看 Audit 紀錄"
+            message: "只有平台擁有者可以查看 Audit 紀錄"
         });
     }
 };
@@ -96,7 +96,7 @@ export const auditRouter = router({
     list: protectedProcedure
         .input(listInput)
         .query(async ({ ctx, input }) => {
-            assertAuditViewer(ctx.user.email);
+            assertAuditViewer(ctx.user);
             const filter = buildFilter(input);
             const skip = (input.page - 1) * input.pageSize;
             const [events, total, success, failed, denied, actorEmails, categories, actions] = await Promise.all([
@@ -135,7 +135,7 @@ export const auditRouter = router({
     exportRows: protectedProcedure
         .input(filterInput)
         .mutation(async ({ ctx, input }) => {
-            assertAuditViewer(ctx.user.email);
+            assertAuditViewer(ctx.user);
             const events = await AuditEventModel.find(buildFilter(input))
                 .sort({ createdAt: -1 })
                 .limit(5000)

@@ -51,7 +51,7 @@ export function CompanyManagementPage() {
     const [isImporting, setIsImporting] = useState(false);
     const fileInputRef = useRef<HTMLInputElement>(null);
     const { user } = useCurrentUser();
-    const canDelete = user?.email?.trim().toLowerCase() === "demo@demo.com";
+    const canDelete = user?.isPlatformOwner === true;
     const utils = trpc.useUtils();
     const { data, isLoading, refetch } = trpc.companies.list.useQuery({ search, limit: 500, includeInactive: true });
 

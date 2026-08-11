@@ -34,4 +34,13 @@ describe("userHasPermission", () => {
         });
         expect(userHasPermission(user, "project.edit", ["admin", "manager", "pm"])).toBe(false);
     });
+
+    it("gives the immutable platform owner every detailed permission", () => {
+        const user = makeUser({
+            role: "user",
+            isPlatformOwner: true,
+            permissionOverrides: { allow: [], deny: ["project.delete"] }
+        });
+        expect(userHasPermission(user, "project.delete", [])).toBe(true);
+    });
 });

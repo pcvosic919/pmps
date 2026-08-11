@@ -45,11 +45,9 @@ export const hasAnyRole = (user: UserSession, roles: Role[]) =>
 export const isAdminOrManager = (user: UserSession) =>
     hasAnyRole(user, ["admin", "manager"]);
 
-const normalizeEmail = (value?: string | null) => (value || "").trim().toLowerCase();
-
-// Only the demo owner account can delete records. Other admins keep create/edit permissions.
+// Only the immutable platform-owner identity can perform high-risk deletion.
 export const canDeleteRecord = (user: UserSession) =>
-    normalizeEmail(user.email) === "demo@demo.com";
+    user.isPlatformOwner === true;
 
 // Admin and manager can create / edit (but not delete)
 export const canCreateOrEdit = (user: UserSession) =>

@@ -52,12 +52,16 @@ export function LoginPage() {
     const loginMutation = trpc.auth.login.useMutation();
     const entraLoginMutation = trpc.auth.entraLogin.useMutation();
 
-    const handleLoginSuccess = (payload: { token: string; user?: { id: string; email: string; name: string; role: Role; permissionOverrides?: PermissionOverrides; isActive: boolean } | null }) => {
+    const handleLoginSuccess = (payload: { token: string; user?: { id: string; email: string; name: string; role: Role; permissionOverrides?: PermissionOverrides; isActive: boolean; isPlatformOwner?: boolean; provider?: "manual" | "entra"; passwordConfigured?: boolean; passwordChangedAt?: string | Date } | null }) => {
         setAuthSession(
             payload.token,
             payload.user ? {
                 ...payload.user,
-                permissionOverrides: payload.user.permissionOverrides || { allow: [], deny: [] }
+                permissionOverrides: payload.user.permissionOverrides || { allow: [], deny: [] },
+                isPlatformOwner: payload.user.isPlatformOwner === true,
+                provider: payload.user.provider || "manual",
+                passwordConfigured: payload.user.passwordConfigured === true,
+                passwordChangedAt: payload.user.passwordChangedAt
             } : null
         );
         window.location.href = "/";

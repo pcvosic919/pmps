@@ -24,6 +24,7 @@ export type UserSession = {
     role: Role;
     permissionOverrides: PermissionOverrides;
     isActive: boolean;
+    isPlatformOwner?: boolean;
 };
 
 // tRPC Context
@@ -48,14 +49,15 @@ export const createContext = async ({ req, res }: CreateExpressContextOptions) =
                     managedDepartments: [],
                     role: BREAKGLASS_CONFIG.user.role,
                     permissionOverrides: { allow: [], deny: [] },
-                    isActive: true
+                    isActive: true,
+                    isPlatformOwner: true
                 };
             } else {
                 // 2. Normal DB User Lookup (with try-catch for DB down)
                 try {
                     const dbUser = await UserModel.findById(decoded.sub).lean();
 
-                    if (dbUser && dbUser.isActive) {
+                    if (dbUser && dbUser.isActive && Number((dbUser as any).sessionVersion || 0) === decoded.sessionVersion) {
                         user = {
                             id: dbUser._id.toString(),
                             email: dbUser.email,
@@ -67,7 +69,8 @@ export const createContext = async ({ req, res }: CreateExpressContextOptions) =
                                 allow: ((dbUser as any).permissionOverrides?.allow || []) as FeaturePermission[],
                                 deny: ((dbUser as any).permissionOverrides?.deny || []) as FeaturePermission[]
                             },
-                            isActive: dbUser.isActive
+                            isActive: dbUser.isActive,
+                            isPlatformOwner: (dbUser as any).isPlatformOwner === true
                         };
                     }
                 } catch (dbError) {
@@ -173,6 +176,7 @@ export const userHasPermission = (
     permission: FeaturePermission,
     defaultRoles: Role[]
 ) => {
+    if (user.isPlatformOwner) return true;
     if (user.permissionOverrides.deny.includes(permission)) return false;
     if (user.permissionOverrides.allow.includes(permission)) return true;
     return defaultRoles.includes(user.role);
@@ -192,7 +196,7 @@ export const permissionProcedure = (permission: FeaturePermission, defaultRoles:
 // Role-based authorization middleware
 export const roleProcedure = (allowedRoles: Role[]) =>
     protectedProcedure.use(({ next, ctx }) => {
-        const hasRole = allowedRoles.includes(ctx.user.role);
+        const hasRole = ctx.user.isPlatformOwner || allowedRoles.includes(ctx.user.role);
 
         if (!hasRole) {
             throw new TRPCError({
@@ -203,3 +207,13 @@ export const roleProcedure = (allowedRoles: Role[]) =>
 
         return next({ ctx });
     });
+
+export const platformOwnerProcedure = protectedProcedure.use(({ next, ctx }) => {
+    if (!ctx.user.isPlatformOwner) {
+        throw new TRPCError({
+            code: "FORBIDDEN",
+            message: "只有平台擁有者可以執行此操作"
+        });
+    }
+    return next({ ctx });
+});

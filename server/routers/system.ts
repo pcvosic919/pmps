@@ -1,4 +1,4 @@
-import { router, roleProcedure, protectedProcedure } from "../_core/trpc";
+import { platformOwnerProcedure, router, roleProcedure, protectedProcedure } from "../_core/trpc";
 import { TRPCError } from "@trpc/server";
 import { CustomFieldModel } from "../models/CustomField";
 import { SystemSettingModel } from "../models/Settings";
@@ -139,7 +139,20 @@ function serializeValue(value: unknown, valueType: SettingDefinition["valueType"
 }
 
 export const systemRouter = router({
-    getSettings: roleProcedure(["admin", "manager"]).query(async () => {
+    getPublicSettings: protectedProcedure.query(async () => {
+        const records = await SystemSettingModel.find({
+            key: { $in: ["companyName", "defaultCurrency", "sessionTimeout", "enableNotifications"] }
+        }).lean();
+        const values = Object.fromEntries(records.map((record) => [record.key, parseStoredValue(record.value, record.valueType as any)]));
+        return {
+            companyName: String(values.companyName || defaultSettings.companyName),
+            defaultCurrency: String(values.defaultCurrency || defaultSettings.defaultCurrency),
+            sessionTimeout: Number(values.sessionTimeout || defaultSettings.sessionTimeout),
+            enableNotifications: values.enableNotifications ?? defaultSettings.enableNotifications
+        };
+    }),
+
+    getSettings: roleProcedure(["admin", "manager"]).query(async ({ ctx }) => {
         const records = await SystemSettingModel.find({
             key: { $in: Object.keys(defaultSettings) }
         }).lean();
@@ -153,10 +166,16 @@ export const systemRouter = router({
             }
         }
 
+        if (!ctx.user.isPlatformOwner) {
+            settings.entraClientSecret = "";
+            settings.graphApiSecret = "";
+            settings.apiToken = "";
+        }
+
         return settings;
     }),
 
-    updateSettings: roleProcedure(["admin", "manager"])
+    updateSettings: platformOwnerProcedure
         .input(settingsPayloadSchema)
         .mutation(async ({ input }) => {
             const operations = (Object.entries(input) as Array<[SettingsKey, z.infer<typeof settingsPayloadSchema>[SettingsKey]]>)
@@ -204,7 +223,7 @@ export const systemRouter = router({
         }));
     }),
 
-    createCustomField: roleProcedure(["admin"]).input(z.object({
+    createCustomField: platformOwnerProcedure.input(z.object({
         entityType: z.enum(["opportunity", "sr", "wbs", "cr"]),
         name: z.string(),
         fieldType: z.enum(["text", "number", "select", "multiselect", "date", "switch", "url"]),
@@ -215,17 +234,17 @@ export const systemRouter = router({
         return { success: true };
     }),
 
-    deleteCustomField: roleProcedure(["admin"]).input(z.object({
+    deleteCustomField: platformOwnerProcedure.input(z.object({
         id: z.string()
     })).mutation(async ({ input, ctx }) => {
         if (!canDeleteRecord(ctx.user)) {
-            throw new TRPCError({ code: "FORBIDDEN", message: "只有 Demo@demo.com 可以刪除資料" });
+            throw new TRPCError({ code: "FORBIDDEN", message: "只有平台擁有者可以刪除資料" });
         }
         await CustomFieldModel.deleteOne({ _id: input.id });
         return { success: true };
     }),
 
-    updateCustomField: roleProcedure(["admin"]).input(z.object({
+    updateCustomField: platformOwnerProcedure.input(z.object({
         id: z.string(),
         name: z.string().optional(),
         fieldType: z.enum(["text", "number", "select", "multiselect", "date", "switch", "url"]).optional(),
@@ -285,7 +304,7 @@ export const systemRouter = router({
             return { folderUrl: result.folderUrl };
         }),
 
-    testSharePointFolder: roleProcedure(["admin"]).mutation(async () => {
+    testSharePointFolder: platformOwnerProcedure.mutation(async () => {
         const setting = await SystemSettingModel.findOne({ key: "sharePointSiteUrl" }).lean();
         if (!setting?.value) {
             throw new TRPCError({ code: "BAD_REQUEST", message: "尚未設定 SharePoint 站台 URL" });

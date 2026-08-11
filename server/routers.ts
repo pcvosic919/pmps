@@ -11,6 +11,7 @@ import { companiesRouter } from "./routers/companies";
 import { auditRouter } from "./routers/audit";
 import { recognitionRouter } from "./routers/recognition";
 import { reportsRouter } from "./routers/reports";
+import { platformRouter } from "./routers/platform";
 
 export const appRouter = router({
     auth: authRouter,
@@ -24,7 +25,8 @@ export const appRouter = router({
     companies: companiesRouter,
     audit: auditRouter,
     recognition: recognitionRouter,
-    reports: reportsRouter
+    reports: reportsRouter,
+    platform: platformRouter
 });
 
 export type AppRouter = typeof appRouter;

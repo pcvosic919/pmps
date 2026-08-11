@@ -6,7 +6,7 @@ import { useCurrentUser } from "../lib/useCurrentUser";
 export function CustomFieldsPage() {
     const { data: fields, isLoading, refetch } = trpc.system.getCustomFields.useQuery();
     const { user } = useCurrentUser();
-    const canDelete = user?.email?.trim().toLowerCase() === "demo@demo.com";
+    const canDelete = user?.isPlatformOwner === true;
     const [editingId, setEditingId] = useState<string | null>(null);
     const createField = trpc.system.createCustomField.useMutation({ onSuccess: () => { setIsModalOpen(false); refetch(); } });
     const updateField = trpc.system.updateCustomField.useMutation({ onSuccess: () => { setIsModalOpen(false); refetch(); } });

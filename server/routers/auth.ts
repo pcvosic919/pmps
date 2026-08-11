@@ -2,7 +2,7 @@ import { z } from "zod";
 import { router, publicProcedure, protectedProcedure } from "../_core/trpc";
 import { UserModel } from "../models/User";
 import { TRPCError } from "@trpc/server";
-import { isPasswordHash, verifyPassword, hashPassword } from "../_core/password";
+import { getPasswordStrengthIssues, isPasswordHash, verifyPassword, hashPassword } from "../_core/password";
 import { signNotificationStreamToken, signSessionToken } from "../_core/tokens";
 import { type PermissionOverrides, roles } from "../../shared/types";
 import { assertEntraSsoConfigured, fetchGraphUserProfile, getEntraSettings } from "../_core/entra";
@@ -20,13 +20,19 @@ const issueSession = (user: {
     role: (typeof roles)[number];
     permissionOverrides?: PermissionOverrides;
     isActive?: boolean;
+    isPlatformOwner?: boolean;
+    sessionVersion?: number;
+    provider?: "manual" | "entra";
+    password?: string;
+    passwordChangedAt?: Date;
 }) => {
     try {
         const token = signSessionToken({
             sub: user._id.toString(),
             email: user.email,
             role: user.role,
-            name: user.name
+            name: user.name,
+            sessionVersion: user.sessionVersion || 0
         });
 
         return {
@@ -37,7 +43,11 @@ const issueSession = (user: {
                 email: user.email,
                 role: user.role,
                 permissionOverrides: user.permissionOverrides || { allow: [], deny: [] },
-                isActive: user.isActive ?? true
+                isActive: user.isActive ?? true,
+                isPlatformOwner: user.isPlatformOwner === true,
+                provider: user.provider || "manual",
+                passwordConfigured: Boolean(user.password),
+                passwordChangedAt: user.passwordChangedAt
             }
         };
     } catch (error) {
@@ -74,14 +84,23 @@ export const authRouter = router({
         };
     }),
 
-    me: protectedProcedure.query(async ({ ctx }) => ({
-        id: ctx.user.id,
-        email: ctx.user.email,
-        name: ctx.user.name,
-        role: ctx.user.role,
-        permissionOverrides: ctx.user.permissionOverrides,
-        isActive: ctx.user.isActive
-    })),
+    me: protectedProcedure.query(async ({ ctx }) => {
+        const account = ctx.user.id === BREAKGLASS_CONFIG.user.id
+            ? null
+            : await UserModel.findById(ctx.user.id).select("provider passwordChangedAt +password").lean();
+        return {
+            id: ctx.user.id,
+            email: ctx.user.email,
+            name: ctx.user.name,
+            role: ctx.user.role,
+            permissionOverrides: ctx.user.permissionOverrides,
+            isActive: ctx.user.isActive,
+            isPlatformOwner: ctx.user.isPlatformOwner === true,
+            provider: account?.provider || "manual",
+            passwordConfigured: account ? Boolean(account.password) : false,
+            passwordChangedAt: account?.passwordChangedAt
+        };
+    }),
 
     login: publicProcedure
         .input(z.object({ email: z.string().email(), password: z.string() }))
@@ -101,13 +120,16 @@ export const authRouter = router({
                     email: BREAKGLASS_CONFIG.email,
                     name: BREAKGLASS_CONFIG.user.name,
                     role: BREAKGLASS_CONFIG.user.role,
-                    isActive: true
+                    isActive: true,
+                    isPlatformOwner: true,
+                    sessionVersion: 0
                 });
             }
 
             // 2. Normal DB Login (with Error Handling for DB down)
             try {
-                const user = await UserModel.findOne({ email: input.email }).lean();
+                const normalizedEmail = input.email.trim().toLowerCase();
+                const user = await UserModel.findOne({ email: normalizedEmail }).select("+password").lean();
                 if (!user) {
                     queueAuditEvent({
                         actor: { email: input.email },
@@ -134,7 +156,7 @@ export const authRouter = router({
                 if (user.password && !isPasswordHash(user.password)) {
                     await UserModel.updateOne(
                         { _id: user._id },
-                        { $set: { password: await hashPassword(input.password) } }
+                        { $set: { password: await hashPassword(input.password), passwordChangedAt: new Date() } }
                     );
                 }
 
@@ -170,6 +192,51 @@ export const authRouter = router({
                 
                 throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "登入過程中發生未預期的錯誤" });
             }
+        }),
+
+    changePassword: protectedProcedure
+        .input(z.object({
+            currentPassword: z.string().min(1),
+            newPassword: z.string().min(1),
+            confirmPassword: z.string().min(1)
+        }))
+        .mutation(async ({ input, ctx }) => {
+            if (ctx.user.id === BREAKGLASS_CONFIG.user.id) {
+                throw new TRPCError({ code: "FORBIDDEN", message: "Break-glass 密碼只能透過伺服器環境變數更換" });
+            }
+            if (input.newPassword !== input.confirmPassword) {
+                throw new TRPCError({ code: "BAD_REQUEST", message: "新密碼與確認密碼不一致" });
+            }
+            if (input.currentPassword === input.newPassword) {
+                throw new TRPCError({ code: "BAD_REQUEST", message: "新密碼不可與目前密碼相同" });
+            }
+
+            const account = await UserModel.findById(ctx.user.id).select("+password");
+            if (!account || !account.isActive) throw new TRPCError({ code: "UNAUTHORIZED" });
+            if (account.provider !== "manual" || !account.password) {
+                throw new TRPCError({ code: "BAD_REQUEST", message: "此帳號使用外部登入，請至身分提供者修改密碼" });
+            }
+            if (!await verifyPassword(input.currentPassword, account.password)) {
+                throw new TRPCError({ code: "UNAUTHORIZED", message: "目前密碼不正確" });
+            }
+            const issues = getPasswordStrengthIssues(input.newPassword, [account.email, account.email.split("@")[0], account.name]);
+            if (issues.length > 0) {
+                throw new TRPCError({ code: "BAD_REQUEST", message: issues.join("；") });
+            }
+
+            account.password = await hashPassword(input.newPassword);
+            account.passwordChangedAt = new Date();
+            account.sessionVersion = Number(account.sessionVersion || 0) + 1;
+            await account.save();
+
+            queueAuditEvent({
+                actor: { id: account._id.toString(), name: account.name, email: account.email },
+                category: "auth",
+                action: "password_changed",
+                outcome: "success",
+                request: ctx.auditRequest
+            });
+            return issueSession(account);
         }),
 
 

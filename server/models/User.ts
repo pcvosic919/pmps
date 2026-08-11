@@ -5,6 +5,9 @@ export interface IUser extends Document {
     email: string;
     name: string;
     password?: string;
+    passwordChangedAt?: Date;
+    sessionVersion: number;
+    isPlatformOwner: boolean;
     department?: string;
     employeeCode?: string;
     managedDepartments: string[];
@@ -25,7 +28,10 @@ export interface IUser extends Document {
 const UserSchema = new Schema<IUser>({
     email: { type: String, required: true, unique: true },
     name: { type: String, required: true },
-    password: { type: String },
+    password: { type: String, select: false },
+    passwordChangedAt: { type: Date },
+    sessionVersion: { type: Number, default: 0, min: 0, required: true },
+    isPlatformOwner: { type: Boolean, default: false, required: true },
     department: { type: String },
     employeeCode: { type: String, trim: true },
     managedDepartments: { type: [String], default: [] },
@@ -63,6 +69,10 @@ UserSchema.index({ department: 1, _id: 1 });
 UserSchema.index({ employeeCode: 1, _id: 1 });
 UserSchema.index({ createdAt: -1 });
 UserSchema.index({ lastLoginAt: -1 });
+UserSchema.index(
+    { isPlatformOwner: 1 },
+    { unique: true, partialFilterExpression: { isPlatformOwner: true } }
+);
 UserSchema.index({ name: "text", email: "text", department: "text", employeeCode: "text" });
 
 export const UserModel = mongoose.models.User || mongoose.model<IUser>("User", UserSchema);
