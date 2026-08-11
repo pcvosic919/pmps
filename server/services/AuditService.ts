@@ -2,7 +2,6 @@ import { createHash } from "node:crypto";
 import type { UserSession } from "../_core/trpc";
 import { AuditEventModel, type AuditOutcome, type AuditSource } from "../models/AuditEvent";
 
-const DEMO_AUDIT_EMAIL = "demo@demo.com";
 const MAX_STRING_LENGTH = 200;
 const REDACTED = "[REDACTED]";
 const blockedKeyPattern = /(password|token|secret|authorization|cookie|content|buffer|filedata|accesskey)/i;
@@ -31,6 +30,8 @@ const targetIdKeys = [
     "id"
 ];
 
+const normalizeEmail = (value?: string | null) => (value || "").trim().toLowerCase();
+
 export type AuditRequestContext = {
     requestId?: string;
     sessionId?: string;
@@ -53,11 +54,10 @@ export type AuditEventInput = {
     metadata?: Record<string, unknown>;
 };
 
-const normalizeEmail = (value?: string | null) => (value || "").trim().toLowerCase();
 const truncate = (value: string, length = MAX_STRING_LENGTH) => value.slice(0, length);
 
-export const canViewAudit = (user?: { email?: string } | null) =>
-    normalizeEmail(user?.email) === DEMO_AUDIT_EMAIL;
+export const canViewAudit = (user?: { isPlatformOwner?: boolean } | null) =>
+    user?.isPlatformOwner === true;
 
 export const hashAuditIp = (value?: string) => {
     if (!value) return undefined;

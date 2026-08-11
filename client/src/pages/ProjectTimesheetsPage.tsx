@@ -12,7 +12,7 @@ const summarizeWbsDescription = (value?: string, maxLength = 48) => {
 export function ProjectTimesheetsPage() {
     const utils = trpc.useContext();
     const { user } = useCurrentUser();
-    const canDelete = user?.email?.trim().toLowerCase() === "demo@demo.com";
+    const canDelete = user?.isPlatformOwner === true;
     const [isSubmitting, setIsSubmitting] = useState(false);
 
     // Form state

@@ -20,6 +20,10 @@ type AuthUser = {
     role: Role;
     permissionOverrides: PermissionOverrides;
     isActive: boolean;
+    isPlatformOwner: boolean;
+    provider: "manual" | "entra";
+    passwordConfigured: boolean;
+    passwordChangedAt: string | Date | undefined;
 };
 
 type AuthContextValue = {

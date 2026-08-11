@@ -1878,7 +1878,7 @@ export const opportunitiesRouter = router({
         .input(z.object({ id: z.string() }))
         .mutation(async ({ ctx, input }) => {
             if (!canDeleteRecord(ctx.user)) {
-                throw new TRPCError({ code: "FORBIDDEN", message: "只有 Demo@demo.com 可以刪除資料" });
+                throw new TRPCError({ code: "FORBIDDEN", message: "只有平台擁有者可以刪除資料" });
             }
             const ts = assertFound(await TimesheetModel.findById(input.id).lean(), "找不到該協銷工時");
             await assertSettlementUnlocked(getMonthKey(new Date(ts.workDate)), "presales");
@@ -1971,7 +1971,7 @@ export const opportunitiesRouter = router({
         .input(z.object({ id: z.string() }))
         .mutation(async ({ input, ctx }) => {
             if (!canDeleteRecord(ctx.user)) {
-                throw new TRPCError({ code: "FORBIDDEN", message: "只有 Demo@demo.com 可以刪除資料" });
+                throw new TRPCError({ code: "FORBIDDEN", message: "只有平台擁有者可以刪除資料" });
             }
             const opp = await OpportunityModel.findById(input.id).select("status");
             assertFound(opp, "找不到該商機");

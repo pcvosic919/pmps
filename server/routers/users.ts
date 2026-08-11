@@ -111,7 +111,7 @@ export const usersRouter = router({
             }
 
             const items = await UserModel.find(query)
-                .select("name email department managedDepartments title role permissionOverrides isActive provider costRate createdAt lastLoginAt")
+                .select("name email department managedDepartments title role permissionOverrides isActive isPlatformOwner provider costRate createdAt lastLoginAt passwordChangedAt")
                 .sort({ [sortBy]: direction })
                 .limit(limit + 1)
                 .lean();
@@ -131,6 +131,7 @@ export const usersRouter = router({
                     role: u.role,
                     permissionOverrides: (u as any).permissionOverrides || { allow: [], deny: [] },
                     isActive: u.isActive,
+                    isPlatformOwner: (u as any).isPlatformOwner === true,
                     provider: u.provider,
                     costRate: (u as any).costRate,
                     lastLoginAt: (u as any).lastLoginAt
@@ -354,7 +355,7 @@ export const usersRouter = router({
     clearAllEntraUsers: roleProcedure(["admin"])
         .mutation(async ({ ctx }) => {
             if (!canDeleteRecord(ctx.user)) {
-                throw new TRPCError({ code: "FORBIDDEN", message: "只有 Demo@demo.com 可以刪除資料" });
+                throw new TRPCError({ code: "FORBIDDEN", message: "只有平台擁有者可以刪除資料" });
             }
             const settings = await getEntraSettings();
             assertEntraSyncConfigured(settings);
@@ -374,6 +375,10 @@ export const usersRouter = router({
             role: z.enum(roles).optional()
         }))
         .mutation(async ({ input }) => {
+            const protectedOwner = await UserModel.exists({ _id: { $in: input.userIds }, isPlatformOwner: true });
+            if (protectedOwner) {
+                throw new TRPCError({ code: "FORBIDDEN", message: "平台擁有者的角色不可透過批次操作修改" });
+            }
             const { userIds, ...data } = input;
             if (Object.keys(data).length === 0) return { success: true };
             await UserModel.updateMany(
@@ -393,10 +398,13 @@ export const usersRouter = router({
         .input(z.object({ id: z.string() }))
         .mutation(async ({ input, ctx }) => {
             if (!canDeleteRecord(ctx.user)) {
-                throw new TRPCError({ code: "FORBIDDEN", message: "只有 Demo@demo.com 可以刪除資料" });
+                throw new TRPCError({ code: "FORBIDDEN", message: "只有平台擁有者可以刪除資料" });
             }
             const user = await UserModel.findById(input.id);
             if (!user) throw new TRPCError({ code: "NOT_FOUND" });
+            if (user.isPlatformOwner) {
+                throw new TRPCError({ code: "FORBIDDEN", message: "平台擁有者帳號不可刪除" });
+            }
             if (user.provider !== "manual") {
                 throw new TRPCError({ code: "BAD_REQUEST", message: "Only manual accounts can be deleted" });
             }
@@ -502,8 +510,18 @@ export const usersRouter = router({
             }).optional(),
             isActive: z.boolean().optional()
         }))
-        .mutation(async ({ input }) => {
+        .mutation(async ({ input, ctx }) => {
             const { id, ...data } = input;
+            const target = await UserModel.findById(id).select("isPlatformOwner").lean();
+            if (!target) throw new TRPCError({ code: "NOT_FOUND" });
+            if ((target as any).isPlatformOwner) {
+                if (!ctx.user.isPlatformOwner || ctx.user.id !== id) {
+                    throw new TRPCError({ code: "FORBIDDEN", message: "平台擁有者帳號不可由其他帳號修改" });
+                }
+                if (data.role !== undefined || data.permissionOverrides !== undefined || data.isActive !== undefined) {
+                    throw new TRPCError({ code: "FORBIDDEN", message: "平台擁有者的角色、權限與啟用狀態不可從一般帳號管理修改" });
+                }
+            }
             await UserModel.updateOne({ _id: id }, { $set: { ...data }, $unset: { roles: 1 } });
             return { success: true };
         }),

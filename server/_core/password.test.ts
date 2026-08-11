@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it } from "vitest";
-import { hashPassword, isPasswordHash, verifyPassword } from "./password";
+import { getPasswordStrengthIssues, hashPassword, isPasswordHash, verifyPassword } from "./password";
 import {
     getJwtSecret,
     signNotificationStreamToken,
@@ -25,6 +25,12 @@ describe("password helpers", () => {
         await expect(verifyPassword("password123", "password123")).resolves.toBe(true);
         await expect(verifyPassword("password123", "password124")).resolves.toBe(false);
     });
+
+    it("requires a strong new password that does not contain the account identity", () => {
+        expect(getPasswordStrengthIssues("short", [])).not.toHaveLength(0);
+        expect(getPasswordStrengthIssues("Adminpmp@2026!", ["adminpmp"])).toContain("密碼不可包含帳號或姓名");
+        expect(getPasswordStrengthIssues("Safe-Change#2026", ["adminpmp", "Platform Owner"])).toEqual([]);
+    });
 });
 
 describe("token helpers", () => {
@@ -37,7 +43,7 @@ describe("token helpers", () => {
         });
         const streamToken = signNotificationStreamToken("user-1");
 
-        expect(verifySessionToken(sessionToken)).toMatchObject({ sub: "user-1", email: "demo@example.com" });
+        expect(verifySessionToken(sessionToken)).toMatchObject({ sub: "user-1", email: "demo@example.com", sessionVersion: 0 });
         expect(verifyNotificationStreamToken(streamToken)).toMatchObject({ sub: "user-1" });
         expect(() => verifyNotificationStreamToken(sessionToken)).toThrow();
         expect(() => verifySessionToken(streamToken)).toThrow();

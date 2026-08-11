@@ -64,7 +64,7 @@ const srTypeForServiceType = (value?: string): "project" | "maintenance" | "othe
 
 export function ServiceRequestsPage() {
     const { user, hasPermission } = useCurrentUser();
-    const canDelete = user?.email?.trim().toLowerCase() === "demo@demo.com";
+    const canDelete = user?.isPlatformOwner === true;
     const { data: srs, isLoading, refetch } = trpc.projects.srList.useQuery();
     const { data: users } = trpc.users.list.useQuery({ limit: 500 });
 

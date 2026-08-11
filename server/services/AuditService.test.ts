@@ -12,9 +12,9 @@ describe("AuditService", () => {
         vi.unstubAllEnvs();
     });
 
-    it("only grants Audit viewer access to demo@demo.com", () => {
-        expect(canViewAudit({ email: " DEMO@demo.com " })).toBe(true);
-        expect(canViewAudit({ email: "admin@example.com" })).toBe(false);
+    it("only grants Audit viewer access to the platform owner", () => {
+        expect(canViewAudit({ isPlatformOwner: true })).toBe(true);
+        expect(canViewAudit({ isPlatformOwner: false })).toBe(false);
         expect(canViewAudit(null)).toBe(false);
     });
 

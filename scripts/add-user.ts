@@ -6,12 +6,15 @@ import { hashPassword } from "../server/_core/password";
 dotenv.config();
 
 async function run() {
+    const email = process.env.ADMIN_EMAIL?.trim().toLowerCase();
+    const password = process.env.ADMIN_PASSWORD;
+    if (!email || !password) {
+        throw new Error("ADMIN_EMAIL and ADMIN_PASSWORD are required.");
+    }
+
     try {
         console.log("Connecting to database...");
         await connectDB();
-        
-        const email = "admin@demo.com";
-        const password = "password123";
         const role = "admin";
         
         console.log(`Hashing password for ${email}...`);

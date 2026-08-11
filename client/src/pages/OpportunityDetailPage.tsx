@@ -74,7 +74,7 @@ export function OpportunityDetailPage() {
 
     const { user } = useCurrentUser();
     const hasRole = (role: string) => user?.role === role;
-    const canDelete = user?.email?.trim().toLowerCase() === "demo@demo.com";
+    const canDelete = user?.isPlatformOwner === true;
 
     // ------ Modal states ------
     const [showAssignModal, setShowAssignModal] = useState(false);

@@ -409,7 +409,7 @@ user       → 一般用戶
 - `logProjectTime` — 記錄專案工時
 - `createCr` / `crList` / `reviewCr` — 變更請求
 - `uploadSrAttachment` / `srAttachmentsList` — 專案附件
-- `delete` — 刪除 SR（後端仍為 admin procedure；前端限制 `demo@demo.com` 可刪除）
+- `delete` — 刪除 SR（僅 Platform Owner 可執行高風險刪除）
 
 ### `users` — 用戶管理
 - `list` — 分頁查詢用戶
@@ -535,7 +535,7 @@ Authorization: Bearer <pmp_auth_token>
 - **Demo 快速登入**：測試/開發環境可直接選擇預設角色，一鍵取得 JWT；需先執行 `pnpm seed:demo` 建立 Demo 帳號。
 
 ### Demo 帳號
-- `demo@demo.com`
+- `adminpmp@demo.com`（Platform Owner，既有密碼雜湊由遷移工具保留）
 - `demo_admin@demo.com`
 - `demo_manager@demo.com`
 - `demo_business@demo.com`
@@ -544,7 +544,7 @@ Authorization: Bearer <pmp_auth_token>
 - `demo_tech@demo.com`
 - `demo_presales2@demo.com`
 
-> 預設 Demo 密碼：`password123`
+> Demo 密碼不寫入前端或版本庫。執行 `seed:demo` 前請透過 `DEMO_PASSWORD` 環境變數提供；既有 Platform Owner 遷移則保留原密碼雜湊。
 
 > ⚠️ `DEMO_LOGIN_ENABLED` 建議只在測試環境開啟；正式環境請關閉。
 > ⚠️ 若缺少 `JWT_SECRET`，登入 API 會拒絕簽發 Token，前端將只顯示通用錯誤訊息，不會直接暴露內部環境變數名稱。

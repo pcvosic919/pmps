@@ -92,7 +92,7 @@ export function OpportunitiesPage() {
     const companies = companiesData?.items || [];
     const oppFields = customFieldDefs?.filter((f: any) => f.entityType === "opportunity") || [];
     const { user, hasRole } = useCurrentUser();
-    const canDelete = user?.email?.trim().toLowerCase() === "demo@demo.com";
+    const canDelete = user?.isPlatformOwner === true;
     const canImport = ["admin", "manager", "business", "presales"].some(hasRole);
     const utils = trpc.useUtils();
 

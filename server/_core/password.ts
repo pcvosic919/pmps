@@ -41,3 +41,20 @@ export async function verifyPassword(password: string, storedPassword?: string |
     const derivedKey = await scrypt(password, parsed.salt, parsed.hash.length) as Buffer;
     return timingSafeEqual(derivedKey, parsed.hash);
 }
+
+export const getPasswordStrengthIssues = (password: string, identityValues: string[] = []) => {
+    const issues: string[] = [];
+    if (password.length < 12) issues.push("密碼至少需要 12 個字元");
+    if (!/[a-z]/.test(password)) issues.push("密碼需要包含英文小寫字母");
+    if (!/[A-Z]/.test(password)) issues.push("密碼需要包含英文大寫字母");
+    if (!/\d/.test(password)) issues.push("密碼需要包含數字");
+    if (!/[^A-Za-z0-9]/.test(password)) issues.push("密碼需要包含特殊符號");
+    const normalizedPassword = password.toLowerCase();
+    if (identityValues.some((value) => {
+        const normalized = value.trim().toLowerCase();
+        return normalized.length >= 4 && normalizedPassword.includes(normalized);
+    })) {
+        issues.push("密碼不可包含帳號或姓名");
+    }
+    return issues;
+};

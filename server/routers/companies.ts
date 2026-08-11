@@ -166,7 +166,7 @@ export const companiesRouter = router({
         .input(z.object({ id: z.string() }))
         .mutation(async ({ input, ctx }) => {
             if (!canDeleteRecord(ctx.user)) {
-                throw new TRPCError({ code: "FORBIDDEN", message: "只有 Demo@demo.com 可以刪除資料" });
+                throw new TRPCError({ code: "FORBIDDEN", message: "只有平台擁有者可以刪除資料" });
             }
             await CompanyModel.findByIdAndDelete(input.id);
             return { success: true };

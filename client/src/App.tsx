@@ -1,4 +1,4 @@
-import { Suspense, lazy, useEffect, useRef, useState, type ComponentType, type ReactNode } from "react";
+import { Suspense, lazy, useEffect, useMemo, useRef, useState, type ComponentType, type ReactNode } from "react";
 import { MutationCache, QueryCache, QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { httpBatchLink } from "@trpc/client";
 import { trpc } from "./lib/trpc";
@@ -46,6 +46,8 @@ const ProjectManagementPage = lazy(() => import("./pages/ProjectManagementPage")
 const ProfitCenterFormulaPage = lazy(() => import("./pages/ProfitCenterFormulaPage"));
 const ProfitCenterReportPage = ReportBuilderPage;
 const AuditPage = lazy(() => import("./pages/AuditPage").then((module) => ({ default: module.AuditPage })));
+const PlatformControlPage = lazy(() => import("./pages/PlatformControlPage").then((module) => ({ default: module.PlatformControlPage })));
+const AccountSecurityPage = lazy(() => import("./pages/AccountSecurityPage").then((module) => ({ default: module.AccountSecurityPage })));
 
 type ActiveRouteDefinition = {
   path: string;
@@ -165,9 +167,41 @@ function ChangeRequestsRoute() {
 function AuditRoute() {
   const { user, isLoading } = useCurrentUser();
   if (isLoading) return <AppLoadingFallback />;
-  return user?.email?.trim().toLowerCase() === "demo@demo.com"
+  return user?.isPlatformOwner
     ? <AuditPage />
-    : <RestrictedPage message="只有 demo@demo.com 可以查看 Audit 使用者互動紀錄。" />;
+    : <RestrictedPage message="只有平台擁有者可以查看 Audit 使用者互動紀錄。" />;
+}
+
+function PlatformControlRoute() {
+  const { user, isLoading } = useCurrentUser();
+  if (isLoading) return <AppLoadingFallback />;
+  return user?.isPlatformOwner
+    ? <PlatformControlPage />
+    : <RestrictedPage message="只有平台擁有者可以使用平台控制中心。" />;
+}
+
+function SystemSettingsRoute() {
+  const { user, isLoading } = useCurrentUser();
+  if (isLoading) return <AppLoadingFallback />;
+  return user?.isPlatformOwner
+    ? <SystemSettingsPage />
+    : <RestrictedPage message="只有平台擁有者可以修改系統設定。" />;
+}
+
+function CustomFieldsRoute() {
+  const { user, isLoading } = useCurrentUser();
+  if (isLoading) return <AppLoadingFallback />;
+  return user?.isPlatformOwner
+    ? <CustomFieldsPage />
+    : <RestrictedPage message="只有平台擁有者可以修改欄位定義。" />;
+}
+
+function ProfitCenterFormulaRoute() {
+  const { user, isLoading } = useCurrentUser();
+  if (isLoading) return <AppLoadingFallback />;
+  return user?.isPlatformOwner
+    ? <ProfitCenterFormulaPage />
+    : <RestrictedPage message="只有平台擁有者可以修改平台公式。" />;
 }
 
 const activeRoutes: ActiveRouteDefinition[] = [
@@ -179,8 +213,8 @@ const activeRoutes: ActiveRouteDefinition[] = [
   { path: "/utilization", component: UtilizationPage, pageFile: "UtilizationPage.tsx", lifecycle: "保留 / 上線", notes: "稼動率看板。" },
   { path: "/settlements", component: SettlementsPage, pageFile: "RecognitionCenterPage.tsx", lifecycle: "保留 / 上線", notes: "協銷與專案認列結算中心。" },
   { path: "/notifications", component: NotificationsPage, pageFile: "NotificationsPage.tsx", lifecycle: "保留 / 上線", notes: "通知中心。" },
-  { path: "/system-settings", component: SystemSettingsPage, pageFile: "SystemSettingsPage.tsx", lifecycle: "保留 / 上線", notes: "系統設定。" },
-  { path: "/custom-fields", component: CustomFieldsPage, pageFile: "CustomFieldsPage.tsx", lifecycle: "保留 / 上線", notes: "自訂欄位管理。" },
+  { path: "/system-settings", component: SystemSettingsRoute, pageFile: "SystemSettingsPage.tsx", lifecycle: "保留 / 上線", notes: "Platform Owner 系統設定。" },
+  { path: "/custom-fields", component: CustomFieldsRoute, pageFile: "CustomFieldsPage.tsx", lifecycle: "保留 / 上線", notes: "Platform Owner 自訂欄位管理。" },
   { path: "/companies", component: CompanyManagementPage, pageFile: "CompanyManagementPage.tsx", lifecycle: "保留 / 上線", notes: "公司主檔管理與商機客戶選擇來源。" },
   { path: "/opportunities", component: OpportunitiesRoute, pageFile: "OpportunitiesPage.tsx", lifecycle: "保留 / 上線", notes: "商機清單。" },
   { path: "/opportunities/:id", component: OpportunityDetailRoute, pageFile: "OpportunityDetailPage.tsx", lifecycle: "保留 / 上線", notes: "商機詳情。" },
@@ -194,9 +228,11 @@ const activeRoutes: ActiveRouteDefinition[] = [
   { path: "/project-timesheets", component: ProjectTimesheetsRoute, pageFile: "ProjectTimesheetsPage.tsx", lifecycle: "保留 / 上線", notes: "專案工時填報。" },
   { path: "/kpi", component: KpiDashboardPage, pageFile: "KpiDashboardPage.tsx", lifecycle: "保留 / 上線", notes: "KPI 儀表板。" },
   { path: "/reports", component: ReportBuilderPage, pageFile: "ReportCenterPage.tsx", lifecycle: "保留 / 上線", notes: "整併後的報表中心與匯出。" },
-  { path: "/formula/profit-center", component: ProfitCenterFormulaPage, pageFile: "ProfitCenterFormulaPage.tsx", lifecycle: "保留 / 上線", notes: "利潤中心公式專用頁面。" },
+  { path: "/formula/profit-center", component: ProfitCenterFormulaRoute, pageFile: "ProfitCenterFormulaPage.tsx", lifecycle: "保留 / 上線", notes: "Platform Owner 利潤中心公式專用頁面。" },
   { path: "/profit-center-report", component: ProfitCenterReportPage, pageFile: "ReportCenterPage.tsx", lifecycle: "保留 / 上線", notes: "舊利潤中心報表入口相容導向報表中心。" },
-  { path: "/audit", component: AuditRoute, pageFile: "AuditPage.tsx", lifecycle: "保留 / 上線", notes: "demo@demo.com 專用使用者互動稽核中心" },
+  { path: "/audit", component: AuditRoute, pageFile: "AuditPage.tsx", lifecycle: "保留 / 上線", notes: "Platform Owner 專用使用者互動稽核中心" },
+  { path: "/platform-control", component: PlatformControlRoute, pageFile: "PlatformControlPage.tsx", lifecycle: "保留 / 上線", notes: "Platform Owner 專用文字、參數與版面控制中心" },
+  { path: "/account-security", component: AccountSecurityPage, pageFile: "AccountSecurityPage.tsx", lifecycle: "保留 / 上線", notes: "使用者修改本人密碼與查看密碼狀態" },
 ];
 
 // `client/src/App.tsx` is the source of truth for routed pages; README and navigation
@@ -228,29 +264,27 @@ function RuntimeMsalProvider({ children }: { children: ReactNode }) {
     },
   });
 
-  // Create the MSAL instance only once, after entraConfig has loaded.
-  // Using useRef ensures we never recreate the instance (which would discard
-  // any in-flight redirect auth code from Microsoft).
-  const instanceRef = useRef<ReturnType<typeof createMsalInstance> | null>(null);
-
   useEffect(() => {
     if (!data?.clientId || !data?.tenantId) return;
     localStorage.setItem(ENTRA_CONFIG_CACHE_KEY, JSON.stringify(data));
   }, [data]);
 
-  if (!instanceRef.current && !isLoading) {
-    instanceRef.current = createMsalInstance({
+  // Keep the MSAL instance stable while the effective Entra configuration is unchanged.
+  // Primitive dependencies prevent background query refreshes from discarding redirect state.
+  const instance = useMemo(() => {
+    if (isLoading) return null;
+    return createMsalInstance({
       clientId: data?.clientId,
       tenantId: data?.tenantId,
     });
-  }
+  }, [data?.clientId, data?.tenantId, isLoading]);
 
-  if (!instanceRef.current) {
+  if (!instance) {
     // Still waiting for entraConfig before we can build the MSAL instance
     return <div className="flex min-h-screen items-center justify-center text-muted-foreground">系統初始化中...</div>;
   }
 
-  return <MsalProvider instance={instanceRef.current}>{children}</MsalProvider>;
+  return <MsalProvider instance={instance}>{children}</MsalProvider>;
 }
 
 function createAppQueryClient(onUnauthorized: () => void) {
