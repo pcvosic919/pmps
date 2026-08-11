@@ -76,6 +76,7 @@ const getDefaultPresalesRate = async () => {
 const syncProjectCandidates = async (month: string) => {
     const { start, endExclusive } = getMonthRangeTaipei(month);
     const projects = await ServiceRequestModel.find({
+        isQuoteWorkspace: { $ne: true },
         status: { $in: ["closed", "completed"] },
         $or: [
             { closedAt: { $gte: start, $lt: endExclusive } },

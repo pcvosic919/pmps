@@ -153,4 +153,28 @@ describe("project authorization policy", () => {
         await expect(canViewProjectFinancials(grantedTech, project)).resolves.toBe(true);
         await expect(canEditProjectFinancials(grantedTech, project)).resolves.toBe(false);
     });
+
+    it("lets the responsible Business user prepare WBS only during quote setup", async () => {
+        const business = makeUser("business");
+        const opportunity = { salesUserId: userId };
+
+        await expect(canEditProjectWbs(business, {
+            isQuoteWorkspace: true,
+            createdById: userId,
+            status: "new",
+            conversionMode: "confirmed_quote",
+        }, opportunity)).resolves.toBe(true);
+        await expect(canEditProjectWbs(business, {
+            isQuoteWorkspace: false,
+            createdById: userId,
+            status: "new",
+            conversionMode: "confirmed_quote",
+        }, opportunity)).resolves.toBe(true);
+        await expect(canEditProjectWbs(business, {
+            isQuoteWorkspace: false,
+            createdById: userId,
+            status: "in_progress",
+            conversionMode: "confirmed_quote",
+        }, opportunity)).resolves.toBe(false);
+    });
 });

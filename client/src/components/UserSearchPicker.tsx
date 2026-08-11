@@ -29,6 +29,7 @@ type UserSearchPickerProps = {
     onClear?: () => void;
     filterUser?: (user: PickerUser) => boolean;
     assignmentContext?: AssignmentContext;
+    allowIneligibleUserIds?: string[];
 };
 
 const buildUserLabel = (user?: PickerUser, fallback = "") => {
@@ -97,7 +98,8 @@ export function UserSearchPicker({
     onSelect,
     onClear,
     filterUser,
-    assignmentContext
+    assignmentContext,
+    allowIneligibleUserIds = []
 }: UserSearchPickerProps) {
     const [searchTerm, setSearchTerm] = useState("");
     const [isOpen, setIsOpen] = useState(false);
@@ -136,8 +138,12 @@ export function UserSearchPicker({
     }, [assignmentData?.items, searchedUsersData?.items, users]);
 
     const activeUsers = useMemo(
-        () => mergedUsers.filter((user) => user.isActive !== false && user.eligible !== false && (!filterUser || filterUser(user))),
-        [filterUser, mergedUsers]
+        () => mergedUsers.filter((user) => {
+            return user.isActive !== false
+                && (user.eligible !== false || allowIneligibleUserIds.includes(user.id))
+                && (!filterUser || filterUser(user));
+        }),
+        [allowIneligibleUserIds, filterUser, mergedUsers]
     );
     const selectedUserFromList = mergedUsers.find((user) => user.id === selectedUserId);
     const selectedUser = selectedUserFromList ||

@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { OpportunityQuoteModel } from "../models/OpportunityQuote";
+import { ServiceRequestModel } from "../models/ServiceRequest";
 import { buildOpportunityProjectMembers } from "./OpportunityConversionService";
 
 describe("OpportunityConversionService", () => {
@@ -27,5 +28,11 @@ describe("OpportunityConversionService", () => {
             && (options.partialFilterExpression as any)?.status === "accepted"
         );
         expect(acceptedIndex).toBeDefined();
+    });
+
+    it("stores the quote date and identifies quote preparation workspaces", () => {
+        expect(OpportunityQuoteModel.schema.path("quoteDate")).toBeDefined();
+        expect(ServiceRequestModel.schema.path("isQuoteWorkspace")).toBeDefined();
+        expect((ServiceRequestModel.schema.path("isQuoteWorkspace") as any).defaultValue).toBe(false);
     });
 });

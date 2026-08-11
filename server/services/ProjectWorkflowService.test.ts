@@ -14,6 +14,7 @@ describe("ProjectWorkflowService", () => {
         expect(canTransitionProjectStatus("in_progress", "pending_acceptance")).toBe(true);
         expect(canTransitionProjectStatus("pending_acceptance", "closed")).toBe(true);
         expect(canTransitionProjectStatus("closed", "in_progress")).toBe(false);
+        expect(canTransitionProjectStatus("cancelled", "pending_acceptance")).toBe(false);
     });
 
     it("requires reasons for hold, close and cancellation", () => {

@@ -22,6 +22,7 @@ export interface IOpportunityQuote extends Document {
     ownerEmailSnapshot?: string;
     ownerDepartmentCodeSnapshot?: string;
     ownerDepartmentNameSnapshot?: string;
+    quoteDate?: Date;
     validFrom?: Date;
     validUntil?: Date;
     expectedCloseDate?: Date;
@@ -60,6 +61,7 @@ const OpportunityQuoteSchema = new Schema<IOpportunityQuote>({
     ownerEmailSnapshot: { type: String },
     ownerDepartmentCodeSnapshot: { type: String },
     ownerDepartmentNameSnapshot: { type: String },
+    quoteDate: { type: Date },
     validFrom: { type: Date },
     validUntil: { type: Date },
     expectedCloseDate: { type: Date },

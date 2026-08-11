@@ -1,9 +1,9 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useRoute, Link } from "wouter";
 import { trpc } from "../lib/trpc";
 import {
     Building2, Calendar, ChevronLeft, Users, Briefcase, Clock,
-    Plus, X, Check, UserPlus, Trash2, FileText, ChevronDown, Upload, Paperclip
+    Plus, X, Check, UserPlus, Trash2, FileText, ChevronDown, Upload, Paperclip, Download
 } from "lucide-react";
 import { useCurrentUser } from "../lib/useCurrentUser";
 import { SharePointFilesSection } from "../components/SharePointFilesSection";
@@ -11,6 +11,7 @@ import { BusinessUserPicker } from "../components/BusinessUserPicker";
 import { UserSearchPicker } from "../components/UserSearchPicker";
 import { fileToBase64 } from "../lib/files";
 import toast from "react-hot-toast";
+import { exportRowsToXlsx, formatExportDate, makeXlsxFileName } from "../lib/exportXlsx";
 
 
 const OPP_STATUSES = [
@@ -42,30 +43,150 @@ type OpportunityProbabilityValue = typeof OPPORTUNITY_PROBABILITY_OPTIONS[number
 const QUOTE_STATUS_LABELS: Record<string, string> = {
     draft: "草稿",
     submitted: "已送出",
-    accepted: "客戶已確認",
+    accepted: "費用已核可",
     void: "已作廢"
 };
 
 const HISTORY_ACTION_LABELS: Record<string, string> = {
     opportunity_created: "建立商機",
+    opportunity_imported: "匯入建立商機",
+    opportunity_import_updated: "匯入更新商機",
     opportunity_status_changed: "變更商機狀態",
+    opportunity_status_overridden: "Platform Owner 強制調整商機狀態",
     opportunity_owner_transferred: "移轉 Owner",
     opportunity_member_added: "新增商機成員",
     opportunity_member_removed: "移除商機成員",
     opportunity_member_role_changed: "調整成員角色",
     opportunity_sales_owner_updated: "調整業務歸屬",
-    opportunity_estimated_amount_updated: "調整預估金額",
+    opportunity_estimated_amount_updated: "調整客戶預算",
+    presales_pricing_updated: "調整協銷計價",
+    presales_assigned: "新增協銷指派",
+    presales_timesheet_deleted: "刪除協銷工時",
     opportunity_probability_updated: "調整商機成功率",
+    opportunity_type_updated: "調整商機類型",
     opportunity_description_updated: "更新商機說明",
     opportunity_custom_fields_updated: "更新自訂欄位",
     opportunity_attachment_uploaded: "上傳附件",
+    products_updated: "更新產品分類",
+    product_approval_reviewed: "審核產品分類",
     presales_time_logged: "填寫協銷工時",
     quote_version_created: "建立報價版本",
+    quote_submitted: "送出報價",
+    quote_voided: "作廢報價",
     quote_adopted: "確認客戶接受報價（相容紀錄）",
-    quote_customer_accepted: "確認客戶接受報價",
-    accepted_quote_replaced: "更換客戶確認報價",
-    opportunity_converted: "商機轉專案"
+    quote_customer_accepted: "核可報價費用",
+    accepted_quote_replaced: "更換核可報價",
+    opportunity_converted: "商機轉專案",
+    project_created_from_exception: "例外成立待建專案",
+    project_created_from_confirmed_quote: "由核可報價建立待建專案",
+    project_source_quote_updated: "更新專案來源報價",
+    quote_workspace_created: "建立報價 WBS 工作區",
+    quote_workspace_promoted_to_project: "報價工作區轉為待建專案",
+    wbs_draft_saved: "儲存 WBS 草稿",
+    wbs_draft_discarded: "放棄 WBS 草稿",
+    wbs_version_submitted: "送出 WBS 審核",
+    wbs_version_reviewed: "審核 WBS",
+    project_attachment_uploaded: "上傳 WBS／專案附件",
+    project_attachment_deleted: "刪除 WBS／專案附件",
+    quote_generated_from_wbs: "由 WBS 產生報價單"
 };
+
+type OpportunityTab = "details" | "timesheets" | "history";
+
+const HISTORY_FIELD_LABELS: Record<string, string> = {
+    title: "商機名稱",
+    customerName: "客戶名稱",
+    status: "狀態",
+    probability: "商機成功率",
+    probabilityNote: "成功率備註",
+    estimatedValue: "客戶預算",
+    presalesAmount: "協銷金額",
+    quotedAmount: "報價金額",
+    finalDealAmount: "最終成交金額",
+    amount: "報價金額",
+    quoteCode: "報價代號",
+    quoteDate: "報價日期",
+    presalesHourlyRate: "協銷費用／時薪",
+    totalHours: "累計協銷時數",
+    hours: "本次工時",
+    estimatedHours: "預估時數",
+    workDate: "工作日期",
+    description: "說明",
+    salesRep: "業務",
+    salesDepartment: "業務部門",
+    opportunityType: "商機類型",
+    productNames: "產品分類",
+    memberRole: "成員角色",
+    fileName: "檔案",
+    productName: "產品",
+    acceptedAt: "費用核可日期",
+    submittedAt: "送出時間",
+    version: "版本",
+    revision: "草稿修訂版",
+    itemCount: "WBS 工項數",
+    itemSummary: "WBS 工項內容"
+};
+
+const HISTORY_MONEY_FIELDS = new Set([
+    "estimatedValue", "presalesAmount", "quotedAmount", "finalDealAmount", "amount", "presalesHourlyRate"
+]);
+const HISTORY_DATE_FIELDS = new Set(["quoteDate", "workDate", "acceptedAt", "submittedAt", "closedAt", "cancelledAt"]);
+const HISTORY_HIDDEN_FIELDS = new Set([
+    "quoteId", "projectId", "ownerId", "salesUserId", "techId", "userId", "adoptedQuoteId", "sourceQuoteId",
+    "previousQuoteId", "platformOwnerOverride", "isQuoteWorkspace", "timesheetId"
+]);
+
+const HISTORY_STATUS_LABELS: Record<string, string> = {
+    ...Object.fromEntries(OPP_STATUSES.map((item) => [item.value, item.label])),
+    draft: "草稿",
+    submitted: "已送出",
+    accepted: "費用已核可",
+    void: "已作廢",
+    voided: "已作廢",
+    in_progress: "進行中",
+    on_hold: "暫停",
+    pending_acceptance: "待驗收",
+    closed: "已結案",
+    completed: "已完成",
+    approved: "已核准",
+    rejected: "已退回"
+};
+
+const formatHistoryValue = (field: string, value: unknown) => {
+    if (value === undefined || value === null || value === "") return "未設定";
+    if (field === "status") return HISTORY_STATUS_LABELS[String(value)] || String(value);
+    if (field === "probability") return `${Number(value)}%`;
+    if (field === "hours" || field === "estimatedHours" || field === "totalHours") return `${Number(value).toLocaleString()} 小時`;
+    if (HISTORY_MONEY_FIELDS.has(field)) return `NT$ ${Number(value).toLocaleString()}`;
+    if (HISTORY_DATE_FIELDS.has(field)) {
+        const date = new Date(value as string | Date);
+        return Number.isNaN(date.getTime()) ? String(value) : date.toLocaleString("zh-TW", { hour12: false });
+    }
+    if (typeof value === "boolean") return value ? "是" : "否";
+    if (Array.isArray(value)) return value.map((item) => typeof item === "object" ? JSON.stringify(item) : String(item)).join("、") || "無";
+    if (typeof value === "object") return JSON.stringify(value);
+    return String(value);
+};
+
+const buildHistoryDetails = (event: any) => {
+    const before = event.before && typeof event.before === "object" ? event.before as Record<string, unknown> : {};
+    const after = event.after && typeof event.after === "object" ? event.after as Record<string, unknown> : {};
+    return Object.keys(after)
+        .filter((field) => !HISTORY_HIDDEN_FIELDS.has(field))
+        .filter((field) => JSON.stringify(before[field]) !== JSON.stringify(after[field]) || !(field in before))
+        .map((field) => {
+            const label = HISTORY_FIELD_LABELS[field] || field;
+            const nextValue = formatHistoryValue(field, after[field]);
+            return field in before
+                ? `${label}：${formatHistoryValue(field, before[field])} → ${nextValue}`
+                : `${label}：${nextValue}`;
+        });
+};
+
+const formatHistoryDateTime = (value: string | Date) =>
+    new Date(value).toLocaleString("zh-TW", {
+        year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", hour12: false
+    });
 
 
 export function OpportunityDetailPage() {
@@ -75,6 +196,7 @@ export function OpportunityDetailPage() {
     const { user } = useCurrentUser();
     const hasRole = (role: string) => user?.role === role;
     const canDelete = user?.isPlatformOwner === true;
+    const [activeTab, setActiveTab] = useState<OpportunityTab>("details");
 
     // ------ Modal states ------
     const [showAssignModal, setShowAssignModal] = useState(false);
@@ -114,6 +236,9 @@ export function OpportunityDetailPage() {
     const [showEditEstimatedValueModal, setShowEditEstimatedValueModal] = useState(false);
     const [editedEstimatedValue, setEditedEstimatedValue] = useState("");
     const [estimatedValueError, setEstimatedValueError] = useState("");
+    const [showPresalesPricingModal, setShowPresalesPricingModal] = useState(false);
+    const [editedPresalesHourlyRate, setEditedPresalesHourlyRate] = useState("1000");
+    const [presalesPricingError, setPresalesPricingError] = useState("");
     const [showEditProbabilityModal, setShowEditProbabilityModal] = useState(false);
     const [editedProbability, setEditedProbability] = useState<OpportunityProbabilityValue>(0);
     const [editedProbabilityNote, setEditedProbabilityNote] = useState("");
@@ -129,6 +254,7 @@ export function OpportunityDetailPage() {
     const [quoteAmount, setQuoteAmount] = useState("");
     const [quoteDescription, setQuoteDescription] = useState("");
     const [quoteProducts, setQuoteProducts] = useState("");
+    const [quoteDate, setQuoteDate] = useState(new Date().toISOString().slice(0, 10));
     const [quoteExpectedCloseDate, setQuoteExpectedCloseDate] = useState("");
     const [quoteTaxIncluded, setQuoteTaxIncluded] = useState(false);
     const [quoteError, setQuoteError] = useState("");
@@ -150,33 +276,40 @@ export function OpportunityDetailPage() {
         { enabled: !!id }
     );
     const { data: historyEvents, refetch: refetchHistory, isFetching: isFetchingHistory } = trpc.opportunities.getBusinessHistory.useQuery(
-        { opportunityId: id, limit: 100 },
+        { opportunityId: id, limit: 2000 },
         { enabled: !!id }
     );
 
     const oppFields = customFieldDefs?.filter((f: any) => f.entityType === "opportunity") || [];
+
+    useEffect(() => {
+        if (!opp || window.location.hash !== "#quote-section") return;
+        const timer = window.setTimeout(() => document.getElementById("quote-section")?.scrollIntoView({ behavior: "smooth", block: "start" }), 100);
+        return () => window.clearTimeout(timer);
+    }, [opp]);
+
     const getFieldValue = (fieldId: string) => {
         return (opp as any)?.customFields?.find((cf: any) => cf.fieldId === fieldId)?.value || "未填寫";
     };
 
     // ------ Mutations ------
     const assignMutation = trpc.opportunities.assignPresales.useMutation({
-        onSuccess: () => { refetchAssignments(); refetchOpp(); setShowAssignModal(false); setAssignTechId(""); setAssignHours("8"); setAssignHourlyRate("1000"); setAssignError(""); },
+        onSuccess: () => { refetchAssignments(); refetchOpp(); refetchHistory(); setShowAssignModal(false); setAssignTechId(""); setAssignHours("8"); setAssignHourlyRate("1000"); setAssignError(""); },
         onError: (err) => setAssignError(err.message || "指派失敗")
     });
 
     const logTimeMutation = trpc.opportunities.logPresalesTime.useMutation({
-        onSuccess: () => { refetchTimesheets(); setShowTimesheetModal(false); setTsDate(new Date().toISOString().slice(0, 10)); setTsHours("4"); setTsDesc(""); setTsError(""); },
+        onSuccess: () => { refetchTimesheets(); refetchOpp(); refetchHistory(); setShowTimesheetModal(false); setTsDate(new Date().toISOString().slice(0, 10)); setTsHours("4"); setTsDesc(""); setTsError(""); },
         onError: (err) => setTsError(err.message || "回報失敗")
     });
 
     const addMemberMutation = trpc.opportunities.addMember.useMutation({
-        onSuccess: () => { refetchMembers(); setShowMemberModal(false); setMemberUserId(""); setMemberRole("watcher"); setMemberError(""); },
+        onSuccess: () => { refetchMembers(); refetchHistory(); setShowMemberModal(false); setMemberUserId(""); setMemberRole("watcher"); setMemberError(""); },
         onError: (err) => setMemberError(err.message || "新增失敗")
     });
 
     const removeMemberMutation = trpc.opportunities.removeMember.useMutation({
-        onSuccess: () => refetchMembers(),
+        onSuccess: () => { refetchMembers(); refetchHistory(); },
     });
 
     const deleteOpportunityMutation = trpc.opportunities.delete.useMutation({
@@ -187,7 +320,7 @@ export function OpportunityDetailPage() {
     });
 
     const updateStatusMutation = trpc.opportunities.updateStatus.useMutation({
-        onSuccess: () => { refetchOpp(); setShowStatusDropdown(false); }
+        onSuccess: () => { refetchOpp(); refetchHistory(); setShowStatusDropdown(false); }
     });
 
     const updateCustomFieldsMutation = trpc.opportunities.updateCustomFields.useMutation({
@@ -206,10 +339,21 @@ export function OpportunityDetailPage() {
     const updateEstimatedValueMutation = trpc.opportunities.updateEstimatedValue.useMutation({
         onSuccess: () => {
             refetchOpp();
+            refetchHistory();
             setShowEditEstimatedValueModal(false);
             setEstimatedValueError("");
         },
-        onError: (err) => setEstimatedValueError(err.message || "更新商機金額失敗")
+        onError: (err) => setEstimatedValueError(err.message || "更新客戶預算失敗")
+    });
+
+    const updatePresalesPricingMutation = trpc.opportunities.updatePresalesPricing.useMutation({
+        onSuccess: async () => {
+            await Promise.all([refetchOpp(), refetchHistory()]);
+            setShowPresalesPricingModal(false);
+            setPresalesPricingError("");
+            toast.success("協銷金額已依累計工時重新計算");
+        },
+        onError: (error) => setPresalesPricingError(error.message || "更新協銷計價失敗")
     });
 
     const updateProbabilityMutation = trpc.opportunities.updateProbability.useMutation({
@@ -255,14 +399,16 @@ export function OpportunityDetailPage() {
         setQuoteAmount("");
         setQuoteDescription("");
         setQuoteProducts("");
+        setQuoteDate(new Date().toISOString().slice(0, 10));
         setQuoteExpectedCloseDate("");
         setQuoteTaxIncluded(false);
         setQuoteError("");
     };
     const createQuoteMutation = trpc.opportunities.createQuoteVersion.useMutation({
-        onSuccess: async () => {
+        onSuccess: async (data) => {
             await Promise.all([refetchQuotes(), refetchOpp()]);
             resetQuoteForm();
+            window.location.href = `/service-requests/${data.workspaceId}`;
         },
         onError: (error) => setQuoteError(error.message || "建立報價版本失敗")
     });
@@ -277,7 +423,7 @@ export function OpportunityDetailPage() {
             setQuoteAcceptanceNote("");
             setQuoteReplacementReason("");
             setQuoteConfirmationError("");
-            toast.success(data.quoteReplaced ? "已更新待建專案的確認報價" : "客戶確認完成，已產生待建專案");
+            toast.success(data.quoteReplaced ? "已更新待建專案的核可報價" : "報價費用已核可，報價工作區已轉為待建專案");
         },
         onError: (error) => setQuoteConfirmationError(error.message || "確認報價失敗")
     });
@@ -415,6 +561,8 @@ export function OpportunityDetailPage() {
     const canConfirmQuotes = !["lost", "cancelled"].includes(opp.status)
         && canChangeQuoteDuringSetup
         && (hasRole("admin") || hasRole("manager") || isOpportunityOwner || isSalesUser);
+    const canEditPresalesPricing = !isTerminal
+        && (hasRole("admin") || hasRole("manager") || hasRole("presales") || isBusinessOwner || isSalesUser);
     const acceptedQuote = (quotes || []).find((quote: any) => quote.status === "accepted");
     const latestDraftQuote = (quotes || []).find((quote: any) =>
         quote.status === "draft" && (!acceptedQuote || quote.version > acceptedQuote.version)
@@ -432,9 +580,43 @@ export function OpportunityDetailPage() {
     const canEditProbability = canEditSalesOwner && !isTerminal;
     const canEditOpportunityMembers = hasRole("admin") || hasRole("manager") || hasRole("presales") || user?.id === opp.ownerId;
     const canReportTime = hasRole("admin") || hasRole("manager") || hasRole("pm") || hasRole("presales") || hasRole("tech");
+    const memberUserIds = new Set<string>((members || []).map((member: any) => String(member.userId)));
+    const presalesPickerUsers = Array.from(new Map<string, any>([
+        ...((presalesList || []).map((item: any) => [item.id, item] as const)),
+        ...((members || []).map((member: any) => [member.userId, {
+            id: member.userId,
+            name: member.userName,
+            email: member.userEmail,
+            department: member.userDepartment,
+            role: member.userRole,
+            isActive: member.isActive,
+            eligible: member.isActive !== false
+        }] as const)),
+        ...((allUsers?.items || [])
+            .filter((item: any) => memberUserIds.has(item.id))
+            .map((item: any) => [item.id, item] as const))
+    ] as Array<[string, any]>).values());
+    const totalLoggedPresalesHours = (timesheets || []).reduce((sum: number, item: any) => sum + Number(item.hours || 0), 0);
+
+    const exportHistory = () => {
+        const rows = (historyEvents || []).map((event: any) => ({
+            "紀錄時間": formatHistoryDateTime(event.occurredAt),
+            "操作項目": HISTORY_ACTION_LABELS[event.action] || event.action,
+            "修改內容": buildHistoryDetails(event).join("；") || "已完成操作",
+            "操作者": event.actorName || "系統",
+            "角色": event.actorRole || event.source || "",
+            "原因／備註": event.reason || ""
+        }));
+        exportRowsToXlsx(
+            rows,
+            makeXlsxFileName((opp as any).opportunityCode || opp.title, "操作歷程", formatExportDate()),
+            "商機操作歷程"
+        );
+        toast.success(`已匯出 ${rows.length.toLocaleString()} 筆操作歷程`);
+    };
 
     const getTechName = (techId: string) => {
-        const found = presalesList?.find((u: any) => u.id === techId);
+        const found = presalesPickerUsers.find((u: any) => u.id === techId);
         return found ? found.name : `#${techId}`;
     };
 
@@ -472,6 +654,30 @@ export function OpportunityDetailPage() {
                 </Link>
                 <h1 className="text-2xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-primary to-primary/60">商機詳情</h1>
             </div>
+
+            <div className="flex flex-wrap gap-2 rounded-xl border border-border/50 bg-card p-2 shadow-sm" role="tablist" aria-label="商機頁籤">
+                {([
+                    { value: "details", label: "商機詳情", icon: Briefcase },
+                    { value: "timesheets", label: "協銷工時紀錄", icon: Clock },
+                    { value: "history", label: "操作歷程", icon: FileText }
+                ] as const).map((tab) => {
+                    const Icon = tab.icon;
+                    return (
+                        <button
+                            key={tab.value}
+                            type="button"
+                            role="tab"
+                            aria-selected={activeTab === tab.value}
+                            onClick={() => setActiveTab(tab.value)}
+                            className={`inline-flex items-center gap-2 rounded-lg px-4 py-2 text-sm font-semibold transition-colors ${activeTab === tab.value ? "bg-primary text-primary-foreground shadow-sm" : "text-muted-foreground hover:bg-muted hover:text-foreground"}`}
+                        >
+                            <Icon className="h-4 w-4" />{tab.label}
+                        </button>
+                    );
+                })}
+            </div>
+
+            {activeTab === "details" && <>
 
             {/* 商機狀態流向圖 (Stepper) */}
             <div className="bg-card border border-border/50 rounded-xl p-5 shadow-sm flex items-center justify-between relative overflow-hidden">
@@ -539,6 +745,7 @@ export function OpportunityDetailPage() {
             {isTerminal && (
                 <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm font-medium text-amber-900">
                     此商機目前為「{currentStatus.label}」，基本資料已鎖定為唯讀。
+                    {user?.isPlatformOwner ? " Platform Owner 可先強制調整狀態後再修改，操作必須填寫原因並保留歷程。" : ""}
                     {project?.status === "new" ? " 待建期間仍可建立並確認新版報價；專案啟用後請改走 CR。" : ""}
                 </div>
             )}
@@ -554,23 +761,29 @@ export function OpportunityDetailPage() {
                                 {!hasRole("business") ? (
                                     <>
                                         <button
-                                            onClick={() => !isTerminal && setShowStatusDropdown(!showStatusDropdown)}
-                                            disabled={isTerminal}
+                                            onClick={() => (!isTerminal || user?.isPlatformOwner) && setShowStatusDropdown(!showStatusDropdown)}
+                                            disabled={isTerminal && !user?.isPlatformOwner}
                                             className={`px-3 py-1 rounded-full text-xs font-semibold border flex items-center gap-1 hover:opacity-80 transition-opacity ${currentStatus.color}`}
+                                            title={isTerminal && user?.isPlatformOwner ? "Platform Owner 可強制調整終止狀態" : undefined}
                                         >
                                             {currentStatus.label}
                                             <ChevronDown className="w-3 h-3" />
                                         </button>
-                                        {showStatusDropdown && !isTerminal && (
+                                        {showStatusDropdown && (!isTerminal || user?.isPlatformOwner) && (
                                             <div className="absolute top-full mt-1 left-0 bg-card border border-border rounded-lg shadow-lg z-10 min-w-[140px] py-1">
                                                 {OPP_STATUSES.filter(s => s.value !== opp.status && !["quoting", "won", "converted"].includes(s.value)).map(s => (
                                                     <button
                                                         key={s.value}
                                                         onClick={() => {
-                                                            const reason = s.value === "cancelled"
-                                                                ? window.prompt("請輸入取消原因")?.trim()
+                                                            const isPlatformOwnerOverride = isTerminal && user?.isPlatformOwner === true;
+                                                            const reason = s.value === "cancelled" || isPlatformOwnerOverride
+                                                                ? window.prompt(
+                                                                    isPlatformOwnerOverride
+                                                                        ? `Platform Owner 強制將「${currentStatus.label}」改為「${s.label}」，請輸入調整原因`
+                                                                        : "請輸入取消原因"
+                                                                )?.trim()
                                                                 : undefined;
-                                                            if (s.value === "cancelled" && !reason) return;
+                                                            if ((s.value === "cancelled" || isPlatformOwnerOverride) && !reason) return;
                                                             updateStatusMutation.mutate({ id, status: s.value, reason });
                                                         }}
                                                         className={`w-full text-left px-3 py-1.5 text-xs font-medium hover:bg-muted transition-colors ${s.color.replace('border-', '')} rounded-none first:rounded-t-md last:rounded-b-md`}
@@ -599,7 +812,7 @@ export function OpportunityDetailPage() {
                             </button>
                         ) : latestSubmittedQuote && canConfirmQuotes ? (
                             <button type="button" onClick={() => openQuoteConfirmation(latestSubmittedQuote.id)} className="flex items-center gap-2 px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 text-sm font-medium shadow-sm">
-                                <Check className="w-4 h-4" />確認客戶接受
+                                <Check className="w-4 h-4" />核可報價費用
                             </button>
                         ) : project ? (
                             <button
@@ -661,8 +874,8 @@ export function OpportunityDetailPage() {
                     </div>
                     <div className="space-y-1">
                         <div className="flex items-center justify-between gap-3">
-                            <span className="text-sm text-muted-foreground">預估金額</span>
-                            {(isBusinessOwner || hasRole("admin") || hasRole("manager") || hasRole("presales")) && !isTerminal && (
+                            <span className="text-sm text-muted-foreground">客戶預算</span>
+                            {(isBusinessOwner || isSalesUser || hasRole("admin") || hasRole("manager") || hasRole("presales")) && !isTerminal && (
                                 <button
                                     onClick={() => {
                                         setEditedEstimatedValue(opp.estimatedValue.toString());
@@ -678,8 +891,22 @@ export function OpportunityDetailPage() {
                         <p className="font-semibold text-lg text-primary">NT$ {opp.estimatedValue.toLocaleString()}</p>
                     </div>
                     <div className="space-y-1">
-                        <span className="text-sm text-muted-foreground">協銷金額</span>
+                        <div className="flex items-center justify-between gap-3">
+                            <span className="text-sm text-muted-foreground">協銷金額</span>
+                            {canEditPresalesPricing && (
+                                <button
+                                    type="button"
+                                    onClick={() => {
+                                        setEditedPresalesHourlyRate(String((opp as any).presalesHourlyRate ?? 1000));
+                                        setPresalesPricingError("");
+                                        setShowPresalesPricingModal(true);
+                                    }}
+                                    className="text-xs font-medium text-primary hover:text-primary/80"
+                                >編輯</button>
+                            )}
+                        </div>
                         <p className="font-semibold">NT$ {Number((opp as any).presalesAmount || 0).toLocaleString()}</p>
+                        <p className="text-xs text-muted-foreground">{totalLoggedPresalesHours.toLocaleString()} 小時 × NT$ {Number((opp as any).presalesHourlyRate ?? 1000).toLocaleString()}</p>
                     </div>
                     <div className="space-y-1">
                         <span className="text-sm text-muted-foreground">目前報價金額</span>
@@ -866,6 +1093,10 @@ export function OpportunityDetailPage() {
                             <input type="number" min="0" value={quoteAmount} onChange={(event) => setQuoteAmount(event.target.value)} className="w-full rounded-lg border bg-background px-3 py-2" />
                         </label>
                         <label className="space-y-1 text-sm">
+                            <span className="font-medium">報價日期 *</span>
+                            <input type="date" value={quoteDate} onChange={(event) => setQuoteDate(event.target.value)} className="w-full rounded-lg border bg-background px-3 py-2" />
+                        </label>
+                        <label className="space-y-1 text-sm">
                             <span className="font-medium">產品（以逗號分隔）</span>
                             <input value={quoteProducts} onChange={(event) => setQuoteProducts(event.target.value)} className="w-full rounded-lg border bg-background px-3 py-2" />
                         </label>
@@ -890,6 +1121,7 @@ export function OpportunityDetailPage() {
                                     const amount = Number(quoteAmount);
                                     if (!quoteName.trim()) return setQuoteError("請輸入報價名稱");
                                     if (!Number.isFinite(amount) || amount < 0) return setQuoteError("請輸入有效的報價金額");
+                                    if (!quoteDate) return setQuoteError("請選擇報價日期");
                                     createQuoteMutation.mutate({
                                         opportunityId: id,
                                         name: quoteName.trim(),
@@ -898,6 +1130,7 @@ export function OpportunityDetailPage() {
                                         amount,
                                         currency: "TWD",
                                         taxIncluded: quoteTaxIncluded,
+                                        quoteDate: new Date(`${quoteDate}T00:00:00+08:00`),
                                         expectedCloseDate: quoteExpectedCloseDate ? new Date(`${quoteExpectedCloseDate}T00:00:00+08:00`) : undefined
                                     });
                                 }}
@@ -923,10 +1156,11 @@ export function OpportunityDetailPage() {
                                 <p className="mt-1 font-semibold">V{quote.version} · {quote.name}</p>
                                 <p className="mt-1 text-xs text-muted-foreground">
                                     {quote.currency} {Number(quote.amount || 0).toLocaleString()} · {quote.taxIncluded ? "含稅" : "未稅"}
+                                    {quote.quoteDate ? ` · 報價日 ${new Date(quote.quoteDate).toLocaleDateString()}` : ""}
                                     {quote.expectedCloseDate ? ` · 預計成交 ${new Date(quote.expectedCloseDate).toLocaleDateString()}` : ""}
                                 </p>
                                 {quote.status === "accepted" && quote.acceptedAt && (
-                                    <p className="mt-1 text-xs text-green-700">客戶確認日：{new Date(quote.acceptedAt).toLocaleDateString()}{quote.acceptanceNote ? ` · ${quote.acceptanceNote}` : ""}</p>
+                                    <p className="mt-1 text-xs text-green-700">費用核可日：{new Date(quote.acceptedAt).toLocaleDateString()}{quote.acceptanceNote ? ` · ${quote.acceptanceNote}` : ""}</p>
                                 )}
                             </div>
                             {quote.status !== "void" && (canManageQuotes || canConfirmQuotes) && (
@@ -935,7 +1169,7 @@ export function OpportunityDetailPage() {
                                         <button type="button" onClick={() => submitQuoteMutation.mutate({ quoteId: quote.id })} className="rounded-lg border px-3 py-1.5 text-xs hover:bg-muted">送出</button>
                                     )}
                                     {canConfirmQuotes && quote.status === "submitted" && (
-                                        <button type="button" onClick={() => openQuoteConfirmation(quote.id)} className="rounded-lg bg-green-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-green-700">確認客戶接受</button>
+                                        <button type="button" onClick={() => openQuoteConfirmation(quote.id)} className="rounded-lg bg-green-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-green-700">核可報價費用</button>
                                     )}
                                     {canManageQuotes && ["draft", "submitted"].includes(quote.status) && (
                                         <button
@@ -955,36 +1189,48 @@ export function OpportunityDetailPage() {
                 </div>
             </div>
 
-            <details className="rounded-xl border border-border/50 bg-card shadow-sm">
-                <summary className="cursor-pointer list-none p-4">
+            </>}
+
+            {activeTab === "history" && <section className="rounded-xl border border-border/50 bg-card shadow-sm">
+                <div className="p-4">
                     <div className="flex items-center justify-between gap-3">
                         <div>
                             <h3 className="font-bold flex items-center"><Clock className="mr-2 h-5 w-5 text-primary" />商機操作歷程</h3>
-                            <p className="mt-1 text-xs text-muted-foreground">永久保存重要商務異動；安全 Audit 仍獨立記錄登入、拒絕與匯出事件。</p>
+                            <p className="mt-1 text-xs text-muted-foreground">依時間條列所有新增與異動，包含商機、報價、成員、協銷指派與工時。</p>
                         </div>
-                        <button
-                            type="button"
-                            onClick={(event) => { event.preventDefault(); void refetchHistory(); }}
-                            className="rounded-lg border px-3 py-1.5 text-xs hover:bg-muted"
-                        >{isFetchingHistory ? "更新中..." : "重新整理"}</button>
+                        <div className="flex items-center gap-2">
+                            <button type="button" onClick={() => void refetchHistory()} className="rounded-lg border px-3 py-1.5 text-xs hover:bg-muted">
+                                {isFetchingHistory ? "更新中..." : "重新整理"}
+                            </button>
+                            <button type="button" onClick={exportHistory} disabled={!historyEvents?.length} className="inline-flex items-center gap-1 rounded-lg bg-primary px-3 py-1.5 text-xs font-semibold text-primary-foreground disabled:opacity-50">
+                                <Download className="h-3.5 w-3.5" />匯出 Excel
+                            </button>
+                        </div>
                     </div>
-                </summary>
-                <div className="divide-y divide-border/50 border-t border-border/50">
-                    {(historyEvents || []).map((event: any) => (
-                        <div key={event.id} className="grid gap-1 p-4 text-sm md:grid-cols-[180px_1fr_auto] md:items-center">
-                            <span className="text-xs text-muted-foreground">{new Date(event.occurredAt).toLocaleString()}</span>
-                            <div>
-                                <p className="font-medium">{HISTORY_ACTION_LABELS[event.action] || event.action}</p>
-                                {event.reason && <p className="mt-1 text-xs text-muted-foreground">原因：{event.reason}</p>}
-                            </div>
-                            <span className="text-xs text-muted-foreground">{event.actorRole || event.source}</span>
-                        </div>
-                    ))}
-                    {(!historyEvents || historyEvents.length === 0) && <div className="p-6 text-center text-sm text-muted-foreground">尚無操作歷程</div>}
                 </div>
-            </details>
+                <ol className="divide-y divide-border/50 border-t border-border/50">
+                    {(historyEvents || []).map((event: any) => (
+                        <li key={event.id} className="relative grid gap-2 p-4 pl-10 text-sm md:grid-cols-[170px_1fr_auto] md:items-start">
+                            <span className="absolute left-4 top-5 h-2.5 w-2.5 rounded-full bg-primary ring-4 ring-primary/10" />
+                            <time className="text-xs font-medium text-muted-foreground">{formatHistoryDateTime(event.occurredAt)}</time>
+                            <div className="space-y-1">
+                                <p className="font-semibold">{HISTORY_ACTION_LABELS[event.action] || event.action}</p>
+                                {buildHistoryDetails(event).length > 0 && (
+                                    <ul className="list-disc space-y-0.5 pl-5 text-xs text-foreground/80">
+                                        {buildHistoryDetails(event).map((detail, index) => <li key={`${event.id}-${index}`}>{detail}</li>)}
+                                    </ul>
+                                )}
+                                {event.reason && <p className="text-xs text-muted-foreground">原因／備註：{event.reason}</p>}
+                            </div>
+                            <span className="text-xs text-muted-foreground">{event.actorName || "系統"}{event.actorRole ? `（${event.actorRole}）` : ""}</span>
+                        </li>
+                    ))}
+                    {(!historyEvents || historyEvents.length === 0) && <li className="p-6 text-center text-sm text-muted-foreground">尚無操作歷程</li>}
+                </ol>
+            </section>}
 
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                {activeTab === "details" && <>
                 {/* 協銷指派 */}
                 <div className="bg-card border border-border/50 rounded-xl shadow-sm overflow-hidden flex flex-col">
                     <div className="p-4 border-b border-border/50 bg-muted/30 flex justify-between items-center">
@@ -1008,7 +1254,7 @@ export function OpportunityDetailPage() {
                                         <div>
                                             <p className="font-medium text-sm">{getTechName(a.techId)}</p>
                                             <p className="text-xs text-muted-foreground">預估時數: {a.estimatedHours} 小時</p>
-                                            <p className="text-xs text-muted-foreground">系統金額: NT$ {(Number(a.estimatedHours || 0) * Number((opp as any).presalesHourlyRate ?? 1000)).toLocaleString()}</p>
+                                            <p className="text-xs text-muted-foreground">指派預估金額：NT$ {(Number(a.estimatedHours || 0) * Number((opp as any).presalesHourlyRate ?? 1000)).toLocaleString()}</p>
                                         </div>
                                     </div>
                                 ))}
@@ -1071,7 +1317,10 @@ export function OpportunityDetailPage() {
                         )}
                     </div>
                 </div>
+                </>}
 
+                {activeTab === "timesheets" && (
+                <>
                 {/* 協銷工時 */}
                 <div className="bg-card border border-border/50 rounded-xl shadow-sm overflow-hidden lg:col-span-2 flex flex-col">
                     <div className="p-4 border-b border-border/50 bg-muted/30 flex justify-between items-center">
@@ -1083,6 +1332,11 @@ export function OpportunityDetailPage() {
                                 <Plus className="w-3 h-3 mr-1" /> 回報工時
                             </button>
                         )}
+                    </div>
+                    <div className="grid grid-cols-1 gap-3 border-b border-border/50 p-4 sm:grid-cols-3">
+                        <div className="rounded-lg bg-muted/40 p-3"><span className="text-xs text-muted-foreground">累計協銷時數</span><strong className="mt-1 block text-lg">{totalLoggedPresalesHours.toLocaleString()} 小時</strong></div>
+                        <div className="rounded-lg bg-muted/40 p-3"><span className="text-xs text-muted-foreground">協銷費用／時薪</span><strong className="mt-1 block text-lg">NT$ {Number((opp as any).presalesHourlyRate ?? 1000).toLocaleString()}</strong></div>
+                        <div className="rounded-lg bg-primary/10 p-3 text-primary"><span className="text-xs">自動計算協銷金額</span><strong className="mt-1 block text-lg">NT$ {Number((opp as any).presalesAmount || 0).toLocaleString()}</strong></div>
                     </div>
                     <div className="p-4">
                         {timesheets && timesheets.length > 0 ? (
@@ -1125,9 +1379,11 @@ export function OpportunityDetailPage() {
                         )}
                     </div>
                 </div>
+                </>
+                )}
             </div>
 
-            <div className="grid grid-cols-1 lg:grid-cols-1 gap-6 mb-8">
+            {activeTab === "details" && <div className="grid grid-cols-1 lg:grid-cols-1 gap-6 mb-8">
                 <div className="bg-card border border-border/50 rounded-xl shadow-sm overflow-hidden p-6">
                     <div className="mb-5">
                         <h3 className="mb-3 flex items-center text-base font-semibold">
@@ -1191,7 +1447,7 @@ export function OpportunityDetailPage() {
                         />
                     )}
                 </div>
-            </div>
+            </div>}
 
             {/* ====== Modals ====== */}
             {/* 協銷指派 Modal */}
@@ -1206,14 +1462,15 @@ export function OpportunityDetailPage() {
 	                            <div>
 	                                <label className="block text-sm font-medium mb-1">選擇技術員 / 售前人員</label>
 	                                <UserSearchPicker
-	                                    users={presalesList || []}
+	                                    users={presalesPickerUsers}
 	                                    assignmentContext="presales"
+	                                    allowIneligibleUserIds={[...memberUserIds]}
 	                                    selectedUserId={assignTechId}
 	                                    placeholder="搜尋姓名或 Email..."
 	                                    onSelect={(selectedUser) => setAssignTechId(selectedUser.id)}
 	                                    onClear={() => setAssignTechId("")}
 	                                    filterUser={(pickerUser) => {
-	                                        return ["presales", "tech", "pm"].includes(pickerUser.role || "");
+	                                        return memberUserIds.has(pickerUser.id) || ["presales", "tech", "pm"].includes(pickerUser.role || "");
 	                                    }}
 	                                />
 	                            </div>
@@ -1334,17 +1591,17 @@ export function OpportunityDetailPage() {
                 </div>
             )}
 
-            {/* 編輯商機金額 Modal */}
+            {/* 編輯客戶預算 Modal */}
             {showEditEstimatedValueModal && (
                 <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4 backdrop-blur-sm">
                     <div className="max-h-[calc(100dvh-2rem)] w-full max-w-lg space-y-5 overflow-y-auto overscroll-contain rounded-xl border border-border bg-card p-6 shadow-xl">
                         <div className="flex justify-between items-center">
-                            <h2 className="text-lg font-bold">輸入商機金額</h2>
+                            <h2 className="text-lg font-bold">輸入客戶預算</h2>
                             <button onClick={() => setShowEditEstimatedValueModal(false)} className="p-1 rounded-full hover:bg-muted"><X className="w-5 h-5 text-muted-foreground" /></button>
                         </div>
                         <div className="space-y-4">
                             <div>
-                                <label className="block text-sm font-medium mb-1">商機金額</label>
+                                <label className="block text-sm font-medium mb-1">客戶預算</label>
                                 <input
                                     type="number"
                                     min="0"
@@ -1362,6 +1619,48 @@ export function OpportunityDetailPage() {
                                 className="px-4 py-2 text-sm bg-primary text-primary-foreground rounded-lg hover:bg-primary/90 disabled:opacity-50">
                                 {updateEstimatedValueMutation.isPending ? "儲存中..." : "儲存金額"}
                             </button>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {showPresalesPricingModal && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4 backdrop-blur-sm">
+                    <div className="w-full max-w-lg space-y-5 rounded-xl border border-border bg-card p-6 shadow-xl">
+                        <div className="flex items-center justify-between">
+                            <h2 className="text-lg font-bold">協銷金額計算設定</h2>
+                            <button onClick={() => setShowPresalesPricingModal(false)} className="rounded-full p-1 hover:bg-muted"><X className="h-5 w-5 text-muted-foreground" /></button>
+                        </div>
+                        <div className="space-y-4">
+                            <label className="block text-sm font-medium">協銷費用（每小時）
+                                <input
+                                    type="number"
+                                    min="0"
+                                    step="100"
+                                    value={editedPresalesHourlyRate}
+                                    onChange={(event) => setEditedPresalesHourlyRate(event.target.value)}
+                                    className="mt-1 w-full rounded-lg border border-border bg-background px-3 py-2 text-sm"
+                                />
+                            </label>
+                            <div className="grid grid-cols-2 gap-3 rounded-xl border border-blue-200 bg-blue-50 p-4 text-sm text-blue-900">
+                                <div><span className="text-xs">已填協銷時數</span><strong className="mt-1 block text-lg">{totalLoggedPresalesHours.toLocaleString()} 小時</strong></div>
+                                <div><span className="text-xs">自動計算協銷金額</span><strong className="mt-1 block text-lg">NT$ {(totalLoggedPresalesHours * Number(editedPresalesHourlyRate || 0)).toLocaleString()}</strong></div>
+                            </div>
+                            <p className="text-xs text-muted-foreground">協銷金額＝已填協銷時數 × 協銷費用。後續新增或刪除工時時會自動重新計算。</p>
+                            {presalesPricingError && <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-600">{presalesPricingError}</p>}
+                        </div>
+                        <div className="flex justify-end gap-3">
+                            <button onClick={() => setShowPresalesPricingModal(false)} className="rounded-lg border px-4 py-2 text-sm hover:bg-muted">取消</button>
+                            <button
+                                type="button"
+                                disabled={updatePresalesPricingMutation.isPending}
+                                onClick={() => {
+                                    const hourlyRate = Number(editedPresalesHourlyRate);
+                                    if (!Number.isFinite(hourlyRate) || hourlyRate < 0) return setPresalesPricingError("請輸入有效的協銷費用");
+                                    updatePresalesPricingMutation.mutate({ id, hourlyRate });
+                                }}
+                                className="rounded-lg bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground disabled:opacity-50"
+                            >{updatePresalesPricingMutation.isPending ? "計算中..." : "儲存並重新計算"}</button>
                         </div>
                     </div>
                 </div>
@@ -1488,7 +1787,7 @@ export function OpportunityDetailPage() {
                 <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4 backdrop-blur-sm">
                     <div className="max-h-[calc(100dvh-2rem)] w-full max-w-md space-y-5 overflow-y-auto overscroll-contain rounded-xl border border-border bg-card p-6 shadow-xl">
                         <div className="flex justify-between items-center">
-                            <h2 className="text-lg font-bold flex items-center"><Check className="w-5 h-5 mr-2 text-green-600" />確認客戶接受報價</h2>
+                            <h2 className="text-lg font-bold flex items-center"><Check className="w-5 h-5 mr-2 text-green-600" />核可報價費用</h2>
                             <button onClick={() => setConfirmingQuoteId("")} className="p-1 rounded-full hover:bg-muted"><X className="w-5 h-5 text-muted-foreground" /></button>
                         </div>
                         <div className="rounded-lg border border-green-200 bg-green-50 p-3 text-sm text-green-900">
@@ -1497,7 +1796,7 @@ export function OpportunityDetailPage() {
                         </div>
                         <p className="text-sm text-muted-foreground">確認後會自動產生或更新待建專案，並以本版本作為合約與最終金額依據。</p>
                         <div className="space-y-4">
-                            <label className="block text-sm font-medium">客戶確認日期
+                            <label className="block text-sm font-medium">費用核可日期
                                 <input type="date" value={quoteAcceptedAt} onChange={(event) => setQuoteAcceptedAt(event.target.value)} className="mt-1 w-full rounded-lg border bg-background px-3 py-2" />
                             </label>
                             <label className="block text-sm font-medium">確認備註
@@ -1514,7 +1813,7 @@ export function OpportunityDetailPage() {
                             <button onClick={() => setConfirmingQuoteId("")} className="px-4 py-2 text-sm border border-border rounded-lg hover:bg-muted">取消</button>
                             <button
                                 onClick={() => {
-                                    if (!quoteAcceptedAt) return setQuoteConfirmationError("請選擇客戶確認日期");
+                                    if (!quoteAcceptedAt) return setQuoteConfirmationError("請選擇費用核可日期");
                                     if (requiresReplacementReason && !quoteReplacementReason.trim()) return setQuoteConfirmationError("請填寫更換報價原因");
                                     confirmQuoteMutation.mutate({
                                         quoteId: confirmingQuoteId,

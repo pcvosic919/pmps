@@ -80,6 +80,7 @@ export interface IServiceRequest extends Document {
     sourceQuoteId?: mongoose.Types.ObjectId;
     sourceOpportunityCodeSnapshot?: string;
     sourceQuoteCodeSnapshot?: string;
+    isQuoteWorkspace?: boolean;
     conversionMode?: ProjectConversionMode;
     conversionExceptionReason?: string;
     conversionExceptionById?: mongoose.Types.ObjectId;
@@ -276,6 +277,7 @@ const ServiceRequestSchema = new Schema<IServiceRequest>({
     sourceQuoteId: { type: Schema.Types.ObjectId, ref: "OpportunityQuote" },
     sourceOpportunityCodeSnapshot: { type: String },
     sourceQuoteCodeSnapshot: { type: String },
+    isQuoteWorkspace: { type: Boolean, default: false },
     conversionMode: { type: String, enum: projectConversionModes },
     conversionExceptionReason: { type: String, trim: true },
     conversionExceptionById: { type: Schema.Types.ObjectId, ref: "User" },
@@ -376,6 +378,7 @@ ServiceRequestSchema.index(
     }
 );
 ServiceRequestSchema.index({ sourceQuoteId: 1 }, { sparse: true });
+ServiceRequestSchema.index({ isQuoteWorkspace: 1, createdAt: -1 });
 ServiceRequestSchema.index({ conversionMode: 1, createdAt: -1 });
 ServiceRequestSchema.index({ "members.userId": 1, createdAt: -1 });
 ServiceRequestSchema.index({ createdByDepartment: 1, createdAt: -1 });
