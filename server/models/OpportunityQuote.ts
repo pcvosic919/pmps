@@ -1,7 +1,9 @@
 import mongoose, { Document, Schema } from "mongoose";
 import {
     opportunityQuoteStatuses,
-    type OpportunityQuoteStatus
+    roles,
+    type OpportunityQuoteStatus,
+    type Role
 } from "../../shared/types";
 
 export interface IOpportunityQuote extends Document {
@@ -33,6 +35,9 @@ export interface IOpportunityQuote extends Document {
     }>;
     submittedAt?: Date;
     acceptedAt?: Date;
+    acceptedById?: mongoose.Types.ObjectId;
+    acceptedByRole?: Role;
+    acceptanceNote?: string;
     voidedAt?: Date;
     voidReason?: string;
     createdAt: Date;
@@ -68,12 +73,19 @@ const OpportunityQuoteSchema = new Schema<IOpportunityQuote>({
     }],
     submittedAt: { type: Date },
     acceptedAt: { type: Date },
+    acceptedById: { type: Schema.Types.ObjectId, ref: "User" },
+    acceptedByRole: { type: String, enum: roles },
+    acceptanceNote: { type: String, trim: true },
     voidedAt: { type: Date },
     voidReason: { type: String, trim: true }
 }, { timestamps: true });
 
 OpportunityQuoteSchema.index({ opportunityId: 1, version: 1 }, { unique: true });
 OpportunityQuoteSchema.index({ quoteCode: 1 }, { unique: true });
+OpportunityQuoteSchema.index(
+    { opportunityId: 1, status: 1 },
+    { unique: true, partialFilterExpression: { status: "accepted" } }
+);
 OpportunityQuoteSchema.index({ opportunityId: 1, status: 1, createdAt: -1 });
 
 export const OpportunityQuoteModel = mongoose.models.OpportunityQuote ||

@@ -48,7 +48,10 @@ export function ReportCenterPage() {
     const catalog = catalogQuery.data || [];
     const categories = Array.from(new Set(catalog.map((item: any) => item.category)));
     const selected = catalog.find((item: any) => item.reportType === reportType);
-    const rows = (reportQuery.data || []) as Record<string, unknown>[];
+    const rows = useMemo(
+        () => (reportQuery.data || []) as Record<string, unknown>[],
+        [reportQuery.data]
+    );
     const visibleCards = catalog.filter((item: any) => item.category === activeCategory);
 
     const summary = useMemo(() => {
@@ -96,7 +99,7 @@ export function ReportCenterPage() {
             <div className="flex flex-col gap-4 rounded-xl border bg-card p-5 shadow-sm xl:flex-row xl:items-center xl:justify-between">
                 <div>
                     <div className="flex items-center gap-2"><BarChart3 className="h-6 w-6 text-primary" /><h1 className="text-2xl font-bold">報表中心</h1></div>
-                    <p className="mt-1 text-sm text-muted-foreground">統一使用結案、認列、Pipeline 與工時資料來源，舊報表口徑已整併。</p>
+                    <p className="mt-1 text-sm text-muted-foreground">即時查詢 MongoDB 的結案、認列、Pipeline 與工時資料，舊報表口徑已整併。</p>
                 </div>
                 <button type="button" onClick={exportReport} disabled={rows.length === 0} className="rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground disabled:opacity-50"><Download className="mr-2 inline h-4 w-4" />匯出目前報表</button>
             </div>
@@ -116,12 +119,17 @@ export function ReportCenterPage() {
                     <div><label className="mb-1 flex items-center text-sm font-medium"><Calendar className="mr-1 h-4 w-4" />結束日期</label><input type="date" value={endDate} onChange={(event) => setEndDate(event.target.value)} className="w-full rounded-lg border bg-background px-3 py-2" /></div>
                     <div><label className="mb-1 block text-sm font-medium">業務部門</label><input value={department} onChange={(event) => setDepartment(event.target.value)} placeholder="留空使用權限範圍" className="w-full rounded-lg border bg-background px-3 py-2" /></div>
                     <div className="rounded-lg border border-sky-200 bg-sky-50 p-3 text-xs leading-5 text-sky-900"><ShieldCheck className="mr-1 inline h-4 w-4" />畫面與 Excel 使用相同資料權限。認列月份、結案月份與工時日期分開計算。</div>
+                    <div className="rounded-lg border bg-muted/30 p-3 text-xs leading-5 text-muted-foreground">
+                        <div>資料來源：MongoDB 即時查詢</div>
+                        <div>狀態：{reportQuery.isFetching ? "更新中" : reportQuery.isError ? "查詢失敗" : "已完成"}</div>
+                        {reportQuery.dataUpdatedAt > 0 && <div>更新時間：{new Date(reportQuery.dataUpdatedAt).toLocaleString()}</div>}
+                    </div>
                 </aside>
 
                 <section className="min-w-0 space-y-4">
                     <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">{summary.map(([label, value]) => <div key={String(label)} className="rounded-xl border bg-card p-4 shadow-sm"><div className="text-xs text-muted-foreground">{label}</div><div className="mt-1 text-xl font-bold">{value}</div></div>)}</div>
                     {chartData.length > 0 && <div className="h-[340px] rounded-xl border bg-card p-4 shadow-sm"><h2 className="mb-3 font-semibold">{reportType === "pipeline" ? "Pipeline 金額比較" : "人員 KPI 摘要"}</h2><ResponsiveContainer width="100%" height="90%"><BarChart data={chartData as any[]}><CartesianGrid strokeDasharray="3 3" vertical={false} /><XAxis dataKey="name" fontSize={11} /><YAxis fontSize={11} /><Tooltip /><Legend />{reportType === "pipeline" ? <><Bar dataKey="原始金額" fill="#94a3b8" /><Bar dataKey="加權金額" fill="#2563eb" /></> : <><Bar dataKey="業務認列" fill="#16a34a" /><Bar dataKey="協銷認列" fill="#0ea5e9" /><Bar dataKey="工時" fill="#f59e0b" /></>}</BarChart></ResponsiveContainer></div>}
-                    <div className="overflow-hidden rounded-xl border bg-card shadow-sm">{reportQuery.isLoading ? <div className="p-12 text-center text-muted-foreground">報表計算中…</div> : rows.length === 0 ? <div className="p-12 text-center text-muted-foreground">目前篩選條件沒有資料。</div> : <div className="overflow-x-auto"><table className="min-w-max w-full text-sm"><thead className="bg-muted/60 text-left text-xs text-muted-foreground"><tr>{Object.keys(rows[0]).map((key) => <th key={key} className="whitespace-nowrap px-3 py-3">{key}</th>)}</tr></thead><tbody>{rows.map((row, index) => <tr key={index} className="border-t hover:bg-muted/20">{Object.values(row).map((value, cell) => <td key={cell} className="max-w-[320px] whitespace-nowrap px-3 py-3">{value instanceof Date ? value.toLocaleDateString() : typeof value === "string" && /^\d{4}-\d{2}-\d{2}T/.test(value) ? new Date(value).toLocaleDateString() : String(value ?? "")}</td>)}</tr>)}</tbody></table></div>}</div>
+                    <div className="overflow-hidden rounded-xl border bg-card shadow-sm">{reportQuery.isLoading ? <div className="p-12 text-center text-muted-foreground">報表計算中…</div> : reportQuery.isError ? <div className="p-12 text-center text-red-600">資料庫查詢失敗：{reportQuery.error.message}</div> : rows.length === 0 ? <div className="p-12 text-center text-muted-foreground">資料庫查詢成功，但目前篩選條件沒有資料。</div> : <div className="overflow-x-auto"><table className="min-w-max w-full text-sm"><thead className="bg-muted/60 text-left text-xs text-muted-foreground"><tr>{Object.keys(rows[0]).map((key) => <th key={key} className="whitespace-nowrap px-3 py-3">{key}</th>)}</tr></thead><tbody>{rows.map((row, index) => <tr key={index} className="border-t hover:bg-muted/20">{Object.values(row).map((value, cell) => <td key={cell} className="max-w-[320px] whitespace-nowrap px-3 py-3">{value instanceof Date ? value.toLocaleDateString() : typeof value === "string" && /^\d{4}-\d{2}-\d{2}T/.test(value) ? new Date(value).toLocaleDateString() : String(value ?? "")}</td>)}</tr>)}</tbody></table></div>}</div>
                 </section>
             </div>
         </div>

@@ -44,13 +44,22 @@ import {
 } from "../_core/projectAuthorization";
 import { createNotification, createNotifications } from "../_core/notifications";
 import { getAccessibleOpportunityQuery, getDirectAccessibleOpportunityQuery } from "./opportunities.listing";
+import { canConfirmOpportunityQuote, canCreateOpportunityConversionException } from "./opportunity-workflow";
 import { toObjectId } from "../_core/cursor";
 import { ensureCompanyByName } from "../_core/companies";
 import { writeLocalAttachment } from "../_core/attachments";
-import { createProjectForOpportunityOnce, finalizeOpportunityConversion, findProjectByOpportunityId } from "../services/OpportunityConversionService";
+import {
+    buildOpportunityProjectMembers,
+    confirmQuoteAndCreateDraftProject,
+    createProjectForOpportunityOnce,
+    finalizeOpportunityConversion,
+    findProjectByOpportunityId
+} from "../services/OpportunityConversionService";
 import { listBusinessHistory, recordBusinessHistory } from "../services/BusinessHistoryService";
 import {
+    assertProjectReadyForActivation,
     assertProjectStatusTransition,
+    getProjectActivationIssues,
     isProjectLocked,
     projectStatusRequiresReason
 } from "../services/ProjectWorkflowService";
@@ -558,7 +567,8 @@ export const projectsRouter = router({
             warrantyExpiresAt: z.coerce.date().optional(),
             billingAllocation: z.string().trim().optional(),
             joinPmAsMember: z.boolean().default(true),
-            opportunityId: z.string().optional()
+            opportunityId: z.string().optional(),
+            conversionExceptionReason: z.string().trim().max(2000).optional()
         }))
         .mutation(async ({ input, ctx }) => {
             const existingOpportunityProject = input.opportunityId
@@ -571,6 +581,10 @@ export const projectsRouter = router({
             let sourceOpportunityCodeSnapshot = "";
             let sourceQuoteId: mongoose.Types.ObjectId | undefined;
             let sourceQuoteCodeSnapshot = "";
+            let opportunityOwnerId = "";
+            let opportunityPresalesAssignments: any[] = [];
+            let conversionMode: "direct" | "exception" = input.opportunityId ? "exception" : "direct";
+            let conversionExceptionAt: Date | undefined;
             if (input.opportunityId) {
                 const opportunity = assertFound(
                     await OpportunityModel.findById(input.opportunityId)
@@ -582,14 +596,9 @@ export const projectsRouter = router({
                 oppSalesUserId = opportunity.salesUserId;
                 oppSalesDepartment = opportunity.salesDepartment || "";
                 oppSalesRep = opportunity.salesRep || "";
+                opportunityOwnerId = opportunity.ownerId.toString();
+                opportunityPresalesAssignments = opportunity.presalesAssignments || [];
                 sourceOpportunityCodeSnapshot = opportunity.opportunityCode || "";
-                sourceQuoteId = opportunity.adoptedQuoteId;
-                if (sourceQuoteId) {
-                    const sourceQuote = await OpportunityQuoteModel.findById(sourceQuoteId)
-                        .select("quoteCode")
-                        .lean();
-                    sourceQuoteCodeSnapshot = sourceQuote?.quoteCode || "";
-                }
                 const isPresalesOnly = hasAnyRole(ctx.user, ["presales"]) && !hasAnyRole(ctx.user, ["admin", "manager", "pm"]);
                 const opportunityScope = await getAccessibleOpportunityQuery(ctx.user as any);
                 const isInOpportunityScope = hasAnyRole(ctx.user, ["admin"]) || !!await OpportunityModel.exists({
@@ -606,15 +615,42 @@ export const projectsRouter = router({
                     await finalizeOpportunityConversion(input.opportunityId, { id: ctx.user.id, role: ctx.user.role });
                     return { id: existingOpportunityProject._id.toString(), reused: true };
                 }
-                if (opportunity.status === "converted") {
-                    throw new TRPCError({ code: "BAD_REQUEST", message: "此商機已轉案，請勿重複建立 SR" });
-                }
                 if (opportunity.status === "lost") {
                     throw new TRPCError({ code: "BAD_REQUEST", message: "已失敗的商機不可建立 SR" });
                 }
                 if (opportunity.status === "cancelled") {
                     throw new TRPCError({ code: "BAD_REQUEST", message: "已取消的商機不可建立 SR" });
                 }
+
+                const acceptedQuote = opportunity.adoptedQuoteId
+                    ? await OpportunityQuoteModel.findOne({ _id: opportunity.adoptedQuoteId, status: "accepted" }).lean()
+                    : null;
+                if (acceptedQuote) {
+                    const canConfirm = canConfirmOpportunityQuote(ctx.user, opportunity);
+                    assertAuthorized(canConfirm, "您沒有權限完成此報價轉案");
+                    const confirmed = await confirmQuoteAndCreateDraftProject({
+                        quoteId: acceptedQuote._id.toString(),
+                        acceptedAt: acceptedQuote.acceptedAt || new Date(),
+                        acceptanceNote: acceptedQuote.acceptanceNote || "由相容專案建立入口完成待建專案"
+                    }, {
+                        id: ctx.user.id,
+                        role: ctx.user.role,
+                        name: ctx.user.name,
+                        email: ctx.user.email,
+                        department: ctx.user.department
+                    });
+                    return { id: confirmed.project._id.toString(), reused: !confirmed.created };
+                }
+                if (opportunity.status === "converted") {
+                    throw new TRPCError({ code: "BAD_REQUEST", message: "此商機已轉案，請勿重複建立 SR" });
+                }
+
+                const canCreateException = canCreateOpportunityConversionException(ctx.user, opportunity);
+                assertAuthorized(canCreateException, "只有 Admin、範圍內 Manager 或商機 Owner 可以例外轉案");
+                if (!input.conversionExceptionReason?.trim()) {
+                    throw new TRPCError({ code: "BAD_REQUEST", message: "沒有客戶確認報價時，例外轉案必須填寫原因" });
+                }
+                conversionExceptionAt = new Date();
             }
             const salesUserFields = await getSalesUserFields(input.salesUserId);
             const customerName = (input.customerName || oppCustomerName).trim();
@@ -654,8 +690,17 @@ export const projectsRouter = router({
                 sourceQuoteId,
                 sourceOpportunityCodeSnapshot,
                 sourceQuoteCodeSnapshot,
+                conversionMode,
+                conversionExceptionReason: input.opportunityId ? input.conversionExceptionReason?.trim() : undefined,
+                conversionExceptionById: input.opportunityId ? toObjectId(ctx.user.id) : undefined,
+                conversionExceptionAt,
                 status: "new",
-                members: buildSrMembers(ctx.user.id, input.pmId, input.joinPmAsMember)
+                members: input.opportunityId
+                    ? buildOpportunityProjectMembers(opportunityOwnerId, {
+                        pmId: input.joinPmAsMember ? input.pmId : undefined,
+                        presalesAssignments: opportunityPresalesAssignments
+                    })
+                    : buildSrMembers(ctx.user.id, input.pmId, input.joinPmAsMember)
             };
             const conversionResult = input.opportunityId
                 ? await createProjectForOpportunityOnce(input.opportunityId, projectAttributes)
@@ -677,10 +722,12 @@ export const projectsRouter = router({
                         opportunityId: sr.opportunityId,
                         sourceQuoteId: sr.sourceQuoteId,
                         sourceOpportunityCodeSnapshot: sr.sourceOpportunityCodeSnapshot,
-                        sourceQuoteCodeSnapshot: sr.sourceQuoteCodeSnapshot
+                        sourceQuoteCodeSnapshot: sr.sourceQuoteCodeSnapshot,
+                        conversionMode: sr.conversionMode
                     },
                     actorId: ctx.user.id,
                     actorRole: ctx.user.role,
+                    reason: input.opportunityId ? input.conversionExceptionReason : undefined,
                     source: "api"
                 });
             }
@@ -700,7 +747,12 @@ export const projectsRouter = router({
             }
 
             if (input.opportunityId) {
-                await finalizeOpportunityConversion(input.opportunityId, { id: ctx.user.id, role: ctx.user.role });
+                await finalizeOpportunityConversion(
+                    input.opportunityId,
+                    { id: ctx.user.id, role: ctx.user.role },
+                    conversionExceptionAt || new Date(),
+                    input.conversionExceptionReason?.trim()
+                );
             }
 
             if (input.pmId && conversionResult.created) {
@@ -872,6 +924,9 @@ export const projectsRouter = router({
             }
             try {
                 assertProjectStatusTransition(sr.status, input.status, input.reason);
+                if (sr.status === "new" && input.status === "in_progress") {
+                    assertProjectReadyForActivation(sr);
+                }
             } catch (error) {
                 throw new TRPCError({
                     code: "BAD_REQUEST",
@@ -1088,8 +1143,12 @@ export const projectsRouter = router({
                 reason: input.rejectionReason ?? null
             });
 
+            let activationIssues: string[] = [];
             if (version.status === "approved" && sr.status === "new") {
-                sr.status = "in_progress";
+                activationIssues = getProjectActivationIssues(sr);
+                if (activationIssues.length === 0) {
+                    sr.status = "in_progress";
+                }
             }
 
             sr.markModified("wbsVersions");
@@ -1119,7 +1178,7 @@ export const projectsRouter = router({
                 actionUrl: `/service-requests/${sr._id.toString()}`
             })));
 
-            return { success: true };
+            return { success: true, activationIssues };
         }),
 
     srAttachmentsList: protectedProcedure
@@ -2661,6 +2720,16 @@ export const projectsRouter = router({
                 wbsItem.status = nextStatus;
                 wbsItem.completionPercentage = getCompletionPercentageForStatus(nextStatus, wbsItem.completionPercentage || 0);
                 sr.markModified("wbsVersions");
+            }
+            if (sr.status === "new") {
+                try {
+                    assertProjectReadyForActivation(sr);
+                } catch (error) {
+                    throw new TRPCError({
+                        code: "BAD_REQUEST",
+                        message: error instanceof Error ? error.message : "專案資料尚未完整，無法開始填報工時"
+                    });
+                }
             }
             if (!["in_progress", "completed", "cancelled"].includes(sr.status)) {
                 sr.status = "in_progress";

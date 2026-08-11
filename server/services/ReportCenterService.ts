@@ -8,6 +8,28 @@ import { UserModel } from "../models/User";
 import { getManagedDepartments, hasAnyRole } from "../_core/authorization";
 import { toTaipeiMonth } from "./RecognitionService";
 
+const TAIPEI_OFFSET = "+08:00";
+
+const parseTaipeiReportDate = (value: string, endOfDay: boolean) => {
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) throw new Error("報表日期格式必須為 YYYY-MM-DD");
+    const date = new Date(`${value}T${endOfDay ? "23:59:59.999" : "00:00:00.000"}${TAIPEI_OFFSET}`);
+    const formatted = new Intl.DateTimeFormat("en-CA", {
+        timeZone: "Asia/Taipei",
+        year: "numeric",
+        month: "2-digit",
+        day: "2-digit"
+    }).format(date);
+    if (Number.isNaN(date.getTime()) || formatted !== value) throw new Error("報表日期不是有效日期");
+    return date;
+};
+
+export const getTaipeiReportDateRange = (startDate: string, endDate: string) => {
+    const start = parseTaipeiReportDate(startDate, false);
+    const end = parseTaipeiReportDate(endDate, true);
+    if (start > end) throw new Error("報表開始日期不可晚於結束日期");
+    return { start, end };
+};
+
 export const reportCenterTypes = [
     "presales_recognition",
     "project_recognition",
@@ -59,18 +81,20 @@ const getLatestApprovedWbs = (project: any) => [...(project.wbsVersions || [])]
     .filter((version: any) => version.status === "approved")
     .sort((left: any, right: any) => Number(right.versionNumber || 0) - Number(left.versionNumber || 0))[0];
 
-const getProjectMetrics = (project: any) => {
+const getProjectMetrics = (project: any, timesheet?: { hours?: number; cost?: number }) => {
     const version = getLatestApprovedWbs(project);
     const items = version?.items || [];
     const estimatedHours = items.reduce((sum: number, item: any) => sum + Number(item.estimatedHours || 0), 0);
-    const actualHours = items.reduce((sum: number, item: any) => sum + Number(item.actualHours || 0), 0);
+    const actualHours = timesheet
+        ? Number(timesheet.hours || 0)
+        : items.reduce((sum: number, item: any) => sum + Number(item.actualHours || 0), 0);
     const completed = items.filter((item: any) => item.status === "completed" || Number(item.completionPercentage || 0) >= 100).length;
     const completionRate = items.length > 0 ? Math.round((completed / items.length) * 100) : Number(project.completionPercentage || 0);
     const pendingApprovals = (project.wbsVersions || []).reduce((sum: number, item: any) =>
         sum + (item.departmentApprovals || []).filter((approval: any) => approval.status === "pending").length, 0);
     const pendingCrs = (project.changeRequests || []).filter((request: any) => String(request.status).startsWith("pending_")).length;
     const revenue = Number(project.finalPrice ?? project.contractAmount ?? 0);
-    const cost = Number(project.actualCost || 0);
+    const cost = Number(project.adjustedLaborCost ?? timesheet?.cost ?? 0);
     const margin = revenue - cost;
     return { items, estimatedHours, actualHours, completed, completionRate, pendingApprovals, pendingCrs, revenue, cost, margin };
 };
@@ -145,20 +169,28 @@ const openOpportunityRows = async (end: Date, departments: string[] | null) => {
     };
     if (departments !== null) query.salesDepartment = { $in: departments };
     const opportunities = await OpportunityModel.find(query)
-        .select("opportunityCode title customerName salesRep salesDepartment probability quotedAmount estimatedValue expectedCloseDate status createdAt updatedAt")
+        .select("opportunityCode title customerName salesRep salesDepartment probability probabilityNote quotedAmount estimatedValue expectedCloseDate status createdAt updatedAt")
         .sort({ expectedCloseDate: 1, updatedAt: 1 })
         .lean();
     const ids = opportunities.map((item: any) => item._id);
-    const histories = await BusinessHistoryEventModel.aggregate([
-        { $match: { entityType: "opportunity", entityId: { $in: ids } } },
-        { $sort: { createdAt: -1 } },
-        { $group: { _id: "$entityId", action: { $first: "$action" }, at: { $first: "$createdAt" } } }
+    const [histories, stageHistories] = await Promise.all([
+        BusinessHistoryEventModel.aggregate([
+            { $match: { entityType: "opportunity", entityId: { $in: ids } } },
+            { $sort: { createdAt: -1 } },
+            { $group: { _id: "$entityId", action: { $first: "$action" }, at: { $first: "$createdAt" } } }
+        ]),
+        BusinessHistoryEventModel.aggregate([
+            { $match: { entityType: "opportunity", entityId: { $in: ids }, "after.status": { $exists: true } } },
+            { $sort: { createdAt: -1 } },
+            { $group: { _id: "$entityId", at: { $first: "$createdAt" } } }
+        ])
     ]);
     const historyMap = new Map(histories.map((item: any) => [item._id.toString(), item]));
+    const stageHistoryMap = new Map(stageHistories.map((item: any) => [item._id.toString(), item]));
     const now = new Date();
     return opportunities.map((opportunity: any) => {
         const last = historyMap.get(opportunity._id.toString());
-        const stageSince = last?.at || opportunity.updatedAt || opportunity.createdAt;
+        const stageSince = stageHistoryMap.get(opportunity._id.toString())?.at || opportunity.createdAt;
         const overdueDays = opportunity.expectedCloseDate && new Date(opportunity.expectedCloseDate) < now
             ? Math.floor((now.getTime() - new Date(opportunity.expectedCloseDate).getTime()) / 86_400_000)
             : 0;
@@ -172,6 +204,7 @@ const openOpportunityRows = async (end: Date, departments: string[] | null) => {
             "業務部門": opportunity.salesDepartment || "",
             "狀態": opportunity.status,
             "成交機率": `${probability}%`,
+            "成功率備註": opportunity.probabilityNote || "",
             "商機金額": amount,
             "加權金額": probability >= 20 && probability <= 80 ? round(amount * probability / 100) : 0,
             "預計成交日": opportunity.expectedCloseDate || "",
@@ -188,12 +221,18 @@ const openProjectRows = async (end: Date, departments: string[] | null) => {
     const query: any = { status: { $in: ["new", "in_progress", "on_hold", "pending_acceptance"] }, createdAt: { $lte: end } };
     if (departments !== null) query.salesDepartment = { $in: departments };
     const projects = await ServiceRequestModel.find(query)
-        .select("projectCode title companyName customerName status plannedEndDate pmId salesRep salesDepartment finalPrice contractAmount actualCost marginWarning completionPercentage wbsVersions changeRequests")
+        .select("projectCode title customerName status plannedEndDate pmId salesRep salesDepartment finalPrice contractAmount adjustedLaborCost marginWarning completionPercentage wbsVersions changeRequests")
         .populate("pmId", "name department")
         .lean();
+    const projectIds = projects.map((project: any) => project._id);
+    const timesheets = projectIds.length > 0 ? await TimesheetModel.aggregate([
+        { $match: { type: "project", srId: { $in: projectIds }, workDate: { $lte: end } } },
+        { $group: { _id: "$srId", hours: { $sum: "$hours" }, cost: { $sum: "$costAmount" } } }
+    ]) : [];
+    const timesheetMap = new Map(timesheets.map((item: any) => [item._id.toString(), item]));
     const now = new Date();
     return projects.map((project: any) => {
-        const metrics = getProjectMetrics(project);
+        const metrics = getProjectMetrics(project, timesheetMap.get(project._id.toString()) || { hours: 0, cost: 0 });
         const overdueDays = project.plannedEndDate && new Date(project.plannedEndDate) < now
             ? Math.floor((now.getTime() - new Date(project.plannedEndDate).getTime()) / 86_400_000)
             : 0;
@@ -201,7 +240,7 @@ const openProjectRows = async (end: Date, departments: string[] | null) => {
         return {
             "專案代號": project.projectCode || project._id.toString(),
             "專案": project.title,
-            "公司": project.companyName || project.customerName || "",
+            "公司": project.customerName || "",
             "PM": project.pmId?.name || "",
             "PM 部門": project.pmId?.department || "",
             "業務": project.salesRep || "",
@@ -225,12 +264,13 @@ const openProjectRows = async (end: Date, departments: string[] | null) => {
 const pipelineRows = async (start: Date, end: Date, departments: string[] | null) => {
     const query: any = {
         status: { $in: ["new", "qualified", "presales_active", "quoting"] },
-        probability: { $gte: 20, $lte: 80 }
+        probability: { $gte: 20, $lte: 80 },
+        createdAt: { $lte: end }
     };
     if (departments !== null) query.salesDepartment = { $in: departments };
     const [opportunities, targets, recognized] = await Promise.all([
-        OpportunityModel.find(query).select("opportunityCode title customerName salesRep salesDepartment probability quotedAmount estimatedValue createdAt expectedCloseDate status").lean(),
-        KpiTargetModel.find({ year: start.getFullYear(), scope: "department" }).lean(),
+        OpportunityModel.find(query).select("opportunityCode title customerName salesRep salesDepartment probability probabilityNote quotedAmount estimatedValue createdAt expectedCloseDate status").lean(),
+        KpiTargetModel.find({ year: Number(toTaipeiMonth(start).slice(0, 4)), scope: "department" }).lean(),
         RecognitionRecordModel.aggregate([
             { $match: { recognitionType: "project", recognitionMonth: monthRange(start, end), status: "recognized", ...(departments === null ? {} : { salesDepartmentSnapshot: { $in: departments } }) } },
             { $group: { _id: "$salesDepartmentSnapshot", amount: { $sum: "$recognizedAmount" } } }
@@ -259,6 +299,7 @@ const pipelineRows = async (start: Date, end: Date, departments: string[] | null
             "業務": opportunity.salesRep || "",
             "業務部門": department,
             "成交機率": `${opportunity.probability}%`,
+            "成功率備註": opportunity.probabilityNote || "",
             "原始金額": amount,
             "加權金額": weighted,
             "預計成交日": opportunity.expectedCloseDate || "",
@@ -275,7 +316,7 @@ const peopleKpiRows = async (start: Date, end: Date, departments: string[] | nul
     if (departments !== null) userQuery.department = { $in: departments };
     const users = await UserModel.find(userQuery).select("name email department role").lean();
     const userIds = users.map((user: any) => user._id);
-    const [projectRevenue, presalesRevenue, timesheetAgg, projectStats, opportunityStats, targets, wbsProjects] = await Promise.all([
+    const [projectRevenue, presalesRevenue, timesheetAgg, closedProjects, opportunityStats, targets, wbsProjects] = await Promise.all([
         RecognitionRecordModel.aggregate([
             { $match: { recognitionType: "project", recognitionMonth: monthRange(start, end), status: "recognized", salesUserId: { $in: userIds } } },
             { $group: { _id: "$salesUserId", amount: { $sum: "$recognizedAmount" }, count: { $sum: 1 } } }
@@ -288,40 +329,70 @@ const peopleKpiRows = async (start: Date, end: Date, departments: string[] | nul
             { $match: { techId: { $in: userIds }, workDate: { $gte: start, $lte: end } } },
             { $group: { _id: "$techId", hours: { $sum: "$hours" } } }
         ]),
-        ServiceRequestModel.aggregate([
-            { $match: { pmId: { $in: userIds }, status: { $in: ["closed", "completed"] }, $or: [{ closedAt: { $gte: start, $lte: end } }, { completedAt: { $gte: start, $lte: end } }] } },
-            { $group: { _id: "$pmId", amount: { $sum: { $ifNull: ["$finalPrice", "$contractAmount"] } }, cost: { $sum: { $ifNull: ["$actualCost", 0] } }, count: { $sum: 1 }, onTime: { $sum: { $cond: [{ $lte: [{ $ifNull: ["$closedAt", "$completedAt"] }, "$plannedEndDate"] }, 1, 0] } } } }
-        ]),
+        ServiceRequestModel.find({
+            pmId: { $in: userIds },
+            status: { $in: ["closed", "completed"] },
+            $or: [
+                { closedAt: { $gte: start, $lte: end } },
+                { actualEndDate: { $gte: start, $lte: end } }
+            ]
+        }).select("pmId finalPrice contractAmount adjustedLaborCost plannedEndDate closedAt actualEndDate").lean(),
         OpportunityModel.aggregate([
             { $match: { salesUserId: { $in: userIds }, createdAt: { $lte: end } } },
             { $group: { _id: "$salesUserId", total: { $sum: 1 }, won: { $sum: { $cond: [{ $in: ["$status", ["won", "converted"]] }, 1, 0] } }, pipeline: { $sum: { $cond: [{ $and: [{ $gte: ["$probability", 20] }, { $lte: ["$probability", 80] }] }, { $multiply: [{ $ifNull: ["$quotedAmount", "$estimatedValue"] }, { $divide: ["$probability", 100] }] }, 0] } } } }
         ]),
-        KpiTargetModel.find({ year: start.getFullYear(), scope: "person", userId: { $in: userIds } }).lean(),
-        ServiceRequestModel.find({ "wbsVersions.status": "approved", "wbsVersions.items.assigneeId": { $in: userIds } })
+        KpiTargetModel.find({ year: Number(toTaipeiMonth(start).slice(0, 4)), scope: "person", userId: { $in: userIds } }).lean(),
+        ServiceRequestModel.find({
+            "wbsVersions.status": "approved",
+            $or: [
+                { "wbsVersions.items.assigneeId": { $in: userIds } },
+                { "wbsVersions.items.assigneeIds": { $in: userIds } }
+            ]
+        })
             .select("wbsVersions")
             .lean()
     ]);
+    const closedProjectIds = (closedProjects as any[]).map((project) => project._id);
+    const projectCosts = closedProjectIds.length > 0 ? await TimesheetModel.aggregate([
+        { $match: { type: "project", srId: { $in: closedProjectIds } } },
+        { $group: { _id: "$srId", cost: { $sum: "$costAmount" } } }
+    ]) : [];
+    const projectCostMap = new Map(projectCosts.map((item: any) => [item._id.toString(), Number(item.cost || 0)]));
     const map = (items: any[]) => new Map(items.map((item: any) => [item._id.toString(), item]));
     const projectRevenueMap = map(projectRevenue);
     const presalesMap = map(presalesRevenue);
     const hoursMap = map(timesheetAgg);
-    const pmMap = map(projectStats);
+    const pmMap = new Map<string, { amount: number; cost: number; count: number; onTime: number }>();
+    for (const project of closedProjects as any[]) {
+        const pmId = project.pmId?.toString();
+        if (!pmId) continue;
+        const current = pmMap.get(pmId) || { amount: 0, cost: 0, count: 0, onTime: 0 };
+        const closedAt = project.closedAt || project.actualEndDate;
+        current.amount += Number(project.finalPrice ?? project.contractAmount ?? 0);
+        current.cost += Number(project.adjustedLaborCost ?? projectCostMap.get(project._id.toString()) ?? 0);
+        current.count += 1;
+        if (closedAt && project.plannedEndDate && new Date(closedAt) <= new Date(project.plannedEndDate)) current.onTime += 1;
+        pmMap.set(pmId, current);
+    }
     const opportunityMap = map(opportunityStats);
     const targetMap = new Map(targets.map((target: any) => [target.userId?.toString(), target]));
-    const wbsMap = new Map<string, { total: number; completed: number }>();
+    const wbsMap = new Map<string, { total: number; completed: number; approvedHours: number }>();
     for (const project of wbsProjects as any[]) {
         const version = getLatestApprovedWbs(project);
         for (const item of version?.items || []) {
             const assigneeIds = Array.from(new Set([item.assigneeId, ...(item.assigneeIds || [])].map((id: any) => id?.toString()).filter(Boolean))) as string[];
+            const hoursPerAssignee = Number(item.estimatedHours || 0) / Math.max(1, assigneeIds.length);
             for (const assigneeId of assigneeIds) {
-                const current = wbsMap.get(assigneeId) || { total: 0, completed: 0 };
+                const current = wbsMap.get(assigneeId) || { total: 0, completed: 0, approvedHours: 0 };
                 current.total += 1;
+                current.approvedHours += hoursPerAssignee;
                 if (item.status === "completed" || Number(item.completionPercentage || 0) >= 100) current.completed += 1;
                 wbsMap.set(assigneeId, current);
             }
         }
     }
-    const businessDays = Math.max(1, Math.round((end.getTime() - start.getTime()) / 86_400_000 * 5 / 7));
+    const inclusiveDays = Math.floor((end.getTime() - start.getTime()) / 86_400_000) + 1;
+    const businessDays = Math.max(1, Math.round(inclusiveDays * 5 / 7));
     const capacity = businessDays * 8;
     return users.map((user: any) => {
         const id = user._id.toString();
@@ -331,7 +402,7 @@ const peopleKpiRows = async (start: Date, end: Date, departments: string[] | nul
         const pm = pmMap.get(id) || { amount: 0, cost: 0, count: 0, onTime: 0 };
         const opportunities = opportunityMap.get(id) || { total: 0, won: 0, pipeline: 0 };
         const target = Number(targetMap.get(id)?.targetAmount || 0);
-        const wbs = wbsMap.get(id) || { total: 0, completed: 0 };
+        const wbs = wbsMap.get(id) || { total: 0, completed: 0, approvedHours: 0 };
         return {
             "人員": user.name,
             "Email": user.email,
@@ -350,7 +421,7 @@ const peopleKpiRows = async (start: Date, end: Date, departments: string[] | nul
             "PM 管理毛利": round(pm.amount - pm.cost),
             "PM 結案數": pm.count,
             "PM 準時率": pm.count > 0 ? `${round(pm.onTime / pm.count * 100)}%` : "-",
-            "核准 WBS 工時": round(hours),
+            "核准 WBS 工時": round(wbs.approvedHours),
             "WBS 完成率": wbs.total > 0 ? `${round(wbs.completed / wbs.total * 100)}%` : "-",
             "填報工時": round(hours),
             "稼動率": `${round(hours / capacity * 100)}%`
@@ -389,7 +460,7 @@ const dataQualityRows = async (departments: string[] | null) => {
         opportunityMatch.salesDepartment = { $in: departments };
     }
     const [projects, opportunities] = await Promise.all([
-        ServiceRequestModel.find(projectMatch).select("projectCode title companyName customerName status closedAt completedAt closeDate pmId createdAt").lean(),
+        ServiceRequestModel.find(projectMatch).select("projectCode title customerName status closedAt actualEndDate pmId createdAt").lean(),
         OpportunityModel.find(opportunityMatch).select("opportunityCode title customerName status closedAt ownerId salesUserId createdAt").lean()
     ]);
     const rows: Record<string, unknown>[] = [];
@@ -401,8 +472,8 @@ const dataQualityRows = async (departments: string[] | null) => {
     }
     for (const item of projects as any[]) {
         if (!item.projectCode) rows.push({ "類型": "專案", "案件": item.title, "異常": "缺少專案代號", "嚴重度": "高" });
-        if (!String(item.title || "").trim() || !String(item.companyName || item.customerName || "").trim()) rows.push({ "類型": "專案", "案件": item.projectCode || item._id, "異常": "缺少專案或公司名稱", "嚴重度": "高" });
-        if (["closed", "completed"].includes(item.status) && !(item.closedAt || item.completedAt || item.closeDate)) rows.push({ "類型": "專案", "案件": item.projectCode || item.title, "異常": "結案狀態缺少結案日期", "嚴重度": "高" });
+        if (!String(item.title || "").trim() || !String(item.customerName || "").trim()) rows.push({ "類型": "專案", "案件": item.projectCode || item._id, "異常": "缺少專案或公司名稱", "嚴重度": "高" });
+        if (["closed", "completed"].includes(item.status) && !(item.closedAt || item.actualEndDate)) rows.push({ "類型": "專案", "案件": item.projectCode || item.title, "異常": "結案狀態缺少結案日期", "嚴重度": "高" });
         if (!item.pmId) rows.push({ "類型": "專案", "案件": item.projectCode || item.title, "異常": "缺少 PM", "嚴重度": "中" });
     }
     return rows;

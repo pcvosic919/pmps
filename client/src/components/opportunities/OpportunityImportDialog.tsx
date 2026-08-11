@@ -176,7 +176,7 @@ export function OpportunityImportDialog({
                             )}
                         </div>
                         <div className="max-h-[52vh] overflow-auto rounded-lg border">
-                            <table className="w-full min-w-[1050px] text-left text-sm">
+                            <table className="w-full min-w-[1150px] text-left text-sm">
                                 <thead className="sticky top-0 bg-muted">
                                     <tr className="border-b">
                                         <th className="px-3 py-2">列號</th>
@@ -185,6 +185,7 @@ export function OpportunityImportDialog({
                                         <th className="px-3 py-2">客戶名稱</th>
                                         <th className="px-3 py-2">業務 Email</th>
                                         <th className="px-3 py-2">金額</th>
+                                        <th className="px-3 py-2">成功率</th>
                                         <th className="px-3 py-2">類型</th>
                                         <th className="px-3 py-2">檢查結果</th>
                                     </tr>
@@ -201,6 +202,7 @@ export function OpportunityImportDialog({
                                                 <td className="px-3 py-2">{row.customerName || "—"}</td>
                                                 <td className="px-3 py-2">{row.salesEmail || "—"}</td>
                                                 <td className="px-3 py-2 font-mono">{row.estimatedValue.toLocaleString()}</td>
+                                                <td className="px-3 py-2">{row.probability === undefined ? "依初始狀態" : `${row.probability}%`}</td>
                                                 <td className="px-3 py-2">{row.opportunityType === "presales" ? "協銷" : "營收型商機"}</td>
                                                 <td className={`max-w-sm px-3 py-2 ${hasError ? "text-red-600" : row.warnings.length ? "text-amber-600" : "text-green-600"}`}>
                                                     {serverError || row.errors.join("；") || row.warnings.join("；") || "通過"}

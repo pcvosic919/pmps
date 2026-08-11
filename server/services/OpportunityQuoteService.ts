@@ -2,6 +2,7 @@ import { TRPCError } from "@trpc/server";
 import type { Role } from "../../shared/types";
 import { OpportunityModel } from "../models/Opportunity";
 import { OpportunityQuoteModel } from "../models/OpportunityQuote";
+import { ServiceRequestModel } from "../models/ServiceRequest";
 import { UserModel } from "../models/User";
 import { nextBusinessSequence } from "./BusinessCodeService";
 import { recordBusinessHistory } from "./BusinessHistoryService";
@@ -44,10 +45,14 @@ export const createOpportunityQuoteVersion = async (
     actor: QuoteActor
 ) => {
     const opportunity = await OpportunityModel.findById(input.opportunityId)
-        .select("opportunityCode status ownerId quotedAmount probability")
+        .select("opportunityCode status ownerId quotedAmount probability probabilityNote")
         .lean();
     if (!opportunity) throw new TRPCError({ code: "NOT_FOUND", message: "找不到該商機" });
-    if (["converted", "lost", "cancelled"].includes(opportunity.status)) {
+    const convertedProject = opportunity.status === "converted"
+        ? await ServiceRequestModel.findOne({ opportunityId: opportunity._id }).select("status").lean()
+        : null;
+    if (["lost", "cancelled"].includes(opportunity.status)
+        || (opportunity.status === "converted" && convertedProject?.status !== "new")) {
         throw new TRPCError({ code: "BAD_REQUEST", message: "目前商機狀態不可新增報價版本" });
     }
 
@@ -71,10 +76,19 @@ export const createOpportunityQuoteVersion = async (
         expectedCloseDate: input.expectedCloseDate
     });
 
-    await OpportunityModel.updateOne(
-        { _id: opportunity._id },
-        { $set: { quotedAmount: input.amount, status: "quoting", probability: 80 } }
-    );
+    if (opportunity.status !== "converted") {
+        await OpportunityModel.updateOne(
+            { _id: opportunity._id },
+            {
+                $set: {
+                    quotedAmount: input.amount,
+                    status: "quoting",
+                    probability: 80,
+                    probabilityNote: `已建立報價版本 ${quote.quoteCode}`
+                }
+            }
+        );
+    }
 
     await Promise.all([
         recordBusinessHistory({
@@ -90,8 +104,21 @@ export const createOpportunityQuoteVersion = async (
             entityType: "opportunity",
             entityId: opportunity._id,
             action: "quote_version_created",
-            before: { quotedAmount: opportunity.quotedAmount, probability: opportunity.probability },
-            after: { quotedAmount: input.amount, probability: 80, quoteId: quote._id },
+            before: {
+                quotedAmount: opportunity.quotedAmount,
+                probability: opportunity.probability,
+                probabilityNote: opportunity.probabilityNote,
+                status: opportunity.status
+            },
+            after: opportunity.status === "converted"
+                ? { quoteId: quote._id, projectStatus: convertedProject?.status }
+                : {
+                    quotedAmount: input.amount,
+                    probability: 80,
+                    probabilityNote: `已建立報價版本 ${quote.quoteCode}`,
+                    status: "quoting",
+                    quoteId: quote._id
+                },
             actorId: actor.id,
             actorRole: actor.role,
             source: "api"
@@ -122,58 +149,12 @@ export const submitOpportunityQuote = async (quoteId: string, actor: QuoteActor)
     return quote;
 };
 
-export const adoptOpportunityQuote = async (quoteId: string, actor: QuoteActor) => {
-    const quote = await OpportunityQuoteModel.findById(quoteId);
-    if (!quote) throw new TRPCError({ code: "NOT_FOUND", message: "找不到報價版本" });
-    if (quote.status === "void") {
-        throw new TRPCError({ code: "BAD_REQUEST", message: "作廢報價不可被採用" });
-    }
-    const acceptedAt = new Date();
-    await OpportunityQuoteModel.updateMany(
-        { opportunityId: quote.opportunityId, status: "accepted", _id: { $ne: quote._id } },
-        { $set: { status: "submitted" }, $unset: { acceptedAt: 1 } }
-    );
-    quote.status = "accepted";
-    quote.acceptedAt = acceptedAt;
-    await quote.save();
-    await OpportunityModel.updateOne(
-        { _id: quote.opportunityId },
-        {
-            $set: {
-                adoptedQuoteId: quote._id,
-                quotedAmount: quote.amount,
-                currency: quote.currency,
-                taxIncluded: quote.taxIncluded
-            }
-        }
-    );
-    await Promise.all([
-        recordBusinessHistory({
-            entityType: "opportunity_quote",
-            entityId: quote._id,
-            action: "quote_adopted",
-            after: { status: quote.status, acceptedAt, amount: quote.amount },
-            actorId: actor.id,
-            actorRole: actor.role
-        }),
-        recordBusinessHistory({
-            entityType: "opportunity",
-            entityId: quote.opportunityId,
-            action: "quote_adopted",
-            after: { adoptedQuoteId: quote._id, quotedAmount: quote.amount },
-            actorId: actor.id,
-            actorRole: actor.role
-        })
-    ]);
-    return quote;
-};
-
 export const voidOpportunityQuote = async (quoteId: string, reason: string, actor: QuoteActor) => {
     const quote = await OpportunityQuoteModel.findById(quoteId);
     if (!quote) throw new TRPCError({ code: "NOT_FOUND", message: "找不到報價版本" });
     const opportunity = await OpportunityModel.findById(quote.opportunityId).select("adoptedQuoteId").lean();
     if (opportunity?.adoptedQuoteId?.toString() === quote._id.toString()) {
-        throw new TRPCError({ code: "CONFLICT", message: "已採用的報價不可直接作廢，請先採用其他版本" });
+        throw new TRPCError({ code: "CONFLICT", message: "客戶已確認的報價不可直接作廢，請先確認其他版本" });
     }
     const previousStatus = quote.status;
     quote.status = "void";

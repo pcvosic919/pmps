@@ -21,6 +21,7 @@
     "migrate:business-flow-foundation": "tsx scripts/migrate-business-flow-foundation.ts",
     "audit:assignment-integrity": "tsx scripts/audit-assignment-integrity.ts",
     "migrate:recognition-and-products": "tsx scripts/migrate-recognition-and-product-approvals.ts",
+    "migrate:opportunity-quote-project-flow": "tsx scripts/migrate-opportunity-quote-project-flow.ts",
     "cosmos:shared-throughput": "bash scripts/prepare-cosmos-shared-throughput.sh"
   },
   "devDependencies": {

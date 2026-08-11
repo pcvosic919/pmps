@@ -1,5 +1,5 @@
 import mongoose, { Schema, Document } from "mongoose";
-import { attachmentCategories, changeRequestStatuses, memberRoles, srStatuses, srTypes, wbsItemStatuses, wbsVersionStatuses, type ChangeRequestInput, type ChangeRequestStatus, type CustomFieldValue, type DepartmentApproval, type MemberRole, type ServiceRequestAttachment, type SrStatus, type SrType, type WbsItemInput, type WbsVersionInput, type WbsVersionStatus } from "../../shared/types";
+import { attachmentCategories, changeRequestStatuses, memberRoles, projectConversionModes, srStatuses, srTypes, wbsItemStatuses, wbsVersionStatuses, type ChangeRequestInput, type ChangeRequestStatus, type CustomFieldValue, type DepartmentApproval, type MemberRole, type ProjectConversionMode, type ServiceRequestAttachment, type SrStatus, type SrType, type WbsItemInput, type WbsVersionInput, type WbsVersionStatus } from "../../shared/types";
 import { generateBusinessCode } from "../services/BusinessCodeService";
 
 export interface IWbsItem extends Omit<WbsItemInput, "assigneeId" | "assigneeIds" | "assigneeSnapshots"> {
@@ -80,6 +80,10 @@ export interface IServiceRequest extends Document {
     sourceQuoteId?: mongoose.Types.ObjectId;
     sourceOpportunityCodeSnapshot?: string;
     sourceQuoteCodeSnapshot?: string;
+    conversionMode?: ProjectConversionMode;
+    conversionExceptionReason?: string;
+    conversionExceptionById?: mongoose.Types.ObjectId;
+    conversionExceptionAt?: Date;
     externalProjectCode?: string;
     externalServiceType?: string;
     externalStatus?: string;
@@ -272,6 +276,10 @@ const ServiceRequestSchema = new Schema<IServiceRequest>({
     sourceQuoteId: { type: Schema.Types.ObjectId, ref: "OpportunityQuote" },
     sourceOpportunityCodeSnapshot: { type: String },
     sourceQuoteCodeSnapshot: { type: String },
+    conversionMode: { type: String, enum: projectConversionModes },
+    conversionExceptionReason: { type: String, trim: true },
+    conversionExceptionById: { type: Schema.Types.ObjectId, ref: "User" },
+    conversionExceptionAt: { type: Date },
     externalProjectCode: { type: String },
     externalServiceType: { type: String },
     externalStatus: { type: String },
@@ -368,6 +376,7 @@ ServiceRequestSchema.index(
     }
 );
 ServiceRequestSchema.index({ sourceQuoteId: 1 }, { sparse: true });
+ServiceRequestSchema.index({ conversionMode: 1, createdAt: -1 });
 ServiceRequestSchema.index({ "members.userId": 1, createdAt: -1 });
 ServiceRequestSchema.index({ createdByDepartment: 1, createdAt: -1 });
 ServiceRequestSchema.index({ "wbsVersions.items.assigneeId": 1, createdAt: -1 });
