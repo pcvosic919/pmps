@@ -2,10 +2,17 @@ import mongoose, { Schema, Document } from "mongoose";
 import { attachmentCategories, changeRequestStatuses, memberRoles, srStatuses, srTypes, wbsItemStatuses, wbsVersionStatuses, type ChangeRequestInput, type ChangeRequestStatus, type CustomFieldValue, type DepartmentApproval, type MemberRole, type ServiceRequestAttachment, type SrStatus, type SrType, type WbsItemInput, type WbsVersionInput, type WbsVersionStatus } from "../../shared/types";
 import { generateBusinessCode } from "../services/BusinessCodeService";
 
-export interface IWbsItem extends Omit<WbsItemInput, "assigneeId" | "assigneeIds"> {
+export interface IWbsItem extends Omit<WbsItemInput, "assigneeId" | "assigneeIds" | "assigneeSnapshots"> {
     id: mongoose.Types.ObjectId;
     assigneeId?: mongoose.Types.ObjectId;
     assigneeIds?: mongoose.Types.ObjectId[];
+    assigneeSnapshots?: Array<{
+        userId: mongoose.Types.ObjectId;
+        name: string;
+        email?: string;
+        department?: string;
+        isActive?: boolean;
+    }>;
 }
 
 export interface IWbsVersion extends Omit<WbsVersionInput, "submittedBy" | "reviewedBy" | "items" | "auditLogs" | "departmentApprovals"> {
@@ -146,6 +153,13 @@ const WbsItemSchema = new Schema<IWbsItem>({
     endDate: { type: Date },
     assigneeId: { type: Schema.Types.ObjectId, ref: "User" },
     assigneeIds: [{ type: Schema.Types.ObjectId, ref: "User" }],
+    assigneeSnapshots: [{
+        userId: { type: Schema.Types.ObjectId, required: true },
+        name: { type: String, required: true },
+        email: { type: String },
+        department: { type: String },
+        isActive: { type: Boolean, default: true }
+    }],
     completionPercentage: { type: Number, default: 0, min: 0, max: 100 },
     status: { type: String, enum: wbsItemStatuses, default: "not_started", required: true },
     colorCode: { type: String, default: "#E2E8F0" },
@@ -192,6 +206,13 @@ const WbsDraftItemSchema = new Schema({
     endDate: { type: Date },
     assigneeId: { type: Schema.Types.ObjectId, ref: "User" },
     assigneeIds: [{ type: Schema.Types.ObjectId, ref: "User" }],
+    assigneeSnapshots: [{
+        userId: { type: Schema.Types.ObjectId, required: true },
+        name: { type: String, required: true },
+        email: { type: String },
+        department: { type: String },
+        isActive: { type: Boolean, default: true }
+    }],
     completionPercentage: { type: Number, default: 0, min: 0, max: 100 },
     status: { type: String, enum: wbsItemStatuses, default: "not_started" },
     colorCode: { type: String, default: "#E2E8F0" },

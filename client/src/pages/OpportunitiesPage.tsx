@@ -76,10 +76,10 @@ export function OpportunitiesPage() {
     // 自訂欄位數值暫存
     const [customFieldsValues, setCustomFieldsValues] = useState<Record<string, string>>({});
     const { data: customFieldDefs } = trpc.system.getCustomFields.useQuery();
-    const { data: settings } = trpc.system.getSettings.useQuery();
+    const { data: productCategories } = trpc.system.getProductCategories.useQuery();
     const { data: usersData } = trpc.users.list.useQuery({ limit: 500 });
     const { data: companiesData } = trpc.companies.list.useQuery({ search: debouncedCompanySearch, limit: 20 });
-    const availableProducts = settings?.availableProducts || [];
+    const availableProducts = (productCategories || []).map((product: any) => product.name);
     const businessUsers = usersData?.items || [];
     const companies = companiesData?.items || [];
     const oppFields = customFieldDefs?.filter((f: any) => f.entityType === "opportunity") || [];
@@ -591,30 +591,9 @@ export function OpportunitiesPage() {
                                                 </FormItem>
                                             )}
                                         />
-                                        {[
-                                            ["approvedM365", "M365"],
-                                            ["approvedAzure", "Azure"],
-                                            ["approvedSecurity", "資安"]
-                                        ].map(([name, label]) => (
-                                            <FormField
-                                                key={name}
-                                                control={form.control}
-                                                name={name}
-                                                render={({ field }: any) => (
-                                                    <FormItem className="flex items-center gap-3 rounded-lg border border-border bg-background p-3">
-                                                        <FormControl>
-                                                            <input
-                                                                type="checkbox"
-                                                                checked={field.value}
-                                                                onChange={(e) => field.onChange(e.target.checked)}
-                                                                className="h-4 w-4 rounded border-gray-300 text-primary focus:ring-primary"
-                                                            />
-                                                        </FormControl>
-                                                        <FormLabel className="mb-0">{label}</FormLabel>
-                                                    </FormItem>
-                                                )}
-                                            />
-                                        ))}
+                                        <div className="md:col-span-2 rounded-lg border border-sky-200 bg-sky-50 p-3 text-sm text-sky-900">
+                                            選擇產品後會建立獨立核准項目；核准狀態可在商機詳情逐項管理，不再使用固定的 M365／Azure／資安欄位。
+                                        </div>
                                     </FormSection>
 
                                     <FormSection title="備註與自訂欄位" description="補充商機背景與組織自訂欄位。" columns={1}>

@@ -19,6 +19,8 @@
     "db:prepare": "tsx scripts/prepare-db.ts",
     "audit:opportunity-conversions": "tsx scripts/audit-opportunity-conversions.ts",
     "migrate:business-flow-foundation": "tsx scripts/migrate-business-flow-foundation.ts",
+    "audit:assignment-integrity": "tsx scripts/audit-assignment-integrity.ts",
+    "migrate:recognition-and-products": "tsx scripts/migrate-recognition-and-product-approvals.ts",
     "cosmos:shared-throughput": "bash scripts/prepare-cosmos-shared-throughput.sh"
   },
   "devDependencies": {

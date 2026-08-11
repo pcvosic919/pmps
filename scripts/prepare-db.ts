@@ -21,6 +21,10 @@ import { AuditEventModel } from "../server/models/AuditEvent";
 import { BusinessHistoryEventModel } from "../server/models/BusinessHistoryEvent";
 import { BusinessSequenceModel } from "../server/models/BusinessSequence";
 import { OpportunityQuoteModel } from "../server/models/OpportunityQuote";
+import { RecognitionRecordModel } from "../server/models/RecognitionRecord";
+import { RecognitionEventModel } from "../server/models/RecognitionEvent";
+import { ProductCategoryModel } from "../server/models/ProductCategory";
+import { ProductApprovalModel } from "../server/models/ProductApproval";
 
 const envFile = process.env.NODE_ENV === "test" ? ".env.test" : ".env.local";
 const pathsToTry = [
@@ -54,6 +58,10 @@ const appModels = [
     BusinessHistoryEventModel,
     BusinessSequenceModel,
     OpportunityQuoteModel,
+    RecognitionRecordModel,
+    RecognitionEventModel,
+    ProductCategoryModel,
+    ProductApprovalModel,
 ];
 
 function shouldSyncIndexes() {

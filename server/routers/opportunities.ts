@@ -4,6 +4,7 @@ import { sharePointService } from "../services/SharePointService";
 import { folderStorageService } from "../services/FolderStorageService";
 import { OpportunityModel } from "../models/Opportunity";
 import { OpportunityQuoteModel } from "../models/OpportunityQuote";
+import { ProductApprovalModel } from "../models/ProductApproval";
 import { SettlementLockModel } from "../models/SettlementLock";
 import { TimesheetModel } from "../models/Timesheet";
 import { ServiceRequestModel } from "../models/ServiceRequest";
@@ -11,7 +12,7 @@ import { UserModel } from "../models/User";
 import { ImportBatchModel } from "../models/ImportBatch";
 import { TRPCError } from "@trpc/server";
 import mongoose from "mongoose";
-import { memberRoles, opportunityStatuses, opportunityTypes } from "../../shared/types";
+import { memberRoles, opportunityStatuses, opportunityTypes, productApprovalStatuses } from "../../shared/types";
 import {
     assertAuthorized,
     assertFound,
@@ -42,6 +43,7 @@ import {
 } from "./opportunity-workflow";
 import { createProjectForOpportunityOnce, finalizeOpportunityConversion, findProjectByOpportunityId } from "../services/OpportunityConversionService";
 import { listBusinessHistory, recordBusinessHistory } from "../services/BusinessHistoryService";
+import { syncOpportunityProductApprovals } from "../services/ProductApprovalService";
 import {
     adoptOpportunityQuote,
     createOpportunityQuoteVersion,
@@ -488,6 +490,15 @@ export const opportunitiesRouter = router({
                                     ...(!expectedCloseDate ? { $unset: { expectedCloseDate: 1 } } : {})
                                 }
                             );
+                            await syncOpportunityProductApprovals({
+                                opportunityId: row.id,
+                                productNames: row.productNames,
+                                statuses: {
+                                    ...(row.approvedM365 ? { M365: "approved" } : {}),
+                                    ...(row.approvedAzure ? { Azure: "approved" } : {}),
+                                    ...(row.approvedSecurity ? { "資安": "approved" } : {})
+                                }
+                            });
                             result.id = row.id;
                             result.action = "updated";
                             continue;
@@ -524,6 +535,15 @@ export const opportunitiesRouter = router({
                             ownerDepartmentCodeSnapshot: ctx.user.department || "",
                             ownerDepartmentNameSnapshot: ctx.user.department || "",
                             members: [{ userId: toObjectId(ctx.user.id), memberRole: "owner" }]
+                        });
+                        await syncOpportunityProductApprovals({
+                            opportunityId: created._id.toString(),
+                            productNames: row.productNames,
+                            statuses: {
+                                ...(row.approvedM365 ? { M365: "approved" } : {}),
+                                ...(row.approvedAzure ? { Azure: "approved" } : {}),
+                                ...(row.approvedSecurity ? { "資安": "approved" } : {})
+                            }
                         });
                         await recordBusinessHistory({
                             entityType: "opportunity",
@@ -640,6 +660,10 @@ export const opportunitiesRouter = router({
                 value: z.string()
             })).optional(),
             productNames: z.array(z.string()).optional(),
+            productApprovals: z.array(z.object({
+                productName: z.string().trim().min(1),
+                status: z.enum(productApprovalStatuses)
+            })).optional(),
             description: z.string().optional(),
             approvedM365: z.boolean().default(false),
             approvedAzure: z.boolean().default(false),
@@ -665,6 +689,16 @@ export const opportunitiesRouter = router({
                     userId: ownerId,
                     memberRole: "owner"
                 }]
+            });
+
+            const approvalStatuses = Object.fromEntries((input.productApprovals || []).map((item) => [item.productName, item.status]));
+            if (input.approvedM365) approvalStatuses.M365 = "approved";
+            if (input.approvedAzure) approvalStatuses.Azure = "approved";
+            if (input.approvedSecurity) approvalStatuses["資安"] = "approved";
+            await syncOpportunityProductApprovals({
+                opportunityId: result._id.toString(),
+                productNames: input.productNames || [],
+                statuses: approvalStatuses
             });
 
             await recordBusinessHistory({
@@ -1446,6 +1480,97 @@ export const opportunitiesRouter = router({
             return { success: true };
         }),
 
+
+    listProductApprovals: permissionProcedure("module.opportunities.view", ["admin", "manager", "business", "presales", "tech", "pm"])
+        .input(z.object({ opportunityId: z.string() }))
+        .query(async ({ ctx, input }) => {
+            const opportunity = assertFound(
+                await OpportunityModel.findById(input.opportunityId).select("ownerId salesUserId salesDepartment members presalesAssignments").lean(),
+                "找不到商機"
+            );
+            assertAuthorized(await canAccessOpportunityInScope(ctx.user, opportunity), "您沒有權限查看產品核准資料");
+            const approvals = await ProductApprovalModel.find({ opportunityId: input.opportunityId })
+                .populate("decidedById", "name email")
+                .sort({ productNameSnapshot: 1 })
+                .lean();
+            return approvals.map((approval: any) => ({
+                id: approval._id.toString(),
+                productCategoryId: approval.productCategoryId?.toString(),
+                productCode: approval.productCodeSnapshot,
+                productName: approval.productNameSnapshot,
+                status: approval.status,
+                reason: approval.reason || "",
+                decidedBy: approval.decidedById?.name || approval.decidedById?.email || "",
+                decidedAt: approval.decidedAt
+            }));
+        }),
+
+    updateProducts: protectedProcedure
+        .input(z.object({
+            opportunityId: z.string(),
+            productNames: z.array(z.string().trim().min(1)).max(100),
+            approvals: z.array(z.object({
+                productName: z.string().trim().min(1),
+                status: z.enum(productApprovalStatuses)
+            })).optional()
+        }))
+        .mutation(async ({ ctx, input }) => {
+            const opportunity: any = assertFound(await OpportunityModel.findById(input.opportunityId), "找不到商機");
+            assertOpportunityEditable(opportunity);
+            assertAuthorized(await canManageOpportunityInScope(ctx.user, opportunity), "您沒有權限修改產品資料");
+            const before = { productNames: [...(opportunity.productNames || [])] };
+            opportunity.productNames = input.productNames;
+            await opportunity.save();
+            await syncOpportunityProductApprovals({
+                opportunityId: opportunity._id.toString(),
+                productNames: input.productNames,
+                statuses: Object.fromEntries((input.approvals || []).map((item) => [item.productName, item.status]))
+            });
+            await recordBusinessHistory({
+                entityType: "opportunity",
+                entityId: opportunity._id,
+                action: "products_updated",
+                before,
+                after: { productNames: input.productNames, approvals: input.approvals || [] },
+                actorId: ctx.user.id,
+                actorRole: ctx.user.role,
+                source: "api"
+            });
+            return { success: true };
+        }),
+
+    reviewProductApproval: protectedProcedure
+        .input(z.object({
+            id: z.string(),
+            status: z.enum(productApprovalStatuses),
+            reason: z.string().trim().optional()
+        }))
+        .mutation(async ({ ctx, input }) => {
+            const approval: any = assertFound(await ProductApprovalModel.findById(input.id), "找不到產品核准資料");
+            const opportunity: any = assertFound(await OpportunityModel.findById(approval.opportunityId), "找不到商機");
+            assertAuthorized(await canManageOpportunityInScope(ctx.user, opportunity), "您沒有權限核准此產品");
+            if (input.status === "rejected" && !input.reason?.trim()) {
+                throw new TRPCError({ code: "BAD_REQUEST", message: "拒絕產品核准時必須填寫原因" });
+            }
+            const before = { status: approval.status, reason: approval.reason };
+            approval.status = input.status;
+            approval.reason = input.reason?.trim() || undefined;
+            approval.decidedById = new mongoose.Types.ObjectId(ctx.user.id);
+            approval.decidedAt = new Date();
+            await approval.save();
+            await recordBusinessHistory({
+                entityType: "opportunity",
+                entityId: opportunity._id,
+                action: "product_approval_reviewed",
+                before: { productName: approval.productNameSnapshot, ...before },
+                after: { productName: approval.productNameSnapshot, status: approval.status, reason: approval.reason },
+                actorId: ctx.user.id,
+                actorRole: ctx.user.role,
+                reason: input.reason,
+                source: "api"
+            });
+            return { success: true };
+        }),
 
     listQuotes: permissionProcedure("module.opportunities.view", ["admin", "manager", "business", "presales", "tech", "pm"])
         .input(z.object({ opportunityId: z.string() }))

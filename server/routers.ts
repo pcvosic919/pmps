@@ -9,6 +9,8 @@ import { authRouter } from "./routers/auth";
 import { issuesRouter } from "./routers/issues";
 import { companiesRouter } from "./routers/companies";
 import { auditRouter } from "./routers/audit";
+import { recognitionRouter } from "./routers/recognition";
+import { reportsRouter } from "./routers/reports";
 
 export const appRouter = router({
     auth: authRouter,
@@ -20,7 +22,9 @@ export const appRouter = router({
     integrations: integrationsRouter,
     issues: issuesRouter,
     companies: companiesRouter,
-    audit: auditRouter
+    audit: auditRouter,
+    recognition: recognitionRouter,
+    reports: reportsRouter
 });
 
 export type AppRouter = typeof appRouter;

@@ -17,6 +17,7 @@ type WbsDraftItem = {
     actualHours?: number;
     assigneeId: string | undefined;
     assigneeIds?: string[];
+    assigneeSnapshots?: Array<{ userId: string; name: string; email?: string; department?: string; isActive?: boolean }>;
     startDate?: Date;
     endDate?: Date;
     completionPercentage?: number;
@@ -1787,9 +1788,10 @@ export function WbsManagementPage() {
                                                                         <div className="mt-1 flex flex-wrap gap-1">
                                                                             {(item.assigneeIds || []).map((userId) => {
                                                                                 const person = (allUsers?.items || []).find((user: any) => user.id === userId) || (techs || []).find((user: any) => user.id === userId);
+                                                                                const snapshot = item.assigneeSnapshots?.find((entry: any) => entry.userId === userId);
                                                                                 return (
                                                                                     <span key={userId} className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[10px] ${item.assigneeId === userId ? "border-primary/30 bg-primary/10 text-primary" : "border-border bg-muted text-muted-foreground"}`}>
-                                                                                        {person?.name || "找不到使用者"}
+                                                                                        {person?.name || snapshot?.name || `歷史帳號 ${userId}`}{!person && snapshot?.isActive === false ? "（已停用）" : ""}
                                                                                         {item.assigneeId !== userId && (
                                                                                             <button type="button" onClick={() => handleRemoveDraftAssignee(idx, userId)} className="hover:text-red-500">×</button>
                                                                                         )}

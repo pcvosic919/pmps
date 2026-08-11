@@ -21,9 +21,10 @@ const createClientEventId = () =>
 
 const LoginPage = lazy(() => import("./pages/LoginPage").then((module) => ({ default: module.LoginPage })));
 const UserManagementPage = lazy(() => import("./pages/UserManagementPage").then((module) => ({ default: module.UserManagementPage })));
+const AssignmentIntegrityPage = lazy(() => import("./pages/AssignmentIntegrityPage").then((module) => ({ default: module.AssignmentIntegrityPage })));
 const CostRatesPage = lazy(() => import("./pages/CostRatesPage").then((module) => ({ default: module.CostRatesPage })));
 const UtilizationPage = lazy(() => import("./pages/UtilizationPage").then((module) => ({ default: module.UtilizationPage })));
-const SettlementsPage = lazy(() => import("./pages/SettlementsPage").then((module) => ({ default: module.SettlementsPage })));
+const SettlementsPage = lazy(() => import("./pages/RecognitionCenterPage").then((module) => ({ default: module.RecognitionCenterPage })));
 const NotificationsPage = lazy(() => import("./pages/NotificationsPage").then((module) => ({ default: module.NotificationsPage })));
 const SystemSettingsPage = lazy(() => import("./pages/SystemSettingsPage").then((module) => ({ default: module.SystemSettingsPage })));
 const CustomFieldsPage = lazy(() => import("./pages/CustomFieldsPage").then((module) => ({ default: module.CustomFieldsPage })));
@@ -38,12 +39,12 @@ const ChangeRequestsPage = lazy(() => import("./pages/ChangeRequestsPage").then(
 const DashboardPage = lazy(() => import("./pages/DashboardPage").then((module) => ({ default: module.DashboardPage })));
 const PmDashboardPage = lazy(() => import("./pages/PmDashboardPage").then((module) => ({ default: module.PmDashboardPage })));
 const CalendarPage = lazy(() => import("./pages/CalendarPage").then((module) => ({ default: module.CalendarPage })));
-const ReportBuilderPage = lazy(() => import("./pages/ReportBuilderPage").then((module) => ({ default: module.ReportBuilderPage })));
+const ReportBuilderPage = lazy(() => import("./pages/ReportCenterPage").then((module) => ({ default: module.ReportCenterPage })));
 const ResourcesPage = lazy(() => import("./pages/ResourcesPage").then((module) => ({ default: module.ResourcesPage })));
 const OpportunityDetailPage = lazy(() => import("./pages/OpportunityDetailPage").then((module) => ({ default: module.OpportunityDetailPage })));
 const ProjectManagementPage = lazy(() => import("./pages/ProjectManagementPage").then((module) => ({ default: module.ProjectManagementPage })));
 const ProfitCenterFormulaPage = lazy(() => import("./pages/ProfitCenterFormulaPage"));
-const ProfitCenterReportPage = lazy(() => import("./pages/ProfitCenterReportPage").then((module) => ({ default: module.ProfitCenterReportPage })));
+const ProfitCenterReportPage = ReportBuilderPage;
 const AuditPage = lazy(() => import("./pages/AuditPage").then((module) => ({ default: module.AuditPage })));
 
 type ActiveRouteDefinition = {
@@ -173,9 +174,10 @@ const activeRoutes: ActiveRouteDefinition[] = [
   { path: "/", component: DashboardPage, pageFile: "DashboardPage.tsx", lifecycle: "保留 / 上線", notes: "主儀表板首頁。" },
   { path: "/resources", component: ResourcesPage, pageFile: "ResourcesPage.tsx", lifecycle: "保留 / 上線", notes: "資源池與人力配置視圖。" },
   { path: "/users", component: UserManagementPage, pageFile: "UserManagementPage.tsx", lifecycle: "保留 / 上線", notes: "正式帳號管理頁，取代舊版 UsersPage。" },
+  { path: "/assignment-integrity", component: AssignmentIntegrityPage, pageFile: "AssignmentIntegrityPage.tsx", lifecycle: "保留 / 上線", notes: "歷史指派資料掃描與安全修復。" },
   { path: "/cost-rates", component: CostRatesPage, pageFile: "CostRatesPage.tsx", lifecycle: "保留 / 上線", notes: "費率設定。" },
   { path: "/utilization", component: UtilizationPage, pageFile: "UtilizationPage.tsx", lifecycle: "保留 / 上線", notes: "稼動率看板。" },
-  { path: "/settlements", component: SettlementsPage, pageFile: "SettlementsPage.tsx", lifecycle: "保留 / 上線", notes: "月度結算。" },
+  { path: "/settlements", component: SettlementsPage, pageFile: "RecognitionCenterPage.tsx", lifecycle: "保留 / 上線", notes: "協銷與專案認列結算中心。" },
   { path: "/notifications", component: NotificationsPage, pageFile: "NotificationsPage.tsx", lifecycle: "保留 / 上線", notes: "通知中心。" },
   { path: "/system-settings", component: SystemSettingsPage, pageFile: "SystemSettingsPage.tsx", lifecycle: "保留 / 上線", notes: "系統設定。" },
   { path: "/custom-fields", component: CustomFieldsPage, pageFile: "CustomFieldsPage.tsx", lifecycle: "保留 / 上線", notes: "自訂欄位管理。" },
@@ -191,9 +193,9 @@ const activeRoutes: ActiveRouteDefinition[] = [
   { path: "/presales-timesheets", component: PresalesTimesheetsPage, pageFile: "PresalesTimesheetsPage.tsx", lifecycle: "保留 / 上線", notes: "協銷工時填報。" },
   { path: "/project-timesheets", component: ProjectTimesheetsRoute, pageFile: "ProjectTimesheetsPage.tsx", lifecycle: "保留 / 上線", notes: "專案工時填報。" },
   { path: "/kpi", component: KpiDashboardPage, pageFile: "KpiDashboardPage.tsx", lifecycle: "保留 / 上線", notes: "KPI 儀表板。" },
-  { path: "/reports", component: ReportBuilderPage, pageFile: "ReportBuilderPage.tsx", lifecycle: "保留 / 上線", notes: "自訂報表產生與匯出。" },
+  { path: "/reports", component: ReportBuilderPage, pageFile: "ReportCenterPage.tsx", lifecycle: "保留 / 上線", notes: "整併後的報表中心與匯出。" },
   { path: "/formula/profit-center", component: ProfitCenterFormulaPage, pageFile: "ProfitCenterFormulaPage.tsx", lifecycle: "保留 / 上線", notes: "利潤中心公式專用頁面。" },
-  { path: "/profit-center-report", component: ProfitCenterReportPage, pageFile: "ProfitCenterReportPage.tsx", lifecycle: "保留 / 上線", notes: "利潤中心業績結算儀表板" },
+  { path: "/profit-center-report", component: ProfitCenterReportPage, pageFile: "ReportCenterPage.tsx", lifecycle: "保留 / 上線", notes: "舊利潤中心報表入口相容導向報表中心。" },
   { path: "/audit", component: AuditRoute, pageFile: "AuditPage.tsx", lifecycle: "保留 / 上線", notes: "demo@demo.com 專用使用者互動稽核中心" },
 ];
 

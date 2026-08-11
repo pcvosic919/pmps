@@ -5,6 +5,8 @@ import { SystemSettingModel } from "../models/Settings";
 import { sharePointService } from "../services/SharePointService";
 import { z } from "zod";
 import { canDeleteRecord } from "../_core/authorization";
+import { ProductCategoryModel } from "../models/ProductCategory";
+import { syncProductCategories } from "../services/ProductApprovalService";
 
 const settingsPayloadSchema = z.object({
     companyName: z.string().trim().min(1),
@@ -179,9 +181,20 @@ export const systemRouter = router({
             if (operations.length > 0) {
                 await SystemSettingModel.bulkWrite(operations);
             }
+            await syncProductCategories(input.availableProducts);
 
             return { success: true };
         }),
+
+    getProductCategories: protectedProcedure.query(async () => {
+        const categories = await ProductCategoryModel.find({ isActive: true }).sort({ sortOrder: 1, name: 1 }).lean();
+        return categories.map((category: any) => ({
+            id: category._id.toString(),
+            code: category.code,
+            name: category.name,
+            sortOrder: category.sortOrder
+        }));
+    }),
 
     getCustomFields: roleProcedure(["admin", "manager"]).query(async () => {
         const items = await CustomFieldModel.find().lean();
