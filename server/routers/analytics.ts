@@ -13,6 +13,7 @@ import { KpiPolicyModel } from "../models/KpiPolicy";
 import { KpiTargetModel, kpiTargetScopes } from "../models/KpiTarget";
 import { ReportTemplateModel, reportTemplateCategories } from "../models/ReportTemplate";
 import { SettlementAuditLogModel, SettlementSnapshotModel } from "../models/SettlementSnapshot";
+import { RecognitionRecordModel } from "../models/RecognitionRecord";
 import { z } from "zod";
 import { settlementTypes } from "../../shared/types";
 import { canDeleteRecord, getManagedDepartments, hasAnyRole } from "../_core/authorization";
@@ -828,10 +829,11 @@ export const analyticsRouter = router({
             department: z.string().optional(),
             userId: z.string().optional()
         }).optional())
-        .query(async ({ input }) => {
+        .query(async ({ ctx, input }) => {
         let srMatch: any = {};
         let oppMatch: any = {};
         let tsMatch: any = { type: "project" };
+        let recognitionMatch: any = { recognitionType: "project", status: "recognized" };
 
         if (input?.startDate && input?.endDate) {
             const minDate = new Date(input.startDate);
@@ -840,6 +842,7 @@ export const analyticsRouter = router({
             srMatch.createdAt = { $gte: minDate, $lte: maxDate };
             oppMatch.createdAt = { $gte: minDate, $lte: maxDate };
             tsMatch.workDate = { $gte: minDate, $lte: maxDate };
+            recognitionMatch.recognitionMonth = { $gte: toMonthKey(minDate), $lte: toMonthKey(maxDate) };
         }
 
         if (input?.departments?.length || input?.userIds?.length || input?.department || input?.userId) {
@@ -856,15 +859,23 @@ export const analyticsRouter = router({
                 srMatch = { ...srMatch, pmId: { $in: deptUserIds } };
                 oppMatch = { ...oppMatch, ownerId: { $in: deptUserIds } };
                 tsMatch = { ...tsMatch, techId: { $in: deptUserIds } };
+                recognitionMatch = { ...recognitionMatch, salesUserId: { $in: deptUserIds } };
             } else {
                 srMatch = { ...srMatch, pmId: null };
                 oppMatch = { ...oppMatch, ownerId: null };
                 tsMatch = { ...tsMatch, techId: null };
+                recognitionMatch = { ...recognitionMatch, salesUserId: null };
             }
+        }
+        const allowedDepartments = await buildDepartmentAccessFilter(ctx.user);
+        if (allowedDepartments !== null) {
+            srMatch.salesDepartment = { $in: allowedDepartments };
+            oppMatch.salesDepartment = { $in: allowedDepartments };
+            recognitionMatch.salesDepartmentSnapshot = { $in: allowedDepartments };
         }
         const policy = await getOrCreateKpiPolicy(new Date().getFullYear());
 
-        const [srTotals, recentSrs, oppStats, totalCostAgg, pipelineOpps] = await Promise.all([
+        const [srTotals, recentSrs, oppStats, totalCostAgg, pipelineOpps, recognizedAgg] = await Promise.all([
             ServiceRequestModel.aggregate([
                 { $match: srMatch },
                 {
@@ -907,10 +918,15 @@ export const analyticsRouter = router({
                 { $match: tsMatch },
                 { $group: { _id: null, totalCost: { $sum: "$costAmount" } } }
             ]),
-            OpportunityModel.find(oppMatch, { estimatedValue: 1, quotedAmount: 1, probability: 1, status: 1 }).lean()
+            OpportunityModel.find(oppMatch, { estimatedValue: 1, quotedAmount: 1, probability: 1, status: 1 }).lean(),
+            RecognitionRecordModel.aggregate([
+                { $match: recognitionMatch },
+                { $group: { _id: null, totalRevenue: { $sum: "$recognizedAmount" } } }
+            ])
         ]);
 
         const totals = srTotals[0] ?? { activeProjects: 0, totalRevenue: 0 };
+        totals.totalRevenue = Number(recognizedAgg[0]?.totalRevenue || 0);
         const oppSummary = oppStats[0] ?? { wonOpps: 0, pendingOpps: 0, lostOpps: 0, totalOpps: 0 };
         const totalCost = totalCostAgg[0]?.totalCost || 0;
         const totalMargin = totals.totalRevenue - totalCost;
@@ -1011,24 +1027,19 @@ export const analyticsRouter = router({
                 }
             }
 
-            const recognizedSrs = await ServiceRequestModel.find(
+            const recognizedByDepartment = await RecognitionRecordModel.aggregate([
                 {
-                    status: { $in: ["closed", "completed"] },
-                    $or: [
-                        { recognitionMonth: { $regex: `^${year}-` } },
-                        { closedAt: { $gte: yearStart, $lte: yearEnd } },
-                        { status: "completed", updatedAt: { $gte: yearStart, $lte: yearEnd } }
-                    ]
+                    $match: {
+                        recognitionType: "project",
+                        status: "recognized",
+                        recognitionMonth: { $regex: `^${year}-` }
+                    }
                 },
-                { recognizedRevenueAmount: 1, contractAmount: 1, finalPrice: 1, pmId: 1 }
-            ).lean();
-            for (const sr of recognizedSrs as any[]) {
-                const pmUser = (allUsers as any[]).find(u => u._id.toString() === sr.pmId?.toString());
-                if (!pmUser) continue;
-                const dept = pmUser.department || "未指定";
-                if (deptMap.has(dept)) {
-                    deptMap.get(dept)!.recognizedRevenue += (sr.recognizedRevenueAmount ?? getProjectStatisticAmount(sr));
-                }
+                { $group: { _id: "$salesDepartmentSnapshot", amount: { $sum: "$recognizedAmount" } } }
+            ]);
+            for (const item of recognizedByDepartment as any[]) {
+                const dept = item._id || "未指定";
+                if (deptMap.has(dept)) deptMap.get(dept)!.recognizedRevenue += Number(item.amount || 0);
             }
 
             const pipelineOpps = await OpportunityModel.find(
@@ -1275,13 +1286,10 @@ export const analyticsRouter = router({
                 ServiceRequestModel.countDocuments({ status: { $nin: ["closed", "completed", "cancelled"] } }),
                 ServiceRequestModel.countDocuments(),
                 KpiTargetModel.countDocuments({ year }),
-                ServiceRequestModel.countDocuments({
-                    status: { $in: ["closed", "completed"] },
-                    $or: [
-                        { recognitionMonth: { $regex: `^${year}-` } },
-                        { actualEndDate: { $gte: new Date(year, 0, 1), $lt: new Date(year + 1, 0, 1) } },
-                        { recognizedRevenueAmount: { $gt: 0 } }
-                    ]
+                RecognitionRecordModel.countDocuments({
+                    recognitionType: "project",
+                    status: "recognized",
+                    recognitionMonth: { $regex: `^${year}-` }
                 }),
                 OpportunityModel.countDocuments({ status: { $in: ["new", "qualified", "presales_active", "quoting"] } })
             ]);

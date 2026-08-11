@@ -340,8 +340,8 @@ const getManagerIds = async (departments: string[]) => {
     return [...new Set(managers.map((manager: any) => manager._id.toString()))];
 };
 
-const buildDepartmentApprovals = async (items: Array<{ assigneeId?: string }>) => {
-    const assigneeIds = Array.from(new Set(items.map(item => item.assigneeId).filter(Boolean))) as string[];
+const buildDepartmentApprovals = async (items: Array<{ assigneeId?: string; assigneeIds?: string[] }>) => {
+    const assigneeIds = Array.from(new Set(items.flatMap(item => [item.assigneeId, ...(item.assigneeIds || [])]).filter(Boolean))) as string[];
     if (assigneeIds.length === 0) return [];
 
     const users = await UserModel.find({ _id: { $in: assigneeIds.map(id => toObjectId(id)) } })
@@ -353,6 +353,30 @@ const buildDepartmentApprovals = async (items: Array<{ assigneeId?: string }>) =
         department,
         status: "pending" as const
     }));
+};
+
+const attachAssigneeSnapshots = async <T extends { assigneeId?: string; assigneeIds?: string[] }>(items: T[]) => {
+    const ids = Array.from(new Set(items.flatMap((item) => [item.assigneeId, ...(item.assigneeIds || [])]).filter(Boolean))) as string[];
+    const users = ids.length > 0
+        ? await UserModel.find({ _id: { $in: ids.map((id) => toObjectId(id)) } }).select("name email department isActive").lean()
+        : [];
+    const userMap = new Map(users.map((user: any) => [user._id.toString(), user]));
+    return items.map((item) => {
+        const itemIds = Array.from(new Set([item.assigneeId, ...(item.assigneeIds || [])].filter(Boolean))) as string[];
+        return {
+            ...item,
+            assigneeSnapshots: itemIds.map((id) => {
+                const user = userMap.get(id);
+                return {
+                    userId: toObjectId(id),
+                    name: user?.name || `歷史帳號 ${id}`,
+                    email: user?.email || "",
+                    department: user?.department || "",
+                    isActive: user?.isActive !== false
+                };
+            })
+        };
+    });
 };
 
 const getProjectWbsSummary = (sr: any) => {
@@ -1289,6 +1313,10 @@ export const projectsRouter = router({
                         id: item._id.toString(),
                         assigneeId: item.assigneeId?.toString(),
                         assigneeIds: (item.assigneeIds || []).map((id: any) => id.toString()),
+                        assigneeSnapshots: (item.assigneeSnapshots || []).map((snapshot: any) => ({
+                            ...snapshot,
+                            userId: snapshot.userId?.toString()
+                        })),
                         status: getWbsItemStatus(item),
                         startDate: item.startDate,
                         endDate: item.endDate
@@ -1686,7 +1714,11 @@ export const projectsRouter = router({
                     ...item,
                     id: item._id?.toString(),
                     assigneeId: item.assigneeId?.toString(),
-                    assigneeIds: (item.assigneeIds || []).map((id: any) => id.toString())
+                    assigneeIds: (item.assigneeIds || []).map((id: any) => id.toString()),
+                    assigneeSnapshots: (item.assigneeSnapshots || []).map((snapshot: any) => ({
+                        ...snapshot,
+                        userId: snapshot.userId?.toString()
+                    }))
                 }))
             };
         }),
@@ -1714,12 +1746,13 @@ export const projectsRouter = router({
             if (input.revision !== undefined && input.revision < currentRevision) {
                 throw new TRPCError({ code: "CONFLICT", message: "草稿已在其他頁面更新，請重新載入" });
             }
+            const itemsWithSnapshots = await attachAssigneeSnapshots(input.items);
             const nextDraft = {
                 userId: toObjectId(ctx.user.id),
                 baseVersionNumber: input.baseVersionNumber,
                 revision: currentRevision + 1,
                 updatedAt: new Date(),
-                items: input.items.map(item => ({
+                items: itemsWithSnapshots.map(item => ({
                     ...item,
                     assigneeId: item.assigneeId ? toObjectId(item.assigneeId) : undefined,
                     assigneeIds: item.assigneeIds?.map(toObjectId)
@@ -1790,15 +1823,17 @@ export const projectsRouter = router({
             }
 
             const departmentApprovals = await buildDepartmentApprovals(input.items);
+            const itemsWithSnapshots = await attachAssigneeSnapshots(input.items);
             const newVersion = {
                 versionNumber: input.versionNumber,
                 status: "submitted" as const,
                 submittedBy: toObjectId(ctx.user.id),
-	                items: input.items.map(item => ({
+	                items: itemsWithSnapshots.map(item => ({
 	                    title: item.title,
 	                    estimatedHours: (item.level || 0) === 0 ? 0 : item.estimatedHours,
                     assigneeId: item.assigneeId ? new mongoose.Types.ObjectId(item.assigneeId) : undefined,
                     assigneeIds: item.assigneeIds?.length ? item.assigneeIds.map(id => new mongoose.Types.ObjectId(id)) : undefined,
+                    assigneeSnapshots: item.assigneeSnapshots,
                     startDate: item.startDate,
                     endDate: item.endDate,
                     status: item.status || getWbsItemStatus(item),
@@ -2064,13 +2099,53 @@ export const projectsRouter = router({
 
     getMyProjectAssignments: permissionProcedure("module.calendar.view", ["admin", "manager", "pm", "tech", "presales"])
         .input(z.object({
-            scope: z.enum(["mine", "managed", "all"]).default("mine")
+            scope: z.enum(["mine", "managed", "all"]).default("mine"),
+            view: z.enum(["planned", "actual"]).default("planned")
         }).optional())
         .query(async ({ ctx, input }) => {
             const scope = input?.scope || "mine";
+            const view = input?.view || "planned";
             const scopedUserIds = await getCalendarScopeUserIds(ctx.user, scope);
             const scopedUserIdStrings = new Set(scopedUserIds.map((id: any) => id.toString()));
             if (scopedUserIds.length === 0) return [];
+
+            if (view === "actual") {
+                const timesheets = await TimesheetModel.find({ techId: { $in: scopedUserIds } })
+                    .populate("techId", "name email department")
+                    .populate("srId", "projectCode title")
+                    .populate("opportunityId", "opportunityCode title customerName")
+                    .sort({ workDate: -1, createdAt: -1 })
+                    .lean();
+                return timesheets.map((timesheet: any) => ({
+                    id: timesheet._id.toString(),
+                    timesheetId: timesheet._id.toString(),
+                    srId: timesheet.srId?._id?.toString(),
+                    opportunityId: timesheet.opportunityId?._id?.toString(),
+                    title: timesheet.description || timesheet.workType || "工時紀錄",
+                    description: timesheet.description || "",
+                    estimatedHours: Number(timesheet.hours || 0),
+                    totalEstimatedHours: Number(timesheet.hours || 0),
+                    actualHours: Number(timesheet.hours || 0),
+                    startDate: timesheet.workDate,
+                    endDate: timesheet.workDate,
+                    srTitle: timesheet.srId?.title || timesheet.opportunityId?.title || "其他活動",
+                    sourceCode: timesheet.srId?.projectCode || timesheet.opportunityId?.opportunityCode || "",
+                    assigneeId: idString(timesheet.techId),
+                    assigneeName: timesheet.techId?.name || "歷史帳號",
+                    assigneeEmail: timesheet.techId?.email || "",
+                    assigneeDepartment: timesheet.techId?.department || "",
+                    memberRole: "assignee",
+                    isBillable: timesheet.isBillable !== false,
+                    isPmView: idString(timesheet.techId) !== ctx.user.id,
+                    sourceType: "actual",
+                    timesheetType: timesheet.type,
+                    workType: timesheet.workType || "",
+                    costCategory: timesheet.costCategory || "",
+                    status: "completed",
+                    isBacklog: false,
+                    isReadOnly: true
+                }));
+            }
 
             const srs = await ServiceRequestModel.find({
                 $or: [

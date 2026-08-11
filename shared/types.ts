@@ -55,6 +55,18 @@ export type TimesheetType = typeof timesheetTypes[number];
 export const settlementTypes = ["project", "presales"] as const;
 export type SettlementType = typeof settlementTypes[number];
 
+export const recognitionStatuses = ["pending", "recognized", "not_recognized", "reversed"] as const;
+export type RecognitionStatus = typeof recognitionStatuses[number];
+
+export const recognitionRecordKinds = ["base", "adjustment", "reversal"] as const;
+export type RecognitionRecordKind = typeof recognitionRecordKinds[number];
+
+export const productApprovalStatuses = ["pending", "approved", "rejected", "not_required"] as const;
+export type ProductApprovalStatus = typeof productApprovalStatuses[number];
+
+export const calendarViews = ["planned", "actual"] as const;
+export type CalendarView = typeof calendarViews[number];
+
 export const notificationTypes = ["warning", "info", "todo", "approval"] as const;
 export type NotificationType = typeof notificationTypes[number];
 
@@ -253,6 +265,13 @@ export interface WbsItemInput {
     endDate?: Date;
     assigneeId?: string;
     assigneeIds?: string[];
+    assigneeSnapshots?: Array<{
+        userId: string;
+        name: string;
+        email?: string;
+        department?: string;
+        isActive?: boolean;
+    }>;
     completionPercentage?: number;
     status?: WbsItemStatus;
     colorCode?: string;

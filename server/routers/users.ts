@@ -8,6 +8,7 @@ import { assertEntraSyncConfigured, getEntraSettings, pruneStaleEntraUsersJob, s
 import { hashPassword } from "../_core/password";
 import { canDeleteRecord } from "../_core/authorization";
 import mongoose from "mongoose";
+import { scanAssignmentIntegrity } from "../services/AssignmentIntegrityService";
 
 const userSortFields = ["name", "email", "role", "createdAt"] as const;
 const assignmentContexts = ["project_pm", "project_owner", "project_member", "presales", "wbs", "issue_assignee"] as const;
@@ -480,6 +481,13 @@ export const usersRouter = router({
             );
             return { success: true };
         }),
+
+    scanAssignmentIntegrity: roleProcedure(["admin"])
+        .query(async () => scanAssignmentIntegrity({ commit: false })),
+
+    repairAssignmentIntegrity: roleProcedure(["admin"])
+        .input(z.object({ confirmation: z.literal("REPAIR_SAFE_ASSIGNMENTS") }))
+        .mutation(async () => scanAssignmentIntegrity({ commit: true })),
 
     updateUser: roleProcedure(["admin"])
         .input(z.object({

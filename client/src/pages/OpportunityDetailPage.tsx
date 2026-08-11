@@ -10,6 +10,7 @@ import { SharePointFilesSection } from "../components/SharePointFilesSection";
 import { BusinessUserPicker } from "../components/BusinessUserPicker";
 import { UserSearchPicker } from "../components/UserSearchPicker";
 import { fileToBase64 } from "../lib/files";
+import toast from "react-hot-toast";
 
 
 const OPP_STATUSES = [
@@ -127,6 +128,10 @@ export function OpportunityDetailPage() {
     const { data: allUsers } = trpc.users.list.useQuery({ limit: 500 });
     const { data: customFieldDefs } = trpc.system.getCustomFields.useQuery();
     const { data: quotes, refetch: refetchQuotes } = trpc.opportunities.listQuotes.useQuery(
+        { opportunityId: id },
+        { enabled: !!id }
+    );
+    const { data: productApprovals, refetch: refetchProductApprovals } = trpc.opportunities.listProductApprovals.useQuery(
         { opportunityId: id },
         { enabled: !!id }
     );
@@ -248,6 +253,10 @@ export function OpportunityDetailPage() {
     const voidQuoteMutation = trpc.opportunities.voidQuoteVersion.useMutation({
         onSuccess: () => refetchQuotes(),
         onError: (error) => alert(error.message)
+    });
+    const reviewProductApprovalMutation = trpc.opportunities.reviewProductApproval.useMutation({
+        onSuccess: () => { toast.success("產品核准狀態已更新"); refetchProductApprovals(); refetchHistory(); },
+        onError: (error) => toast.error(error.message)
     });
 
     // ------ Handlers ------
@@ -639,6 +648,26 @@ export function OpportunityDetailPage() {
                                         <span key={p} className="px-2 py-1 bg-primary/10 text-primary text-xs font-bold rounded-md border border-primary/20">
                                             {p}
                                         </span>
+                                    ))}
+                                </div>
+                                <div className="mt-3 space-y-2">
+                                    {(productApprovals || []).map((approval: any) => (
+                                        <div key={approval.id} className="flex flex-wrap items-center justify-between gap-2 rounded-lg border bg-background p-2">
+                                            <div>
+                                                <div className="text-sm font-semibold">{approval.productName}</div>
+                                                <div className="font-mono text-[10px] text-muted-foreground">{approval.productCode}</div>
+                                            </div>
+                                            <div className="flex items-center gap-2">
+                                                <span className={`rounded-full px-2 py-1 text-xs font-semibold ${approval.status === "approved" ? "bg-emerald-100 text-emerald-700" : approval.status === "rejected" ? "bg-red-100 text-red-700" : "bg-amber-100 text-amber-700"}`}>{approval.status === "approved" ? "已核准" : approval.status === "rejected" ? "已拒絕" : approval.status === "not_required" ? "不需核准" : "待核准"}</span>
+                                                {canManageQuotes && <select value={approval.status} onChange={(event) => {
+                                                    const status = event.target.value as "pending" | "approved" | "rejected" | "not_required";
+                                                    const reason = status === "rejected" ? window.prompt("請輸入拒絕原因") || "" : "";
+                                                    if (status === "rejected" && !reason.trim()) return;
+                                                    reviewProductApprovalMutation.mutate({ id: approval.id, status, reason: reason || undefined });
+                                                }} className="rounded border bg-background px-2 py-1 text-xs"><option value="pending">待核准</option><option value="approved">核准</option><option value="rejected">拒絕</option><option value="not_required">不需核准</option></select>}
+                                            </div>
+                                            {approval.reason && <div className="w-full text-xs text-muted-foreground">原因：{approval.reason}</div>}
+                                        </div>
                                     ))}
                                 </div>
                             </div>

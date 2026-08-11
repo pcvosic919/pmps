@@ -10,6 +10,7 @@ export function CalendarPage() {
     const { hasRole, user } = useCurrentUser();
     const [currentDate, setCurrentDate] = useState(new Date());
     const [calendarScope, setCalendarScope] = useState<"mine" | "managed" | "all">("mine");
+    const [calendarView, setCalendarView] = useState<"planned" | "actual">("planned");
     
     // Edit state
     const [editingEvent, setEditingEvent] = useState<any>(null);
@@ -28,7 +29,7 @@ export function CalendarPage() {
 
     // Fetch WBS items assigned to current user
     const { data: assignments, isLoading, isFetching } = trpc.projects.getMyProjectAssignments.useQuery(
-        { scope: calendarScope },
+        { scope: calendarScope, view: calendarView },
         { placeholderData: undefined }
     );
 
@@ -114,6 +115,7 @@ export function CalendarPage() {
     };
 
     const openEditModal = (event: any) => {
+        if (calendarView === "actual" || event.isReadOnly) return;
         setEditingEvent(event);
         setEditForm({
             startDate: event.startDate ? new Date(event.startDate).toISOString().slice(0, 10) : "",
@@ -138,6 +140,7 @@ export function CalendarPage() {
     };
 
     const scheduleTaskOnDay = (task: any, day: Date) => {
+        if (calendarView === "actual" || task.isReadOnly) return;
         const startDate = day;
         const endDate = day;
 
@@ -154,7 +157,7 @@ export function CalendarPage() {
     };
 
     const handleDropOnDay = (day: Date) => {
-        if (!draggedTask) return;
+        if (!draggedTask || calendarView === "actual") return;
         scheduleTaskOnDay(draggedTask, day);
         setDraggedTask(null);
     };
@@ -276,7 +279,7 @@ export function CalendarPage() {
                             {visibleDayAssignments.map((event: any, idx: number) => (
                                 <div
                                     key={idx}
-                                    draggable
+                                    draggable={calendarView === "planned"}
                                     onDragStart={(e) => {
                                         e.stopPropagation();
                                         setDraggedTask(event);
@@ -323,13 +326,22 @@ export function CalendarPage() {
 
     const projectOptions = Array.from(new Set((assignments || []).filter((a: any) => a.sourceType !== "manual").map((a: any) => a.srTitle))).sort();
     const visibleAssignments = (assignments || []).filter((a: any) => !projectFilter || a.srTitle === projectFilter || a.sourceType === "manual");
-    const unscheduledAssignments = visibleAssignments.filter((a: any) => a.isBacklog || !a.startDate || !a.endDate);
+    const unscheduledAssignments = calendarView === "planned"
+        ? visibleAssignments.filter((a: any) => a.isBacklog || !a.startDate || !a.endDate)
+        : [];
 
     return (
         <div className="max-w-[1400px] mx-auto space-y-4">
             {renderHeader()}
             
             <div className="bg-card border border-border/50 rounded-xl p-4 flex flex-col md:flex-row gap-3 md:items-end">
+                <div>
+                    <label className="block text-xs font-semibold text-muted-foreground mb-1">行事曆視角</label>
+                    <div className="flex rounded-lg border border-border bg-muted/30 p-1 text-xs">
+                        <button type="button" onClick={() => setCalendarView("planned")} className={`px-3 py-1.5 rounded-md font-semibold ${calendarView === "planned" ? "bg-background shadow-sm text-primary" : "text-muted-foreground"}`}>計畫排程</button>
+                        <button type="button" onClick={() => setCalendarView("actual")} className={`px-3 py-1.5 rounded-md font-semibold ${calendarView === "actual" ? "bg-background shadow-sm text-emerald-700" : "text-muted-foreground"}`}>實際執行</button>
+                    </div>
+                </div>
                 <div className="flex-1">
                     <label className="block text-xs font-semibold text-muted-foreground mb-1">先篩選專案，再細選任務</label>
                     <select value={projectFilter} onChange={(e) => setProjectFilter(e.target.value)} className="w-full md:w-80 text-sm rounded-lg border border-border bg-background px-3 py-2">
@@ -337,7 +349,7 @@ export function CalendarPage() {
                         {projectOptions.map((name: string) => <option key={name} value={name}>{name}</option>)}
                     </select>
                 </div>
-                <div className="flex gap-2 flex-1">
+                <div className={`flex gap-2 flex-1 ${calendarView === "actual" ? "hidden" : ""}`}>
                     <input value={newTaskTitle} onChange={(e) => setNewTaskTitle(e.target.value)} placeholder="自行新增排程任務" className="flex-1 text-sm rounded-lg border border-border bg-background px-3 py-2" />
                     <button onClick={() => newTaskTitle.trim() && createCalendarTaskMutation.mutate({ title: newTaskTitle.trim() })} className="px-3 py-2 bg-primary text-primary-foreground rounded-lg text-sm font-semibold inline-flex items-center gap-1"><Plus className="w-4 h-4" />新增</button>
                 </div>
@@ -377,7 +389,7 @@ export function CalendarPage() {
                                 unscheduledAssignments.map((event: any) => (
                                     <div
                                         key={event.id}
-                                        draggable
+                                        draggable={calendarView === "planned"}
                                         onDragStart={() => setDraggedTask(event)}
                                         onDragEnd={() => setDraggedTask(null)}
                                         onClick={() => openEditModal(event)}

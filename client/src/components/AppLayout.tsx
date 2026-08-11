@@ -23,6 +23,7 @@ import {
     Settings,
     Settings2,
     ShieldCheck,
+    ShieldAlert,
     TrendingUp,
     Users,
     X,
@@ -109,14 +110,14 @@ const navGroups: NavGroup[] = [
         label: "KPI / 報表",
         items: [
             { icon: TrendingUp, label: "KPI 達成儀表板", href: "/kpi", roles: ["admin", "manager"] },
-            { icon: FileText, label: "自訂報表", href: "/reports", roles: ["admin", "manager"] },
+            { icon: FileText, label: "報表中心", href: "/reports", roles: ["admin", "manager", "business"] },
         ],
     },
     {
         key: "settlement",
         label: "結算",
         items: [
-            { icon: FileSpreadsheet, label: "月度結算", href: "/settlements", roles: ["admin", "manager"] },
+            { icon: FileSpreadsheet, label: "認列結算中心", href: "/settlements", roles: ["admin", "manager", "business"] },
         ],
     },
     {
@@ -133,6 +134,7 @@ const navGroups: NavGroup[] = [
         label: "系統管理",
         items: [
             { icon: Settings, label: "帳號管理", href: "/users", roles: ["admin"] },
+            { icon: ShieldAlert, label: "指派資料檢查", href: "/assignment-integrity", roles: ["admin"] },
             { icon: Building2, label: "公司管理", href: "/companies", roles: ["admin"] },
             { icon: Settings, label: "系統設定", href: "/system-settings", roles: ["admin"] },
             { icon: ShieldCheck, label: "Audit 稽核中心", href: "/audit", auditOnly: true },
