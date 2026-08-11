@@ -14,7 +14,7 @@ describe("parseOpportunityWorkbook", () => {
             "商機名稱 *": "M365 導入",
             "客戶名稱 *": "範例公司",
             "業務人員 Email": "Sales@Example.com",
-            預估金額: "NT$ 1,250,000",
+            客戶預算: "NT$ 1,250,000",
             "商機成功率 (%)": "60%",
             成功率備註: "方案規劃中",
             商機類型: "協銷",
@@ -42,7 +42,7 @@ describe("parseOpportunityWorkbook", () => {
         const [row] = parseOpportunityWorkbook(makeWorkbook([{
             商機名稱: "",
             客戶名稱: "",
-            預估金額: "not-a-number",
+            客戶預算: "not-a-number",
             商機成功率: 55,
             商機類型: "其他",
             預計成交日: "2026-02-30",
@@ -52,7 +52,7 @@ describe("parseOpportunityWorkbook", () => {
         expect(row.errors).toEqual(expect.arrayContaining([
             "商機名稱不可為空",
             "客戶名稱不可為空",
-            "預估金額必須是大於或等於 0 的數字",
+            "客戶預算必須是大於或等於 0 的數字",
             "商機成功率必須是 0、20、40、60、80 或 100",
             "商機類型必須是營收型商機或協銷",
             "預計成交日格式必須為 YYYY-MM-DD",

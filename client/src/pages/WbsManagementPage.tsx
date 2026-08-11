@@ -988,6 +988,30 @@ export function WbsManagementPage() {
     };
 
     const handleExportQuote = async () => {
+        if (sr.isQuoteWorkspace && isBuildingVersion) {
+            if (draftItems.length === 0) {
+                toast.error("請先建立至少一項 WBS 工項");
+                return;
+            }
+            if (saveDraftMutation.isPending) {
+                toast.error("WBS 草稿仍在儲存中，請稍後再產生報價單");
+                return;
+            }
+            try {
+                await saveDraftMutation.mutateAsync({
+                    srId,
+                    baseVersionNumber: latestVersion?.version,
+                    revision: draftRevisionRef.current,
+                    items: draftItems.map(item => ({
+                        ...item,
+                        startDate: item.startDate || undefined,
+                        endDate: item.endDate || undefined
+                    }))
+                });
+            } catch {
+                return;
+            }
+        }
         const result = await refetchWbsQuote();
         const quote = result.data || wbsQuote;
         if (!quote) return;
@@ -1007,6 +1031,9 @@ export function WbsManagementPage() {
             toast.error(`以下人員尚未設定日費率：${missingRatePeople.join(", ")}`);
         }
         toast.success("已依人員日費率產生報價單");
+        if (sr.isQuoteWorkspace && sr.opportunityId) {
+            window.location.href = `/opportunities/${sr.opportunityId}#quote-section`;
+        }
     };
 
     const handleDrop = (e: React.DragEvent) => {
@@ -1024,21 +1051,35 @@ export function WbsManagementPage() {
     return (
         <div className="space-y-6 max-w-5xl mx-auto">
             <div className="flex items-center space-x-4 mb-4">
-                <Link href="/projects">
+                <Link href={sr.isQuoteWorkspace && sr.opportunityId ? `/opportunities/${sr.opportunityId}#quote-section` : "/projects"}>
                     <a className="p-2 hover:bg-muted rounded-full transition-colors">
                         <ArrowLeft className="w-5 h-5 text-muted-foreground" />
                     </a>
                 </Link>
                 <div className="flex-1">
                     <h2 className="text-2xl font-bold flex items-center flex-wrap gap-2">
-                        {sr.projectCode || `SR-#${sr.id}`} WBS 管理
+                        {sr.isQuoteWorkspace ? "報價 WBS 準備" : `${sr.projectCode || `SR-#${sr.id}`} WBS 管理`}
                         <span className="text-sm font-medium px-2.5 py-0.5 rounded-full bg-primary/10 text-primary border border-primary/20">{sr.title}</span>
                     </h2>
                 </div>
                 <button onClick={handleExportQuote} className="ml-auto inline-flex items-center gap-2 px-3 py-2 rounded-lg bg-emerald-600 text-white text-sm font-semibold hover:bg-emerald-700 transition-colors">
                     <Receipt className="w-4 h-4" /> WBS 轉報價單
                 </button>
+                {sr.isQuoteWorkspace && sr.opportunityId && (
+                    <Link href={`/opportunities/${sr.opportunityId}#quote-section`}>
+                        <a className="inline-flex items-center gap-2 rounded-lg border border-primary/30 bg-primary/5 px-3 py-2 text-sm font-semibold text-primary hover:bg-primary/10">
+                            完成準備，返回商機
+                        </a>
+                    </Link>
+                )}
             </div>
+
+            {sr.isQuoteWorkspace && (
+                <div className="rounded-xl border border-blue-200 bg-blue-50 p-4 text-sm text-blue-900">
+                    <div className="font-semibold">報價準備工作區（尚未成立正式專案）</div>
+                    <p className="mt-1">請先建立並儲存 WBS 草稿，再產生報價單。返回商機送出報價並核可費用後，此工作區才會轉為待建專案，屆時才能送出 WBS 審核。</p>
+                </div>
+            )}
 
             {projectLocked && (
                 <div className={`rounded-xl border p-4 text-sm font-medium ${sr.status === "cancelled" ? "border-red-300 bg-red-50 text-red-700" : "border-amber-300 bg-amber-50 text-amber-800"}`}>
@@ -1931,10 +1972,18 @@ export function WbsManagementPage() {
                                         className="border border-border bg-background px-4 py-2 rounded-md text-sm font-medium hover:bg-muted disabled:opacity-50">
                                         手動存草稿
                                     </button>
-                                    <button onClick={handleSaveVersion} disabled={submitVersion.isPending || draftItems.length === 0}
-                                        className="bg-primary text-primary-foreground hover:bg-primary/90 px-6 py-2 rounded-md font-medium transition-colors flex items-center gap-2 disabled:opacity-50">
-                                        {submitVersion.isPending ? "儲存中..." : <><Save className="w-4 h-4" /> 送出版本審核</>}
-                                    </button>
+                                    {sr.isQuoteWorkspace ? (
+                                        <Link href={sr.opportunityId ? `/opportunities/${sr.opportunityId}#quote-section` : "/opportunities"}>
+                                            <a className="bg-primary text-primary-foreground hover:bg-primary/90 px-6 py-2 rounded-md font-medium transition-colors flex items-center gap-2">
+                                                完成準備，返回商機
+                                            </a>
+                                        </Link>
+                                    ) : (
+                                        <button onClick={handleSaveVersion} disabled={submitVersion.isPending || draftItems.length === 0}
+                                            className="bg-primary text-primary-foreground hover:bg-primary/90 px-6 py-2 rounded-md font-medium transition-colors flex items-center gap-2 disabled:opacity-50">
+                                            {submitVersion.isPending ? "儲存中..." : <><Save className="w-4 h-4" /> 送出版本審核</>}
+                                        </button>
+                                    )}
                                 </div>
                             </div>
                         </div>

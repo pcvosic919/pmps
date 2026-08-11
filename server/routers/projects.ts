@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { permissionProcedure, router, protectedProcedure, roleProcedure } from "../_core/trpc";
+import { permissionProcedure, router, protectedProcedure, roleProcedure, userHasPermission } from "../_core/trpc";
 import { sharePointService } from "../services/SharePointService";
 import { folderStorageService } from "../services/FolderStorageService";
 import { ServiceRequestModel } from "../models/ServiceRequest";
@@ -14,7 +14,7 @@ import mongoose from "mongoose";
 import path from "node:path";
 import { readFile, unlink } from "node:fs/promises";
 import { TRPCError } from "@trpc/server";
-import { approvalActions, attachmentCategories, memberRoles, srStatuses, srTypes } from "../../shared/types";
+import { approvalActions, attachmentCategories, memberRoles, srStatuses, srTypes, type FeaturePermission, type Role } from "../../shared/types";
 import {
     assertAuthorized,
     assertFound,
@@ -59,12 +59,30 @@ import { listBusinessHistory, recordBusinessHistory } from "../services/Business
 import {
     assertProjectReadyForActivation,
     assertProjectStatusTransition,
+    canTransitionProjectStatus,
     getProjectActivationIssues,
     isProjectLocked,
     projectStatusRequiresReason
 } from "../services/ProjectWorkflowService";
 
 const getMonthKey = (value: Date) => value.toISOString().slice(0, 7);
+const isBusinessQuoteSetupProject = (user: any, project: any) =>
+    user.role === "business" && (
+        project.isQuoteWorkspace === true || (
+            project.status === "new"
+            && project.conversionMode === "confirmed_quote"
+            && idString(project.createdById) === user.id
+        )
+    );
+const assertQuoteWorkspaceOrPermission = (
+    user: any,
+    project: { isQuoteWorkspace?: boolean },
+    permission: FeaturePermission,
+    defaultRoles: Role[]
+) => {
+    if (isBusinessQuoteSetupProject(user, project)) return;
+    assertAuthorized(userHasPermission(user, permission, defaultRoles), "您沒有執行此功能的權限");
+};
 const optionalDateInput = z.preprocess(
     value => value === "" || value === null ? undefined : value,
     z.coerce.date().optional()
@@ -301,6 +319,7 @@ const buildServiceRequestQuery = async ({
     if (status) {
         clauses.push({ status });
     }
+    clauses.push({ isQuoteWorkspace: { $ne: true } });
     clauses.push(includeArchived ? { archivedAt: { $exists: true } } : { archivedAt: { $exists: false } });
 
     // Admin can see ALL service requests
@@ -919,12 +938,18 @@ export const projectsRouter = router({
                 "您沒有權限更新服務請求狀態"
             );
 
-            if (projectStatusRequiresReason(input.status) && !input.reason?.trim()) {
+            const isPlatformOwnerOverride =
+                ctx.user.isPlatformOwner === true
+                && !canTransitionProjectStatus(sr.status, input.status);
+
+            if ((projectStatusRequiresReason(input.status) || isPlatformOwnerOverride) && !input.reason?.trim()) {
                 throw new TRPCError({ code: "BAD_REQUEST", message: `專案狀態轉為 ${input.status} 時必須填寫原因` });
             }
             try {
-                assertProjectStatusTransition(sr.status, input.status, input.reason);
-                if (sr.status === "new" && input.status === "in_progress") {
+                if (!isPlatformOwnerOverride) {
+                    assertProjectStatusTransition(sr.status, input.status, input.reason);
+                }
+                if (input.status === "in_progress" && (sr.status === "new" || isPlatformOwnerOverride)) {
                     assertProjectReadyForActivation(sr);
                 }
             } catch (error) {
@@ -936,6 +961,12 @@ export const projectsRouter = router({
 
             const occurredAt = new Date();
             const set: Record<string, unknown> = { status: input.status };
+            const isReopeningLockedProject = isProjectLocked(sr.status) && !isProjectLocked(input.status);
+            if (isReopeningLockedProject) {
+                set.reopenedAt = occurredAt;
+                set.reopenedById = toObjectId(ctx.user.id);
+                set.reopenReason = input.reason?.trim();
+            }
             if (input.status === "closed" || input.status === "completed") {
                 set.closedAt = occurredAt;
                 set.closedById = toObjectId(ctx.user.id);
@@ -954,9 +985,9 @@ export const projectsRouter = router({
             await recordBusinessHistory({
                 entityType: "project",
                 entityId: input.id,
-                action: "project_status_changed",
+                action: isPlatformOwnerOverride ? "project_status_overridden" : "project_status_changed",
                 before: { status: sr.status, closedAt: sr.closedAt, cancelledAt: sr.cancelledAt },
-                after: { status: input.status, ...set },
+                after: { status: input.status, ...set, platformOwnerOverride: isPlatformOwnerOverride },
                 actorId: ctx.user.id,
                 actorRole: ctx.user.role,
                 reason: input.reason,
@@ -1011,10 +1042,11 @@ export const projectsRouter = router({
             return { success: true };
         }),
 
-    getBusinessHistory: permissionProcedure("module.projects.view", ["admin", "manager", "pm", "presales", "tech"])
+    getBusinessHistory: protectedProcedure
         .input(z.object({ projectId: z.string(), limit: z.number().min(1).max(500).default(100) }))
         .query(async ({ input, ctx }) => {
             const sr = assertFound(await ServiceRequestModel.findById(input.projectId).lean(), "找不到該服務請求");
+            assertQuoteWorkspaceOrPermission(ctx.user, sr, "module.projects.view", ["admin", "manager", "pm", "presales", "tech"]);
             const opportunity = sr.opportunityId
                 ? await OpportunityModel.findById(sr.opportunityId).select("ownerId members presalesAssignments").lean()
                 : null;
@@ -1204,7 +1236,7 @@ export const projectsRouter = router({
             })).sort((a: any, b: any) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
         }),
 
-    uploadSrAttachment: roleProcedure(["admin", "manager", "pm", "tech", "presales"])
+    uploadSrAttachment: protectedProcedure
         .input(z.object({
             srId: z.string(),
             fileName: z.string(),
@@ -1217,10 +1249,11 @@ export const projectsRouter = router({
         .mutation(async ({ ctx, input }) => {
             const sr: any = assertFound(
                 await ServiceRequestModel.findById(input.srId)
-                    .select("pmId members wbsVersions.items.assigneeId changeRequests opportunityId localFolderPath")
+                    .select("isQuoteWorkspace status conversionMode createdById pmId members wbsVersions.items.assigneeId changeRequests opportunityId localFolderPath")
                     .lean(),
                 "找不到該服務請求"
             );
+            assertQuoteWorkspaceOrPermission(ctx.user, sr, "wbs.submit", ["admin", "manager", "pm", "tech", "presales"]);
             const opportunity = sr.opportunityId
                 ? await OpportunityModel.findById(sr.opportunityId)
                     .select("ownerId members presalesAssignments")
@@ -1260,6 +1293,20 @@ export const projectsRouter = router({
                     }
                 }
             );
+            await recordBusinessHistory({
+                entityType: "project",
+                entityId: input.srId,
+                action: "project_attachment_uploaded",
+                after: {
+                    fileName: localAttachment?.fileName || input.fileName,
+                    fileSize: input.fileSize,
+                    mimeType: input.mimeType,
+                    category: input.category
+                },
+                actorId: ctx.user.id,
+                actorRole: ctx.user.role,
+                source: "api"
+            });
             return { success: true };
         }),
 
@@ -1343,16 +1390,31 @@ export const projectsRouter = router({
                     }
                 }
             );
+            await recordBusinessHistory({
+                entityType: "project",
+                entityId: input.srId,
+                action: "project_attachment_deleted",
+                before: {
+                    fileName: attachment.fileName,
+                    fileSize: attachment.fileSize,
+                    mimeType: attachment.mimeType,
+                    category: attachment.category
+                },
+                actorId: ctx.user.id,
+                actorRole: ctx.user.role,
+                source: "api"
+            });
             return { success: true };
         }),
 
-    srById: permissionProcedure("module.projects.view", ["admin", "manager", "pm", "tech", "presales"])
+    srById: protectedProcedure
         .input(z.object({ id: z.string() }))
         .query(async ({ input, ctx }) => {
             const sr = assertFound(
                 await ServiceRequestModel.findById(input.id).lean(),
                 "找不到該服務請求"
             );
+            assertQuoteWorkspaceOrPermission(ctx.user, sr, "module.projects.view", ["admin", "manager", "pm", "tech", "presales"]);
             const opportunity = sr.opportunityId
                 ? await OpportunityModel.findById(sr.opportunityId)
                     .select("ownerId members presalesAssignments")
@@ -1782,7 +1844,7 @@ export const projectsRouter = router({
             };
         }),
 
-    saveWbsDraft: permissionProcedure("wbs.submit", ["admin", "manager", "tech", "presales", "pm"])
+    saveWbsDraft: protectedProcedure
         .input(z.object({
             srId: z.string(),
             baseVersionNumber: z.number().optional(),
@@ -1792,9 +1854,10 @@ export const projectsRouter = router({
         .mutation(async ({ input, ctx }) => {
             const sr: any = assertFound(
                 await ServiceRequestModel.findById(input.srId)
-                    .select("status pmId members wbsVersions.items.assigneeId changeRequests opportunityId wbsDrafts"),
+                    .select("isQuoteWorkspace status conversionMode createdById pmId members wbsVersions.items.assigneeId changeRequests opportunityId wbsDrafts"),
                 "找不到該專案"
             );
+            assertQuoteWorkspaceOrPermission(ctx.user, sr, "wbs.submit", ["admin", "manager", "tech", "presales", "pm"]);
             assertProjectEditable(sr);
             const opportunity = sr.opportunityId
                 ? await OpportunityModel.findById(sr.opportunityId).select("ownerId members presalesAssignments").lean()
@@ -1802,6 +1865,15 @@ export const projectsRouter = router({
             assertAuthorized(await canEditProjectWbs(ctx.user, sr, opportunity), "您沒有權限儲存 WBS 草稿");
             const existingIndex = (sr.wbsDrafts || []).findIndex((item: any) => idString(item.userId) === ctx.user.id);
             const currentRevision = existingIndex >= 0 ? sr.wbsDrafts[existingIndex].revision : 0;
+            const summarizeDraftItems = (items: any[] = []) => items.map((item, index) => {
+                const title = String(item.title || `工項 ${index + 1}`).trim();
+                return `${title}（${Number(item.estimatedHours || 0)} 小時）`;
+            }).join("；");
+            const previousDraft = existingIndex >= 0 ? {
+                revision: currentRevision,
+                itemCount: sr.wbsDrafts[existingIndex]?.items?.length || 0,
+                itemSummary: summarizeDraftItems(sr.wbsDrafts[existingIndex]?.items)
+            } : undefined;
             if (input.revision !== undefined && input.revision < currentRevision) {
                 throw new TRPCError({ code: "CONFLICT", message: "草稿已在其他頁面更新，請重新載入" });
             }
@@ -1820,31 +1892,59 @@ export const projectsRouter = router({
             if (existingIndex >= 0) sr.wbsDrafts.splice(existingIndex, 1, nextDraft as any);
             else sr.wbsDrafts.push(nextDraft as any);
             await sr.save();
+            await recordBusinessHistory({
+                entityType: "project",
+                entityId: input.srId,
+                action: "wbs_draft_saved",
+                before: previousDraft,
+                after: {
+                    revision: nextDraft.revision,
+                    itemCount: input.items.length,
+                    itemSummary: summarizeDraftItems(input.items)
+                },
+                actorId: ctx.user.id,
+                actorRole: ctx.user.role,
+                source: "api"
+            });
             return { revision: nextDraft.revision, updatedAt: nextDraft.updatedAt };
         }),
 
-    discardWbsDraft: permissionProcedure("wbs.submit", ["admin", "manager", "tech", "presales", "pm"])
+    discardWbsDraft: protectedProcedure
         .input(z.object({ srId: z.string() }))
         .mutation(async ({ input, ctx }) => {
             const sr: any = assertFound(
                 await ServiceRequestModel.findById(input.srId)
-                    .select("status createdById pmId members wbsVersions.items.assigneeId changeRequests opportunityId")
+                    .select("isQuoteWorkspace status conversionMode createdById pmId members wbsVersions.items.assigneeId changeRequests opportunityId wbsDrafts")
                     .lean(),
                 "找不到該專案"
             );
+            assertQuoteWorkspaceOrPermission(ctx.user, sr, "wbs.submit", ["admin", "manager", "tech", "presales", "pm"]);
             assertProjectEditable(sr);
             const opportunity = sr.opportunityId
                 ? await OpportunityModel.findById(sr.opportunityId).select("ownerId members presalesAssignments").lean()
                 : null;
             assertAuthorized(await canEditProjectWbs(ctx.user, sr, opportunity), "您沒有權限刪除此 WBS 草稿");
+            const discardedDraft = (sr.wbsDrafts || []).find((item: any) => idString(item.userId) === ctx.user.id);
             await ServiceRequestModel.updateOne(
                 { _id: input.srId },
                 { $pull: { wbsDrafts: { userId: toObjectId(ctx.user.id) } } }
             );
+            await recordBusinessHistory({
+                entityType: "project",
+                entityId: input.srId,
+                action: "wbs_draft_discarded",
+                before: discardedDraft ? {
+                    revision: discardedDraft.revision,
+                    itemCount: discardedDraft.items?.length || 0
+                } : undefined,
+                actorId: ctx.user.id,
+                actorRole: ctx.user.role,
+                source: "api"
+            });
             return { success: true };
         }),
 
-    submitWbsVersion: permissionProcedure("wbs.submit", ["admin", "manager", "tech", "presales", "pm"])
+    submitWbsVersion: protectedProcedure
         .input(z.object({
             srId: z.string(),
             versionNumber: z.number(),
@@ -1853,7 +1953,14 @@ export const projectsRouter = router({
         .mutation(async ({ ctx, input }) => {
             const sr = await ServiceRequestModel.findById(input.srId);
             if (!sr) throw new TRPCError({ code: "NOT_FOUND", message: "找不到該服務請求" });
+            assertQuoteWorkspaceOrPermission(ctx.user, sr, "wbs.submit", ["admin", "manager", "tech", "presales", "pm"]);
             assertProjectEditable(sr);
+            if (sr.isQuoteWorkspace) {
+                throw new TRPCError({
+                    code: "BAD_REQUEST",
+                    message: "報價費用尚未核可，目前只能儲存 WBS 草稿與產生報價單；核可後才能送出版本審核"
+                });
+            }
             const opportunity = sr.opportunityId
                 ? await OpportunityModel.findById(sr.opportunityId)
                     .select("ownerId members presalesAssignments")
@@ -2555,7 +2662,10 @@ export const projectsRouter = router({
     generateWbsQuote: protectedProcedure
         .input(z.object({ srId: z.string() }))
         .query(async ({ ctx, input }) => {
-            const sr = await ServiceRequestModel.findById(input.srId).populate("wbsVersions.items.assigneeId", "name email department costRate").lean();
+            const sr = await ServiceRequestModel.findById(input.srId)
+                .populate("wbsVersions.items.assigneeId", "name email department costRate")
+                .populate("wbsDrafts.items.assigneeId", "name email department costRate")
+                .lean();
             if (!sr) throw new TRPCError({ code: "NOT_FOUND", message: "找不到專案" });
             const opportunity = sr.opportunityId
                 ? await OpportunityModel.findById(sr.opportunityId)
@@ -2563,7 +2673,10 @@ export const projectsRouter = router({
                     .lean()
                 : null;
             assertAuthorized(await canViewProject(ctx.user, sr, opportunity), "您沒有權限查看此專案報價");
-            const version = getEffectiveWbsVersion(sr) || [...(sr.wbsVersions || [])].sort((a: any, b: any) => b.versionNumber - a.versionNumber)[0];
+            const currentUserDraft = (sr.wbsDrafts || []).find((draft: any) => idString(draft.userId) === ctx.user.id);
+            const version = sr.isQuoteWorkspace
+                ? currentUserDraft
+                : getEffectiveWbsVersion(sr) || [...(sr.wbsVersions || [])].sort((a: any, b: any) => b.versionNumber - a.versionNumber)[0];
             if (!version) throw new TRPCError({ code: "BAD_REQUEST", message: "沒有可轉報價的 WBS" });
             const items = (version.items || []).map((item: any) => {
                 const user = item.assigneeId;
@@ -2572,6 +2685,20 @@ export const projectsRouter = router({
                 return { title: item.title, assigneeName: user?.name || "未指派", days, dailyRate, amount: days * dailyRate };
             });
             const firstAssignee = (version.items || []).map((item: any) => item.assigneeId).find(Boolean);
+            const totalAmount = items.reduce((sum: number, item: any) => sum + item.amount, 0);
+            await recordBusinessHistory({
+                entityType: "project",
+                entityId: sr._id,
+                action: "quote_generated_from_wbs",
+                after: {
+                    version: version.versionNumber || version.revision || 1,
+                    itemCount: items.length,
+                    amount: totalAmount
+                },
+                actorId: ctx.user.id,
+                actorRole: ctx.user.role,
+                source: "api"
+            });
             return {
                 srId: sr._id.toString(),
                 title: sr.title,
@@ -2580,9 +2707,9 @@ export const projectsRouter = router({
                 salesRep: sr.salesRep || "",
                 technicalDepartment: firstAssignee?.department || "",
                 technicalLead: firstAssignee?.name || "",
-                versionNumber: version.versionNumber,
+                versionNumber: version.versionNumber || version.revision || 1,
                 items,
-                totalAmount: items.reduce((sum: number, item: any) => sum + item.amount, 0)
+                totalAmount
             };
         }),
 

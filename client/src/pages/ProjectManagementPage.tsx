@@ -375,9 +375,18 @@ export function ProjectManagementPage() {
                                                     <button
                                                         key={s.value}
                                                         onClick={() => {
-                                                            const requiresReason = ["on_hold", "closed", "cancelled"].includes(s.value);
+                                                            const isPlatformOwnerOverride =
+                                                                user?.isPlatformOwner === true
+                                                                && ["closed", "completed", "cancelled"].includes(sr.status);
+                                                            const requiresReason =
+                                                                ["on_hold", "closed", "cancelled"].includes(s.value)
+                                                                || isPlatformOwnerOverride;
                                                             const reason = requiresReason
-                                                                ? window.prompt(`請輸入「${s.label}」原因`)?.trim()
+                                                                ? window.prompt(
+                                                                    isPlatformOwnerOverride
+                                                                        ? `Platform Owner 強制將「${getStatusInfo(sr.status).label}」改為「${s.label}」，請輸入調整原因`
+                                                                        : `請輸入「${s.label}」原因`
+                                                                )?.trim()
                                                                 : undefined;
                                                             if (requiresReason && !reason) return;
                                                             updateStatus.mutate({ id: sr.id, status: s.value as SRStatus, reason });
@@ -399,9 +408,16 @@ export function ProjectManagementPage() {
                                             canOperateProject(sr) && (
                                                 <button
                                                     onClick={() => setChangingStatus(sr.id)}
-                                                    className="px-3 py-1.5 text-xs border border-border rounded-lg hover:bg-muted transition-colors text-muted-foreground whitespace-nowrap"
+                                                    className={`px-3 py-1.5 text-xs border rounded-lg transition-colors whitespace-nowrap ${
+                                                        user?.isPlatformOwner && ["closed", "completed", "cancelled"].includes(sr.status)
+                                                            ? "border-amber-300 bg-amber-50 text-amber-800 hover:bg-amber-100"
+                                                            : "border-border text-muted-foreground hover:bg-muted"
+                                                    }`}
+                                                    title={user?.isPlatformOwner ? "Platform Owner 可強制調整所有專案狀態，操作將保留歷程" : undefined}
                                                 >
-                                                    更改狀態
+                                                    {user?.isPlatformOwner && ["closed", "completed", "cancelled"].includes(sr.status)
+                                                        ? "管理員調整狀態"
+                                                        : "更改狀態"}
                                                 </button>
                                             )
                                         )}

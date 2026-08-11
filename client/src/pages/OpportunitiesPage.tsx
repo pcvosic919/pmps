@@ -32,7 +32,7 @@ const oppSchema = z.object({
     salesUserId: z.string().optional(),
     salesDepartment: z.string().optional(),
     salesRep: z.string().optional(),
-    estimatedValue: z.number().min(0, "金額不能為負數"),
+    estimatedValue: z.number().min(0, "客戶預算不能為負數"),
     presalesAmount: z.number().min(0, "協銷金額不能為負數").optional(),
     probability: z.union([z.literal(0), z.literal(20), z.literal(40), z.literal(60), z.literal(80), z.literal(100)]),
     probabilityNote: z.string().max(2000, "成交率備註不可超過 2,000 字").optional(),
@@ -297,7 +297,7 @@ export function OpportunitiesPage() {
                                 <th className="px-6 py-4">類型</th>
                                 <th className="px-6 py-4">客戶名稱</th>
                                 <th className="px-6 py-4">業務</th>
-                                <th className="px-6 py-4">商機金額 (NT$)</th>
+                                <th className="px-6 py-4">客戶預算／目前金額 (NT$)</th>
                                 <th className="px-6 py-4">負責人</th>
                                 <th className="px-6 py-4">建立日期</th>
                                 <th className="px-6 py-4 text-right">操作</th>
@@ -431,7 +431,7 @@ export function OpportunitiesPage() {
                         <form onSubmit={form.handleSubmit(handleCreate)} className="space-y-4">
                             <div className="grid gap-4 lg:grid-cols-[1fr_280px]">
                                 <div className="space-y-4">
-                                    <FormSection title="基本與業務" description="先填客戶、業務與商機金額，方便後續報表歸屬。">
+                                    <FormSection title="基本與業務" description="先填客戶、業務與客戶預算，方便後續報表歸屬。">
                                         <FormField
                                             control={form.control}
                                             name="title"
@@ -560,7 +560,7 @@ export function OpportunitiesPage() {
                                             name="estimatedValue"
                                             render={({ field }: any) => (
                                                 <FormItem>
-                                                    <FormLabel>商機金額 (NT$)</FormLabel>
+                                                    <FormLabel>客戶預算 (NT$)</FormLabel>
                                                     <FormControl>
                                                         <Input
                                                             type="number"
@@ -587,7 +587,7 @@ export function OpportunitiesPage() {
                                                                 onChange={(event: React.ChangeEvent<HTMLInputElement>) => field.onChange(Number(event.target.value))}
                                                             />
                                                         </FormControl>
-                                                        <p className="text-xs text-muted-foreground">與預估金額、報價金額及最終成交金額分開保存。</p>
+                                                        <p className="text-xs text-muted-foreground">建立後將依實際填寫的協銷時數與協銷費用自動重新計算。</p>
                                                         <FormMessage />
                                                     </FormItem>
                                                 )}
@@ -694,7 +694,7 @@ export function OpportunitiesPage() {
                                             { label: "業務", value: selectedSalesRep },
                                             { label: "業務部門", value: selectedSalesDepartment },
                                             { label: "類型", value: opportunityTypeLabels[watchedOppType] },
-                                            { label: "商機金額", value: `NT$ ${watchedEstimatedValue.toLocaleString()}` },
+                                            { label: "客戶預算", value: `NT$ ${watchedEstimatedValue.toLocaleString()}` },
                                             { label: "產品", value: watchedProducts.length ? watchedProducts.join("、") : "" }
                                         ]}
                                     />

@@ -41,6 +41,7 @@ copilotApiRouter.use(requireApiKey);
 copilotApiRouter.get("/projects/active", async (_req, res) => {
     try {
         const projects = await ServiceRequestModel.find({
+            isQuoteWorkspace: { $ne: true },
             status: { $nin: ["completed", "cancelled"] }
         })
             .populate("pmId", "name email")
@@ -80,6 +81,7 @@ copilotApiRouter.get("/projects/search", async (req, res) => {
         if (!q) return res.status(400).json({ error: "請提供查詢關鍵字 ?q=..." });
 
         const projects = await ServiceRequestModel.find({
+            isQuoteWorkspace: { $ne: true },
             $text: { $search: q }
         })
             .populate("pmId", "name email")
@@ -138,7 +140,10 @@ copilotApiRouter.get("/projects/search", async (req, res) => {
  */
 copilotApiRouter.get("/projects/:id", async (req, res) => {
     try {
-        const project = await ServiceRequestModel.findById(req.params.id)
+        const project = await ServiceRequestModel.findOne({
+            _id: req.params.id,
+            isQuoteWorkspace: { $ne: true }
+        })
             .populate("pmId", "name email")
             .populate("members.userId", "name")
             .lean() as any;
@@ -209,9 +214,10 @@ copilotApiRouter.get("/projects/summary", async (_req, res) => {
     try {
         const [statusGroups, atRisk, criticalIssues] = await Promise.all([
             ServiceRequestModel.aggregate([
+                { $match: { isQuoteWorkspace: { $ne: true } } },
                 { $group: { _id: "$status", count: { $sum: 1 }, totalContract: { $sum: projectStatisticAmountExpr } } }
             ]),
-            ServiceRequestModel.countDocuments({ marginWarning: true, status: { $nin: ["completed", "cancelled"] } }),
+            ServiceRequestModel.countDocuments({ isQuoteWorkspace: { $ne: true }, marginWarning: true, status: { $nin: ["completed", "cancelled"] } }),
             IssueModel.countDocuments({ priority: { $in: ["high", "critical"] }, status: { $in: ["open", "in_progress"] } })
         ]);
 

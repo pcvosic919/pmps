@@ -74,7 +74,7 @@ const importHeaders = [
     "業務人員 Email",
     "業務人員",
     "業務部門",
-    "預估金額",
+    "客戶預算",
     "商機成功率 (%)",
     "成功率備註",
     "商機類型",
@@ -102,7 +102,7 @@ const parseAmount = (value: unknown) => {
     const amount = Number(normalized);
     return Number.isFinite(amount) && amount >= 0
         ? { value: amount }
-        : { value: 0, error: "預估金額必須是大於或等於 0 的數字" };
+        : { value: 0, error: "客戶預算必須是大於或等於 0 的數字" };
 };
 
 const parseProbability = (value: unknown) => {
@@ -180,7 +180,7 @@ export const downloadOpportunityTemplate = () => {
         ["商機名稱", "必填", "文字", "商機顯示名稱。"],
         ["客戶名稱", "必填", "文字", "不存在時依系統規則建立客戶。"],
         ["業務人員 Email", "選填", "啟用中的系統帳號 Email", "有填寫時會以 Email 對應業務人員，優先於姓名及部門。"],
-        ["預估金額", "選填", "大於或等於 0 的數字", "空白視為 0。"],
+        ["客戶預算", "選填", "大於或等於 0 的數字", "空白視為 0。"],
         ["商機成功率", "選填", "0／20／40／60／80／100", "用於 Pipeline 預測；100% 不會自動建立專案。"],
         ["成功率備註", "選填", "最多 2,000 字", "說明成功率的判斷依據。"],
         ["商機類型", "選填", "營收型商機／協銷", "空白視為營收型商機。"],
@@ -233,7 +233,7 @@ export const exportOpportunitiesToXlsx = (rows: OpportunityExportRow[]) => {
             "業務人員 Email",
             "業務人員",
             "業務部門",
-            "預估金額",
+            "客戶預算",
             "協銷金額",
             "報價金額",
             "最終成交金額",
@@ -277,13 +277,13 @@ export const parseOpportunityWorkbook = (data: ArrayBuffer): OpportunityImportPr
         const salesRep = textCell(getCell(source, ["業務人員", "業務", "salesRep"]));
         const salesDepartment = textCell(getCell(source, ["業務部門", "salesDepartment"]));
         if (![id, title, customerName, salesEmail, salesRep, salesDepartment].some(Boolean) &&
-            !textCell(getCell(source, ["預估金額", "estimatedValue"]))) return null;
+            !textCell(getCell(source, ["客戶預算", "預估金額", "estimatedValue"]))) return null;
 
         const errors: string[] = [];
         const warnings: string[] = [];
         if (!title) errors.push("商機名稱不可為空");
         if (!customerName) errors.push("客戶名稱不可為空");
-        const amount = parseAmount(getCell(source, ["預估金額", "商機金額", "estimatedValue"]));
+        const amount = parseAmount(getCell(source, ["客戶預算", "預估金額", "商機金額", "estimatedValue"]));
         if (amount.error) errors.push(amount.error);
         const probability = parseProbability(getCell(source, ["商機成功率 (%)", "商機成功率", "成交率 (%)", "成交率", "probability"]));
         if (probability.error) errors.push(probability.error);

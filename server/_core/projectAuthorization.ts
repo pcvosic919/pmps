@@ -166,6 +166,16 @@ export const canReviewProject = (user: ProjectAccessUser, project: any, opportun
 
 export const canEditProjectWbs = async (user: ProjectAccessUser, project: any, opportunity?: any) => {
     if (projectPermissionDenied(user, "module.projects.view") || projectPermissionDenied(user, "wbs.submit")) return false;
+    const isBusinessQuoteSetupProject = hasAnyRole(user as any, ["business"]) && (
+        project?.isQuoteWorkspace === true || (
+            project?.status === "new"
+            && project?.conversionMode === "confirmed_quote"
+            && idString(project?.createdById) === user.id
+        )
+    );
+    if (isBusinessQuoteSetupProject && opportunity) {
+        return canAccessServiceRequest(user as any, project, opportunity);
+    }
     if (hasAnyRole(user as any, ["tech"])) {
         const canView = await canViewProject(user, project, opportunity);
         return canView && (
@@ -199,7 +209,12 @@ export const getProjectCapabilities = async (
         canViewProjectFinancials(user, project, opportunity, options),
         canEditProjectFinancials(user, project, opportunity, options),
     ]);
-    const canEditWbs = hasAnyRole(user as any, ["tech"])
+    const canEditWbs = project?.isQuoteWorkspace || (
+        hasAnyRole(user as any, ["business"])
+        && project?.status === "new"
+        && project?.conversionMode === "confirmed_quote"
+        && idString(project?.createdById) === user.id
+    ) || hasAnyRole(user as any, ["tech"])
         ? await canEditProjectWbs(user, project, opportunity)
         : await canPerform("wbs.submit");
     return {

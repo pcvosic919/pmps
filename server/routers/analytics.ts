@@ -287,7 +287,7 @@ const buildSettlementSnapshotPayload = async (month: string, type: "project" | "
 
     if (type === "project") {
         const [srs, timesheets] = await Promise.all([
-            ServiceRequestModel.find({}, { _id: 1, title: 1, pmId: 1, contractAmount: 1, finalPrice: 1, status: 1, salesDepartment: 1, salesRep: 1 }).populate("pmId", "name department").lean(),
+            ServiceRequestModel.find({ isQuoteWorkspace: { $ne: true } }, { _id: 1, title: 1, pmId: 1, contractAmount: 1, finalPrice: 1, status: 1, salesDepartment: 1, salesRep: 1 }).populate("pmId", "name department").lean(),
             TimesheetModel.find({ type: "project", workDate: { $gte: startDate, $lte: endDate } }).populate("techId", "name department costRate").lean()
         ]);
         const costMap = new Map<string, { cost: number; hours: number }>();
@@ -509,6 +509,8 @@ export const analyticsRouter = router({
                     tsMatch.techId = null;
                 }
             }
+
+            srQuery.isQuoteWorkspace = { $ne: true };
 
             // Fetch timesheets and users to calculate REVENUE (hours * rate)
             const [srs, opps, timesheets, locks] = await Promise.all([
@@ -830,7 +832,7 @@ export const analyticsRouter = router({
             userId: z.string().optional()
         }).optional())
         .query(async ({ ctx, input }) => {
-        let srMatch: any = {};
+        let srMatch: any = { isQuoteWorkspace: { $ne: true } };
         let oppMatch: any = {};
         let tsMatch: any = { type: "project" };
         let recognitionMatch: any = { recognitionType: "project", status: "recognized" };
@@ -1015,7 +1017,7 @@ export const analyticsRouter = router({
 
             // 年度 SR 最終成交金額按 PM 部門分組
             const allSrs = await ServiceRequestModel.find(
-                { createdAt: { $gte: yearStart, $lte: yearEnd } },
+                { isQuoteWorkspace: { $ne: true }, createdAt: { $gte: yearStart, $lte: yearEnd } },
                 { contractAmount: 1, finalPrice: 1, pmId: 1 }
             ).lean();
             for (const sr of allSrs as any[]) {
@@ -1177,7 +1179,7 @@ export const analyticsRouter = router({
             userIds: z.array(z.string()).optional()
         }).optional())
         .query(async ({ input }) => {
-            let srMatch: any = {};
+            let srMatch: any = { isQuoteWorkspace: { $ne: true } };
             if (input?.departments?.length || input?.userIds?.length) {
                 let uq: any = {};
                 if (input.departments?.length) uq.department = { $in: input.departments };
@@ -1234,6 +1236,7 @@ export const analyticsRouter = router({
                 { $group: { _id: "$techId", totalCost: { $sum: "$costAmount" } } }
             ]),
             ServiceRequestModel.aggregate([
+                { $match: { isQuoteWorkspace: { $ne: true } } },
                 { $group: { _id: "$pmId", totalRevenue: { $sum: projectStatisticAmountExpr } } }
             ])
         ]);
@@ -1283,8 +1286,8 @@ export const analyticsRouter = router({
         .query(async () => {
             const year = new Date().getFullYear();
             const [openCasesRows, totalProjects, targetRows, recognizedRows, pipelineRows] = await Promise.all([
-                ServiceRequestModel.countDocuments({ status: { $nin: ["closed", "completed", "cancelled"] } }),
-                ServiceRequestModel.countDocuments(),
+                ServiceRequestModel.countDocuments({ isQuoteWorkspace: { $ne: true }, status: { $nin: ["closed", "completed", "cancelled"] } }),
+                ServiceRequestModel.countDocuments({ isQuoteWorkspace: { $ne: true } }),
                 KpiTargetModel.countDocuments({ year }),
                 RecognitionRecordModel.countDocuments({
                     recognitionType: "project",
@@ -1324,7 +1327,7 @@ export const analyticsRouter = router({
         }).optional())
         .query(async ({ ctx, input }) => {
             const allowedDepartments = await buildDepartmentAccessFilter(ctx.user, input?.department);
-            const match: any = { externalProjectCode: { $exists: true, $ne: "" } };
+            const match: any = { isQuoteWorkspace: { $ne: true }, externalProjectCode: { $exists: true, $ne: "" } };
             if (allowedDepartments !== null) {
                 if (allowedDepartments.length === 0) {
                     match._id = null;
@@ -1597,7 +1600,7 @@ export const analyticsRouter = router({
                     };
                 }).filter(u => u["Total Hours"] > 0 || u.Role === "tech" || u.Role === "presales");
             } else if (input.reportType === "settlement") {
-                let srMatch: any = {};
+                let srMatch: any = { isQuoteWorkspace: { $ne: true } };
                 let oppMatch: any = {};
                 
                 if (!hasAnyRole(ctx.user as any, ["admin"]) || input.department || input.userId) {
@@ -1691,6 +1694,7 @@ export const analyticsRouter = router({
 
                 const [srs, opportunities] = await Promise.all([
                     ServiceRequestModel.find({
+                        isQuoteWorkspace: { $ne: true },
                         ...departmentMatch(),
                         status: { $ne: "cancelled" },
                         ...projectDateMatch
@@ -1791,7 +1795,7 @@ export const analyticsRouter = router({
                 const overheadRate = Number(settingsMap.get("pcOverheadRate") || 15);
                 const targetMargin = Number(settingsMap.get("pcTargetMargin") || 30);
 
-                let srMatch: any = {};
+                let srMatch: any = { isQuoteWorkspace: { $ne: true } };
                 await applyScopedUserFilter(ctx.user, srMatch, "pmId", input.department, input.userId);
 
                 const srs = await ServiceRequestModel.find(srMatch).populate("pmId", "name department").populate("opportunityId", "title customerName").lean();
@@ -1834,6 +1838,7 @@ export const analyticsRouter = router({
 
                 const [revenueAgg, costAgg] = await Promise.all([
                     ServiceRequestModel.aggregate([
+                        { $match: { isQuoteWorkspace: { $ne: true } } },
                         { $group: { _id: "$pmId", totalRevenue: { $sum: projectStatisticAmountExpr }, count: { $sum: 1 } } }
                     ]),
                     TimesheetModel.aggregate([
@@ -1862,7 +1867,7 @@ export const analyticsRouter = router({
                 }).sort((a, b) => b["\u7e3d\u71df\u6536"] - a["\u7e3d\u71df\u6536"]);
             } else if (input.reportType === "budget_variance") {
                 // Budget Variance Analysis
-                let srMatch: any = {};
+                let srMatch: any = { isQuoteWorkspace: { $ne: true } };
                 await applyScopedUserFilter(ctx.user, srMatch, "pmId", input.department, input.userId);
                 const srs = await ServiceRequestModel.find(srMatch).populate("pmId", "name").lean();
                 const costAgg = await TimesheetModel.aggregate([
@@ -1897,7 +1902,7 @@ export const analyticsRouter = router({
                     : null;
                 if (input.userId && !scopedUser) return [];
 
-                const srMatch: any = {};
+                const srMatch: any = { isQuoteWorkspace: { $ne: true } };
                 if (allowedDepartments !== null) {
                     const deptUsers = await UserModel.find({ department: { $in: allowedDepartments } }, { _id: 1 }).lean();
                     const deptUserIds = deptUsers.map((user: any) => user._id);
@@ -2182,7 +2187,7 @@ export const analyticsRouter = router({
                     : null;
                 if (input.userId && !scopedUser) return [];
 
-                const srs = await ServiceRequestModel.find({ status: { $ne: "cancelled" } })
+                const srs = await ServiceRequestModel.find({ isQuoteWorkspace: { $ne: true }, status: { $ne: "cancelled" } })
                     .populate("pmId", "name department")
                     .populate("wbsVersions.items.assigneeId", "name email department")
                     .sort({ createdAt: 1 })
@@ -2291,7 +2296,7 @@ export const analyticsRouter = router({
                     }));
             } else if (input.reportType === "sla_compliance") {
                 // SLA Compliance - based on project on-time completion
-                let srMatch: any = {};
+                let srMatch: any = { isQuoteWorkspace: { $ne: true } };
                 await applyScopedUserFilter(ctx.user, srMatch, "pmId", input.department, input.userId);
                 const srs = await ServiceRequestModel.find(srMatch).populate("pmId", "name department").lean();
 
@@ -2362,7 +2367,7 @@ export const analyticsRouter = router({
                 const scopedUser = input.userId
                     ? (await getScopedReportUsers(ctx.user, input.department, input.userId))[0]
                     : null;
-                const srMatch: any = { status: { $nin: ["closed", "completed", "cancelled"] } };
+                const srMatch: any = { isQuoteWorkspace: { $ne: true }, status: { $nin: ["closed", "completed", "cancelled"] } };
                 const allowedDepartments = await buildDepartmentAccessFilter(ctx.user, input.department);
                 if (allowedDepartments !== null) {
                     if (allowedDepartments.length === 0) {
@@ -2494,7 +2499,7 @@ export const analyticsRouter = router({
                     ];
                 }
 
-                const srMatch: any = {};
+                const srMatch: any = { isQuoteWorkspace: { $ne: true } };
                 if (departmentFilter) {
                     srMatch.$or = [
                         { salesDepartment: { $in: departmentFilter } },
@@ -2826,7 +2831,7 @@ export const analyticsRouter = router({
             const pcPresalesHourlyRate = Number(settingsMap.get("pcPresalesHourlyRate") || 1000);
             const pcOverheadRate = Number(settingsMap.get("pcOverheadRate") || 15);
 
-            let srMatch: any = { createdAt: { $gte: start, $lte: end } };
+            let srMatch: any = { isQuoteWorkspace: { $ne: true }, createdAt: { $gte: start, $lte: end } };
             let tsMatch: any = { workDate: { $gte: start, $lte: end } };
             
             if (input.department) {

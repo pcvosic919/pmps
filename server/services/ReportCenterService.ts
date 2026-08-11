@@ -218,7 +218,11 @@ const openOpportunityRows = async (end: Date, departments: string[] | null) => {
 };
 
 const openProjectRows = async (end: Date, departments: string[] | null) => {
-    const query: any = { status: { $in: ["new", "in_progress", "on_hold", "pending_acceptance"] }, createdAt: { $lte: end } };
+    const query: any = {
+        isQuoteWorkspace: { $ne: true },
+        status: { $in: ["new", "in_progress", "on_hold", "pending_acceptance"] },
+        createdAt: { $lte: end }
+    };
     if (departments !== null) query.salesDepartment = { $in: departments };
     const projects = await ServiceRequestModel.find(query)
         .select("projectCode title customerName status plannedEndDate pmId salesRep salesDepartment finalPrice contractAmount adjustedLaborCost marginWarning completionPercentage wbsVersions changeRequests")
@@ -330,6 +334,7 @@ const peopleKpiRows = async (start: Date, end: Date, departments: string[] | nul
             { $group: { _id: "$techId", hours: { $sum: "$hours" } } }
         ]),
         ServiceRequestModel.find({
+            isQuoteWorkspace: { $ne: true },
             pmId: { $in: userIds },
             status: { $in: ["closed", "completed"] },
             $or: [
@@ -343,6 +348,7 @@ const peopleKpiRows = async (start: Date, end: Date, departments: string[] | nul
         ]),
         KpiTargetModel.find({ year: Number(toTaipeiMonth(start).slice(0, 4)), scope: "person", userId: { $in: userIds } }).lean(),
         ServiceRequestModel.find({
+            isQuoteWorkspace: { $ne: true },
             "wbsVersions.status": "approved",
             $or: [
                 { "wbsVersions.items.assigneeId": { $in: userIds } },
@@ -453,7 +459,7 @@ const timesheetRows = async (start: Date, end: Date, departments: string[] | nul
 };
 
 const dataQualityRows = async (departments: string[] | null) => {
-    const projectMatch: any = {};
+    const projectMatch: any = { isQuoteWorkspace: { $ne: true } };
     const opportunityMatch: any = {};
     if (departments !== null) {
         projectMatch.salesDepartment = { $in: departments };

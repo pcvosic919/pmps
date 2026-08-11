@@ -16,6 +16,12 @@ const isDuplicateKeyError = (error: unknown) =>
     !!error && typeof error === "object" && "code" in error && (error as { code?: number }).code === 11000;
 
 export const findProjectByOpportunityId = (opportunityId: string) =>
+    ServiceRequestModel.findOne({
+        opportunityId: toObjectId(opportunityId),
+        isQuoteWorkspace: { $ne: true }
+    });
+
+export const findProjectOrQuoteWorkspaceByOpportunityId = (opportunityId: string) =>
     ServiceRequestModel.findOne({ opportunityId: toObjectId(opportunityId) });
 
 export type OpportunityConversionActor = {
@@ -50,7 +56,7 @@ export const createProjectForOpportunityOnce = async (
     opportunityId: string,
     attributes: Record<string, unknown>
 ) => {
-    const existing = await findProjectByOpportunityId(opportunityId);
+    const existing = await findProjectOrQuoteWorkspaceByOpportunityId(opportunityId);
     if (existing) return { project: existing, created: false };
 
     try {
@@ -61,10 +67,82 @@ export const createProjectForOpportunityOnce = async (
         return { project, created: true };
     } catch (error) {
         if (!isDuplicateKeyError(error)) throw error;
-        const concurrentProject = await findProjectByOpportunityId(opportunityId);
+        const concurrentProject = await findProjectOrQuoteWorkspaceByOpportunityId(opportunityId);
         if (!concurrentProject) throw error;
         return { project: concurrentProject, created: false };
     }
+};
+
+export const ensureQuotePreparationWorkspace = async (
+    opportunityId: string,
+    quote: { _id: unknown; quoteCode: string; amount: number },
+    actor: OpportunityConversionActor
+) => {
+    const opportunity = await OpportunityModel.findById(opportunityId)
+        .select("opportunityCode title customerName salesUserId salesDepartment salesRep ownerId presalesAssignments")
+        .lean();
+    if (!opportunity) throw new TRPCError({ code: "NOT_FOUND", message: "找不到該商機" });
+
+    const existing = await findProjectOrQuoteWorkspaceByOpportunityId(opportunityId);
+    if (existing) {
+        if (existing.isQuoteWorkspace) {
+            existing.sourceQuoteId = toObjectId(String(quote._id));
+            existing.sourceQuoteCodeSnapshot = quote.quoteCode;
+            existing.contractAmount = quote.amount;
+            existing.finalPrice = quote.amount;
+            await existing.save();
+        }
+        return { workspace: existing, created: false };
+    }
+
+    const customerName = (opportunity.customerName || "").trim();
+    const title = (opportunity.title || "").trim();
+    if (!customerName || !title) {
+        throw new TRPCError({ code: "BAD_REQUEST", message: "建立報價準備工作區前，必須先填寫公司名稱與商機名稱" });
+    }
+
+    const result = await createProjectForOpportunityOnce(opportunityId, {
+        title,
+        customerName,
+        salesUserId: opportunity.salesUserId,
+        salesDepartment: opportunity.salesDepartment || "",
+        salesRep: opportunity.salesRep || "",
+        externalServiceType: "報價 WBS 準備",
+        contractAmount: quote.amount,
+        finalPrice: quote.amount,
+        srType: "project",
+        sourceQuoteId: toObjectId(String(quote._id)),
+        sourceOpportunityCodeSnapshot: opportunity.opportunityCode || "",
+        sourceQuoteCodeSnapshot: quote.quoteCode,
+        conversionMode: "confirmed_quote",
+        isQuoteWorkspace: true,
+        createdById: toObjectId(actor.id),
+        createdByNameSnapshot: actor.name || actor.email || "",
+        createdByDepartment: actor.department || "",
+        members: buildOpportunityProjectMembers(opportunity.ownerId.toString(), {
+            presalesAssignments: opportunity.presalesAssignments
+        }),
+        status: "new"
+    });
+
+    if (result.created) {
+        await recordBusinessHistory({
+            entityType: "project",
+            entityId: result.project._id,
+            action: "quote_workspace_created",
+            after: {
+                opportunityId,
+                quoteId: quote._id,
+                quoteCode: quote.quoteCode,
+                amount: quote.amount,
+                isQuoteWorkspace: true
+            },
+            actorId: actor.id,
+            actorRole: actor.role,
+            source: "api"
+        });
+    }
+    return { workspace: result.project, created: result.created };
 };
 
 export const finalizeOpportunityConversion = async (
@@ -128,7 +206,7 @@ export const confirmQuoteAndCreateDraftProject = async (input: {
         throw new TRPCError({ code: "BAD_REQUEST", message: "已失敗或已取消的商機不可確認報價" });
     }
 
-    const existingProject = await findProjectByOpportunityId(opportunity._id.toString());
+    const existingProject = await findProjectOrQuoteWorkspaceByOpportunityId(opportunity._id.toString());
     const previousQuoteId = existingProject?.sourceQuoteId?.toString()
         || opportunity.adoptedQuoteId?.toString()
         || "";
@@ -169,7 +247,11 @@ export const confirmQuoteAndCreateDraftProject = async (input: {
         status: "new"
     });
     const project = conversionResult.project;
-    if (conversionResult.created) {
+    const promotedQuoteWorkspace = project.isQuoteWorkspace === true;
+    if (promotedQuoteWorkspace) {
+        project.isQuoteWorkspace = false;
+    }
+    if (conversionResult.created || promotedQuoteWorkspace) {
         try {
             const folder = await folderStorageService.createRecordFolder(
                 projectTitle,
@@ -197,6 +279,8 @@ export const confirmQuoteAndCreateDraftProject = async (input: {
         project.contractAmount = quote.amount;
         project.finalPrice = quote.amount;
         project.conversionMode = "confirmed_quote";
+        await project.save();
+    } else if (promotedQuoteWorkspace) {
         await project.save();
     }
 
@@ -265,11 +349,11 @@ export const confirmQuoteAndCreateDraftProject = async (input: {
             source: "api"
         }));
     }
-    if (conversionResult.created) {
+    if (conversionResult.created || promotedQuoteWorkspace) {
         historyTasks.push(recordBusinessHistory({
             entityType: "project",
             entityId: project._id,
-            action: "project_created_from_confirmed_quote",
+            action: promotedQuoteWorkspace ? "quote_workspace_promoted_to_project" : "project_created_from_confirmed_quote",
             after: {
                 projectCode: project.projectCode,
                 status: project.status,
@@ -298,5 +382,5 @@ export const confirmQuoteAndCreateDraftProject = async (input: {
     }
     await Promise.all(historyTasks);
 
-    return { project, quoteId: quote._id.toString(), created: conversionResult.created, replaced: isReplacingQuote };
+    return { project, quoteId: quote._id.toString(), created: conversionResult.created || promotedQuoteWorkspace, replaced: isReplacingQuote };
 };

@@ -21,6 +21,7 @@ export type CreateOpportunityQuoteInput = {
     currency?: string;
     taxIncluded?: boolean;
     ownerId?: string;
+    quoteDate: Date;
     validFrom?: Date;
     validUntil?: Date;
     expectedCloseDate?: Date;
@@ -71,6 +72,7 @@ export const createOpportunityQuoteVersion = async (
         currency: input.currency || "TWD",
         taxIncluded: input.taxIncluded || false,
         ...owner,
+        quoteDate: input.quoteDate,
         validFrom: input.validFrom,
         validUntil: input.validUntil,
         expectedCloseDate: input.expectedCloseDate
@@ -95,7 +97,7 @@ export const createOpportunityQuoteVersion = async (
             entityType: "opportunity_quote",
             entityId: quote._id,
             action: "quote_version_created",
-            after: { version, quoteCode: quote.quoteCode, amount: quote.amount, status: quote.status },
+            after: { version, quoteCode: quote.quoteCode, amount: quote.amount, quoteDate: quote.quoteDate, status: quote.status },
             actorId: actor.id,
             actorRole: actor.role,
             source: "api"
