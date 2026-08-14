@@ -2167,7 +2167,6 @@ export const analyticsRouter = router({
                             "案件編號(協銷)": sr.externalPresalesCaseCode || "",
                             "更新日期": toDateText(sr.updatedAt),
                             "保固到期日期": toDateText(sr.warrantyExpiresAt),
-                            "計費分攤": sr.billingAllocation || "",
                             "認列月份": sr.recognitionMonth || "",
                             "工作項目": joinUnique(summary.items.filter((item: any) => {
                                 const assignee = item.assigneeId as any;
@@ -2465,7 +2464,6 @@ export const analyticsRouter = router({
                         "案件編號(協銷)": sr.externalPresalesCaseCode || "",
                         "更新日期": toDateText(sr.updatedAt),
                         "保固到期日期": toDateText(sr.warrantyExpiresAt),
-                        "計費分攤": sr.billingAllocation || "",
                         "認列月份": sr.recognitionMonth || "",
                         "工作項目": joinUnique(wbsItems.map((item: any) => item?.title)),
                         "總工作項目": sr.totalWorkItems || totalWorkItems,

@@ -27,9 +27,7 @@ const srSchema = z.object({
     externalServiceType: z.string().optional(),
     plannedStartDate: optionalDate,
     plannedEndDate: optionalDate,
-    reviewDate: optionalDate,
     warrantyExpiresAt: optionalDate,
-    billingAllocation: z.string().optional(),
     srType: z.enum(["project", "maintenance", "other_activity"]).default("project"),
     contractAmount: z.number().min(0, "合約金額不能為負").optional(),
     finalPrice: z.number().min(0, "合約最終金額不能為負").optional(),
@@ -107,8 +105,7 @@ export function ServiceRequestsPage() {
         defaultValues: { 
             title: "", customerName: "", srType: "project", contractAmount: 0, finalPrice: undefined,
             salesUserId: "", salesDepartment: "", salesRep: "",
-            externalServiceType: "專案服務", plannedStartDate: "", plannedEndDate: "", reviewDate: "", warrantyExpiresAt: "",
-            billingAllocation: "",
+            externalServiceType: "專案服務", plannedStartDate: "", plannedEndDate: "", warrantyExpiresAt: "",
             totalPoints: 0, pointValue: 500, 
             pmId: "", joinPmAsMember: true 
         }
@@ -453,38 +450,12 @@ export function ServiceRequestsPage() {
                                         />
                                         <FormField
                                             control={form.control}
-                                            name="reviewDate"
-                                            render={({ field }: any) => (
-                                                <FormItem>
-                                                    <FormLabel>審核日期</FormLabel>
-                                                    <FormControl>
-                                                        <Input type="date" {...field} />
-                                                    </FormControl>
-                                                    <FormMessage />
-                                                </FormItem>
-                                            )}
-                                        />
-                                        <FormField
-                                            control={form.control}
                                             name="warrantyExpiresAt"
                                             render={({ field }: any) => (
                                                 <FormItem>
                                                     <FormLabel>保固到期</FormLabel>
                                                     <FormControl>
                                                         <Input type="date" {...field} />
-                                                    </FormControl>
-                                                    <FormMessage />
-                                                </FormItem>
-                                            )}
-                                        />
-                                        <FormField
-                                            control={form.control}
-                                            name="billingAllocation"
-                                            render={({ field }: any) => (
-                                                <FormItem>
-                                                    <FormLabel>{watchedSrType === "other_activity" ? "服務內容摘要" : "計費分攤"}</FormLabel>
-                                                    <FormControl>
-                                                        <Input placeholder={watchedSrType === "other_activity" ? "例：已與業務確認的服務內容" : "例：部門分攤 / 客戶合約"} {...field} />
                                                     </FormControl>
                                                     <FormMessage />
                                                 </FormItem>

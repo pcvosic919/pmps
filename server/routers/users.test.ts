@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import mongoose from "mongoose";
 import { buildAssignmentCandidateQuery, buildUserListQuery } from "./users";
 
 describe("user list query", () => {
@@ -46,7 +47,7 @@ describe("assignment candidate query", () => {
     it("searches name, email, department and employee code", () => {
         const query = buildAssignmentCandidateQuery("wbs", "A+B");
         const clauses = query.$and as Array<any>;
-        expect(clauses[1]).toEqual({ role: { $in: ["tech", "presales", "pm"] } });
+        expect(clauses[1]).toEqual({ role: { $in: ["tech"] } });
         expect(clauses[2].$or.map((entry: Record<string, RegExp>) => Object.keys(entry)[0])).toEqual([
             "name",
             "email",
@@ -55,5 +56,25 @@ describe("assignment candidate query", () => {
         ]);
         expect(clauses[2].$or[0].name.test("A+B Team")).toBe(true);
         expect(clauses[2].$or[0].name.test("AAAB Team")).toBe(false);
+    });
+
+    it("excludes base user accounts from opportunity and project member selection", () => {
+        expect(buildAssignmentCandidateQuery("project_member")).toEqual({
+            $and: [
+                { isActive: { $ne: false } },
+                { role: { $in: ["admin", "manager", "presales", "pm", "tech", "business"] } }
+            ]
+        });
+    });
+
+    it("adds scoped project participants to the default Tech-only WBS candidates", () => {
+        const participantId = new mongoose.Types.ObjectId();
+        const query = buildAssignmentCandidateQuery("wbs", undefined, [participantId]);
+        expect((query.$and as Array<any>)[1]).toEqual({
+            $or: [
+                { role: { $in: ["tech"] } },
+                { _id: { $in: [participantId] } }
+            ]
+        });
     });
 });

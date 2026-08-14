@@ -885,6 +885,13 @@ export const opportunitiesRouter = router({
             }
             assertOpportunityEditable(opportunity);
 
+            assertFound(
+                await UserModel.findOne({ _id: input.userId, isActive: { $ne: false }, role: { $ne: "user" } })
+                    .select("_id role")
+                    .lean(),
+                "找不到可加入的使用者；一般 User 權限帳號不可加入商機成員"
+            );
+
             const existingMember = (opportunity.members || []).find((member: any) => member.userId?.toString() === input.userId);
             if (input.memberRole === "owner") {
                 const ownerSnapshot = await getOwnerSnapshot(input.userId);

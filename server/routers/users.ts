@@ -9,6 +9,8 @@ import { hashPassword } from "../_core/password";
 import { canDeleteRecord } from "../_core/authorization";
 import mongoose from "mongoose";
 import { scanAssignmentIntegrity } from "../services/AssignmentIntegrityService";
+import { ServiceRequestModel } from "../models/ServiceRequest";
+import { canViewProject } from "../_core/projectAuthorization";
 
 const userSortFields = ["name", "email", "role", "createdAt"] as const;
 const assignmentContexts = ["project_pm", "project_owner", "project_member", "presales", "wbs", "issue_assignee"] as const;
@@ -17,9 +19,9 @@ type AssignmentContext = typeof assignmentContexts[number];
 const assignmentRoles: Record<AssignmentContext, readonly string[]> = {
     project_pm: ["pm"],
     project_owner: ["admin", "manager", "presales", "pm"],
-    project_member: ["admin", "manager", "presales", "pm", "tech", "business", "user"],
+    project_member: ["admin", "manager", "presales", "pm", "tech", "business"],
     presales: ["presales", "tech", "pm"],
-    wbs: ["tech", "presales", "pm"],
+    wbs: ["tech"],
     issue_assignee: ["tech", "presales", "pm"]
 };
 
@@ -58,10 +60,17 @@ export const buildUserListQuery = (search?: string, departments: string[] = []) 
     return { $and: clauses };
 };
 
-export const buildAssignmentCandidateQuery = (context: AssignmentContext, search?: string) => {
+export const buildAssignmentCandidateQuery = (
+    context: AssignmentContext,
+    search?: string,
+    scopedUserIds: mongoose.Types.ObjectId[] = []
+) => {
+    const roleClause = context === "wbs" && scopedUserIds.length > 0
+        ? { $or: [{ role: { $in: assignmentRoles[context] } }, { _id: { $in: scopedUserIds } }] }
+        : { role: { $in: assignmentRoles[context] } };
     const clauses: Record<string, unknown>[] = [
         { isActive: { $ne: false } },
-        { role: { $in: assignmentRoles[context] } }
+        roleClause
     ];
     const keyword = search?.trim();
     if (keyword) {
@@ -76,6 +85,34 @@ export const buildAssignmentCandidateQuery = (context: AssignmentContext, search
         });
     }
     return { $and: clauses };
+};
+
+const getScopedAssignmentUserIds = async (
+    context: AssignmentContext,
+    scopeId: string | undefined,
+    user: Parameters<typeof canViewProject>[0]
+) => {
+    if (context !== "wbs" || !scopeId) return [];
+    if (!mongoose.isValidObjectId(scopeId)) {
+        throw new TRPCError({ code: "BAD_REQUEST", message: "專案識別碼格式錯誤" });
+    }
+    const project: any = await ServiceRequestModel.findById(scopeId)
+        .select("createdById pmId members opportunityId wbsVersions.items.assigneeId changeRequests")
+        .lean();
+    if (!project) throw new TRPCError({ code: "NOT_FOUND", message: "找不到該專案" });
+    if (!await canViewProject(user, project)) {
+        throw new TRPCError({ code: "FORBIDDEN", message: "您沒有權限查詢此專案的 WBS 指派人員" });
+    }
+    const memberIds = (project.members || [])
+        .filter((member: any) => member.memberRole !== "watcher")
+        .map((member: any) => toObjectId(member.userId.toString()));
+    if (memberIds.length === 0) return [];
+    const eligibleMembers = await UserModel.find({
+        _id: { $in: memberIds },
+        isActive: { $ne: false },
+        role: { $ne: "user" }
+    }).select("_id").lean();
+    return eligibleMembers.map((member) => member._id);
 };
 
 export const usersRouter = router({
@@ -150,11 +187,13 @@ export const usersRouter = router({
             search: z.string().trim().optional(),
             cursor: z.string().nullish(),
             limit: z.number().min(1).max(100).default(30),
-            includeIds: z.array(z.string()).max(100).default([])
+            includeIds: z.array(z.string()).max(100).default([]),
+            scopeId: z.string().optional()
         }))
-        .query(async ({ input }) => {
+        .query(async ({ input, ctx }) => {
             const cursor = input.cursor ? decodeCursor(input.cursor) : null;
-            let query: Record<string, unknown> = buildAssignmentCandidateQuery(input.context, input.search);
+            const scopedUserIds = await getScopedAssignmentUserIds(input.context, input.scopeId, ctx.user);
+            let query: Record<string, unknown> = buildAssignmentCandidateQuery(input.context, input.search, scopedUserIds);
             if (cursor) {
                 query = {
                     $and: [
@@ -186,12 +225,13 @@ export const usersRouter = router({
             const pageRows = hasMore ? candidateRows.slice(0, input.limit) : candidateRows;
             const lastRow = pageRows[pageRows.length - 1];
             const allowedRoles = new Set(assignmentRoles[input.context]);
+            const scopedUserIdSet = new Set(scopedUserIds.map((id: mongoose.Types.ObjectId) => id.toString()));
             const byId = new Map<string, any>();
             for (const row of [...includedRows, ...pageRows]) byId.set(row._id.toString(), row);
 
             return {
                 items: [...byId.values()].map((user) => {
-                    const roleEligible = allowedRoles.has(user.role);
+                    const roleEligible = allowedRoles.has(user.role) || scopedUserIdSet.has(user._id.toString());
                     const active = user.isActive !== false;
                     return {
                         id: user._id.toString(),
@@ -216,14 +256,19 @@ export const usersRouter = router({
     resolveAssignmentUsers: protectedProcedure
         .input(z.object({
             context: z.enum(assignmentContexts),
-            values: z.array(z.string().trim().min(1)).min(1).max(1000)
+            values: z.array(z.string().trim().min(1)).min(1).max(1000),
+            scopeId: z.string().optional()
         }))
-        .query(async ({ input }) => {
+        .query(async ({ input, ctx }) => {
             const uniqueValues = [...new Set(input.values.map((value) => value.trim()).filter(Boolean))];
             const objectIds = uniqueValues.filter(mongoose.isValidObjectId).map(toObjectId);
+            const scopedUserIds = await getScopedAssignmentUserIds(input.context, input.scopeId, ctx.user);
+            const eligibilityClause = input.context === "wbs" && scopedUserIds.length > 0
+                ? { $or: [{ role: { $in: assignmentRoles[input.context] } }, { _id: { $in: scopedUserIds } }] }
+                : { role: { $in: assignmentRoles[input.context] } };
             const users = await UserModel.find({
                 isActive: { $ne: false },
-                role: { $in: assignmentRoles[input.context] },
+                ...eligibilityClause,
                 $or: [
                     ...(objectIds.length > 0 ? [{ _id: { $in: objectIds } }] : []),
                     { email: { $in: uniqueValues } },

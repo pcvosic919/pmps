@@ -237,7 +237,7 @@ const buildSrActivityAssignment = (sr: any, assignee: any, options?: { isPmView?
         estimatedHours: 1,
         actualHours: 0,
         status: ["closed", "completed"].includes(sr.status) ? "completed" : sr.status === "in_progress" ? "in_progress" : "not_started",
-        description: sr.billingAllocation || "",
+        description: sr.externalServiceType || "",
         code: sr.externalProjectCode || "",
         srTitle: sr.title,
         srType: sr.srType,
@@ -405,6 +405,44 @@ const attachAssigneeSnapshots = async <T extends { assigneeId?: string; assignee
             })
         };
     });
+};
+
+const assertWbsAssigneesEligible = async (
+    project: { members?: Array<{ userId: unknown; memberRole: string }> },
+    items: Array<{ assigneeId?: string; assigneeIds?: string[] }>
+) => {
+    const memberIds = new Set((project.members || [])
+        .filter((member) => member.memberRole !== "watcher")
+        .map((member) => idString(member.userId))
+        .filter(Boolean));
+    const assigneeIds = Array.from(new Set(items
+        .flatMap((item) => [item.assigneeId, ...(item.assigneeIds || [])])
+        .filter(Boolean))) as string[];
+    const invalidObjectId = assigneeIds.find((id) => !mongoose.isValidObjectId(id));
+    if (invalidObjectId) {
+        const rowIndex = items.findIndex((item) => [item.assigneeId, ...(item.assigneeIds || [])].includes(invalidObjectId));
+        throw new TRPCError({ code: "BAD_REQUEST", message: `第 ${rowIndex + 1} 筆指派人員帳號格式錯誤` });
+    }
+    if (assigneeIds.length === 0) return;
+    const users = await UserModel.find({ _id: { $in: assigneeIds.map(toObjectId) } })
+        .select("role isActive")
+        .lean();
+    const userMap = new Map(users.map((user: any) => [user._id.toString(), user]));
+    for (let index = 0; index < items.length; index++) {
+        const itemIds = Array.from(new Set([items[index].assigneeId, ...(items[index].assigneeIds || [])].filter(Boolean))) as string[];
+        for (const userId of itemIds) {
+            const user = userMap.get(userId);
+            if (!user || user.isActive === false) {
+                throw new TRPCError({ code: "BAD_REQUEST", message: `第 ${index + 1} 筆指派人員不存在或帳號已停用` });
+            }
+            if (user.role === "user" || (user.role !== "tech" && !memberIds.has(userId))) {
+                throw new TRPCError({
+                    code: "BAD_REQUEST",
+                    message: `第 ${index + 1} 筆指派人員必須是 Tech，或先加入此專案的參與人員`
+                });
+            }
+        }
+    }
 };
 
 const getProjectWbsSummary = (sr: any) => {
@@ -582,9 +620,7 @@ export const projectsRouter = router({
             externalServiceType: z.string().trim().optional(),
             plannedStartDate: z.coerce.date().optional(),
             plannedEndDate: z.coerce.date().optional(),
-            reviewDate: z.coerce.date().optional(),
             warrantyExpiresAt: z.coerce.date().optional(),
-            billingAllocation: z.string().trim().optional(),
             joinPmAsMember: z.boolean().default(true),
             opportunityId: z.string().optional(),
             conversionExceptionReason: z.string().trim().max(2000).optional()
@@ -696,9 +732,7 @@ export const projectsRouter = router({
                 createdByDepartment: ctx.user.department || "",
                 plannedStartDate: input.plannedStartDate,
                 plannedEndDate: input.plannedEndDate,
-                reviewDate: input.reviewDate,
                 warrantyExpiresAt: input.warrantyExpiresAt,
-                billingAllocation: input.billingAllocation || undefined,
                 plannedEndDateHistory: input.plannedEndDate ? [{
                     nextDate: input.plannedEndDate,
                     changedById: toObjectId(ctx.user.id),
@@ -841,9 +875,12 @@ export const projectsRouter = router({
                 await canManageProjectMembers(ctx.user, sr, opportunity),
                 "您沒有權限管理此專案成員"
             );
-            const user = assertFound(await UserModel.findById(input.userId).select("_id isActive").lean(), "找不到指定使用者");
+            const user = assertFound(await UserModel.findById(input.userId).select("_id isActive role").lean(), "找不到指定使用者");
             if (user.isActive === false) {
                 throw new TRPCError({ code: "BAD_REQUEST", message: "無法加入已停用帳號" });
+            }
+            if (user.role === "user") {
+                throw new TRPCError({ code: "BAD_REQUEST", message: "一般 User 權限帳號不可加入專案參與人員" });
             }
             const existingMember = (sr.members || []).find((member: any) => idString(member.userId) === input.userId);
             if (existingMember) {
@@ -1504,8 +1541,8 @@ export const projectsRouter = router({
             );
             const update: Record<string, unknown> = {
                 ...changes,
-                salesUserId: changes.salesUserId ? toObjectId(changes.salesUserId) : undefined,
-                pmId: changes.pmId ? toObjectId(changes.pmId) : undefined
+                salesUserId: changes.salesUserId === undefined ? undefined : changes.salesUserId ? toObjectId(changes.salesUserId) : null,
+                pmId: changes.pmId === undefined ? undefined : changes.pmId ? toObjectId(changes.pmId) : null
             };
             Object.keys(update).forEach(key => update[key] === undefined && delete update[key]);
             if (changes.plannedEndDate && idString(sr.plannedEndDate) !== idString(changes.plannedEndDate)) {
@@ -1563,7 +1600,7 @@ export const projectsRouter = router({
                 }
             }
             const targetUser = assertFound(
-                await UserModel.findOne({ _id: input.newOwnerUserId, isActive: { $ne: false } }).lean(),
+                await UserModel.findOne({ _id: input.newOwnerUserId, isActive: { $ne: false }, role: { $ne: "user" } }).lean(),
                 "找不到可交接的使用者"
             );
             for (const member of sr.members || []) {
@@ -1877,6 +1914,7 @@ export const projectsRouter = router({
             if (input.revision !== undefined && input.revision < currentRevision) {
                 throw new TRPCError({ code: "CONFLICT", message: "草稿已在其他頁面更新，請重新載入" });
             }
+            await assertWbsAssigneesEligible(sr, input.items);
             const itemsWithSnapshots = await attachAssigneeSnapshots(input.items);
             const nextDraft = {
                 userId: toObjectId(ctx.user.id),
@@ -1988,6 +2026,7 @@ export const projectsRouter = router({
                 }
             }
 
+            await assertWbsAssigneesEligible(sr, input.items);
             const departmentApprovals = await buildDepartmentApprovals(input.items);
             const itemsWithSnapshots = await attachAssigneeSnapshots(input.items);
             const newVersion = {
@@ -2321,7 +2360,7 @@ export const projectsRouter = router({
                     { "members.userId": { $in: scopedUserIds } }
                 ]
             })
-                .select("title srType externalServiceType externalProjectCode billingAllocation pmId createdById members wbsVersions createdAt updatedAt plannedStartDate plannedEndDate closeDate completedAt status")
+                .select("title srType externalServiceType externalProjectCode pmId createdById members wbsVersions createdAt updatedAt plannedStartDate plannedEndDate closeDate completedAt status")
                 .populate("pmId", "name email department")
                 .populate("createdById", "name email department")
                 .populate("members.userId", "name email department")

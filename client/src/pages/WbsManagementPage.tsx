@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { trpc } from "../lib/trpc";
 import { useRoute } from "wouter";
-import { ArrowLeft, Plus, FileText, Clock, Trash2, Save, X, CheckCircle2, XCircle, Upload, Paperclip, AlertCircle, Receipt, Download, ChevronDown, ChevronRight, Users, UserPlus } from "lucide-react";
+import { ArrowLeft, Plus, FileText, Clock, Trash2, Save, X, CheckCircle2, XCircle, Upload, Paperclip, AlertCircle, Receipt, Download, ChevronDown, ChevronRight, Users, UserPlus, Pencil, MapPin } from "lucide-react";
 import { Link } from "wouter";
 import toast from "react-hot-toast";
 import * as XLSX from "xlsx";
@@ -39,6 +39,8 @@ type WbsImportPreview = {
     };
     warnings: string[];
 };
+
+type ProjectMemberRole = "owner" | "assignee" | "participant" | "watcher";
 
 export function WbsManagementPage() {
     const [, params] = useRoute("/service-requests/:id");
@@ -81,8 +83,9 @@ export function WbsManagementPage() {
     const [showEditSalesModal, setShowEditSalesModal] = useState(false);
     const [showFinancialModal, setShowFinancialModal] = useState(false);
     const [showProjectMemberModal, setShowProjectMemberModal] = useState(false);
+    const [editingProjectMember, setEditingProjectMember] = useState<any | null>(null);
     const [projectMemberUserId, setProjectMemberUserId] = useState("");
-    const [projectMemberRole, setProjectMemberRole] = useState<"owner" | "participant" | "watcher">("participant");
+    const [projectMemberRole, setProjectMemberRole] = useState<ProjectMemberRole>("participant");
     const [editedSalesUserId, setEditedSalesUserId] = useState("");
     const [editedSalesRep, setEditedSalesRep] = useState("");
     const [editedSalesDepartment, setEditedSalesDepartment] = useState("");
@@ -96,6 +99,7 @@ export function WbsManagementPage() {
     const [editedFinalPrice, setEditedFinalPrice] = useState(0);
     const [editedTotalPoints, setEditedTotalPoints] = useState(0);
     const [editedPointValue, setEditedPointValue] = useState(0);
+    const [wbsSubmitFailure, setWbsSubmitFailure] = useState<{ message: string; rowIndex?: number } | null>(null);
 
     const { data: sr, isLoading, error } = trpc.projects.srById.useQuery({ id: srId }, { enabled: !!srId });
     const projectLocked = ["closed", "completed", "cancelled"].includes(sr?.status || "");
@@ -127,7 +131,16 @@ export function WbsManagementPage() {
             utils.projects.srById.invalidate({ id: srId });
             setIsBuildingVersion(false);
             setDraftItems([]);
+            setWbsSubmitFailure(null);
             toast.success("WBS 版本已送出審核");
+        },
+        onError: (error) => {
+            const message = error.message || "WBS 送審失敗";
+            const rowMatch = message.match(/第\s*(\d+)\s*筆/);
+            const rowIndex = rowMatch ? Math.max(0, Number(rowMatch[1]) - 1) : undefined;
+            setWbsSubmitFailure({ message, rowIndex });
+            toast.error(`${message}${rowIndex !== undefined ? "；可使用定位按鈕檢查該工項" : ""}`);
+            window.setTimeout(() => focusWbsFailure(rowIndex), 0);
         }
     });
 
@@ -264,9 +277,10 @@ export function WbsManagementPage() {
             refetchProjectMembers();
             utils.projects.srById.invalidate({ id: srId });
             setShowProjectMemberModal(false);
+            setEditingProjectMember(null);
             setProjectMemberUserId("");
             setProjectMemberRole("participant");
-            toast.success("專案參與人員已新增");
+            toast.success(editingProjectMember ? "專案參與人員權限已更新" : "專案參與人員已新增");
         },
         onError: (err) => toast.error(err.message || "新增專案參與人員失敗")
     });
@@ -276,6 +290,7 @@ export function WbsManagementPage() {
             refetchProjectMembers();
             utils.projects.srById.invalidate({ id: srId });
             setShowProjectMemberModal(false);
+            setEditingProjectMember(null);
             setProjectMemberUserId("");
             setProjectMemberRole("participant");
             toast.success("專案擁有者已完成交接");
@@ -287,6 +302,9 @@ export function WbsManagementPage() {
         onSuccess: () => {
             refetchProjectMembers();
             utils.projects.srById.invalidate({ id: srId });
+            setShowProjectMemberModal(false);
+            setEditingProjectMember(null);
+            setProjectMemberUserId("");
             toast.success("專案參與人員已移除");
         },
         onError: (err) => toast.error(err.message || "移除專案參與人員失敗")
@@ -336,7 +354,7 @@ export function WbsManagementPage() {
                 const json = XLSX.utils.sheet_to_json(worksheet);
                 const assigneeInputs = Array.from(new Set(json.flatMap((row: any) => splitAssigneeTextList(getExcelAssigneeText(row)))));
                 const resolution = assigneeInputs.length > 0
-                    ? await utils.users.resolveAssignmentUsers.fetch({ context: "wbs", values: assigneeInputs })
+                    ? await utils.users.resolveAssignmentUsers.fetch({ context: "wbs", values: assigneeInputs, scopeId: srId })
                     : { items: [] };
                 const resolutionErrors = resolution.items.filter((item: any) => item.error);
                 if (resolutionErrors.length > 0) {
@@ -483,6 +501,24 @@ export function WbsManagementPage() {
 	    const canEditFinancials = sr.permissions?.canEditFinancials === true && !projectLocked;
 	    const canEditWbs = sr.permissions?.canEditWbs === true && !projectLocked;
 	    const canReviewSubmittedWbs = sr.permissions?.canReview === true && !projectLocked;
+        const projectMemberRoleLabels: Record<string, string> = {
+            owner: "負責人（Owner）",
+            assignee: "執行人員",
+            participant: "參與人員",
+            watcher: "觀察者／唯讀"
+        };
+        const accountRoleLabels: Record<string, string> = {
+            admin: "Admin",
+            manager: "Manager",
+            presales: "Presales",
+            pm: "PM",
+            tech: "Tech",
+            business: "Business",
+            user: "User"
+        };
+        const pmDisplayName = (projectMembers || []).find((member: any) => member.userId === sr.pmId)?.userName
+            || (allUsers?.items || []).find((item: any) => item.id === sr.pmId)?.name
+            || (sr.pmId ? "已指派 PM" : "未指派");
 
     const getStatusColor = (status: string) => {
         switch (status) {
@@ -558,6 +594,7 @@ export function WbsManagementPage() {
         const newItems = [...draftItems];
         newItems[index] = { ...newItems[index], [field]: value };
         setDraftItems(newItems);
+        if (wbsSubmitFailure?.rowIndex === index) setWbsSubmitFailure(null);
     };
     const handleUpdateDraftItemFields = (index: number, changes: Partial<WbsDraftItem>) => {
         setDraftItems(current => current.map((item, itemIndex) =>
@@ -669,8 +706,21 @@ export function WbsManagementPage() {
         return { compareWithVer, added, removed, changed };
     };
 
+    const focusWbsFailure = (rowIndex?: number) => {
+        const selector = rowIndex === undefined ? "[data-wbs-builder]" : `[data-wbs-row-index="${rowIndex}"]`;
+        const target = document.querySelector<HTMLElement>(selector);
+        target?.scrollIntoView({ behavior: "smooth", block: "center" });
+        if (rowIndex !== undefined) target?.querySelector<HTMLInputElement>("input, textarea, select")?.focus({ preventScroll: true });
+    };
+
     const handleSaveVersion = () => {
-        if (draftItems.length === 0) { toast.error("請至少新增一項工作"); return; }
+        if (draftItems.length === 0) {
+            const message = "請至少新增一項工作";
+            setWbsSubmitFailure({ message });
+            toast.error(message);
+            focusWbsFailure();
+            return;
+        }
         const invalidIndex = draftItems.findIndex(item =>
             !item.title.trim() ||
             (!isHeadingItem(item) && (
@@ -681,9 +731,13 @@ export function WbsManagementPage() {
             ))
         );
         if (invalidIndex >= 0) {
-            toast.error(`第 ${invalidIndex + 1} 筆工作請填寫名稱、工作天數及正確的起訖日期`);
+            const message = `第 ${invalidIndex + 1} 筆工作請填寫名稱、工作天數及正確的起訖日期`;
+            setWbsSubmitFailure({ message, rowIndex: invalidIndex });
+            toast.error(`${message}；可使用定位按鈕快速檢查`);
+            focusWbsFailure(invalidIndex);
             return;
         }
+        setWbsSubmitFailure(null);
         const normalizedItems = draftItems.map(item => ({
             ...item,
             estimatedHours: isHeadingItem(item) ? 0 : item.estimatedHours,
@@ -719,7 +773,7 @@ export function WbsManagementPage() {
             salesUserId: editedSalesUserId || undefined,
             salesDepartment: editedSalesDepartment,
             salesRep: editedSalesRep,
-            pmId: editedPmId || undefined,
+            pmId: editedPmId,
             srType: editedSrType,
             plannedStartDate: editedPlannedStartDate || undefined,
             plannedEndDate: editedPlannedEndDate || undefined
@@ -736,6 +790,20 @@ export function WbsManagementPage() {
             return;
         }
         addProjectMemberMutation.mutate({ srId, userId: projectMemberUserId, memberRole: projectMemberRole });
+    };
+
+    const openAddProjectMember = () => {
+        setEditingProjectMember(null);
+        setProjectMemberUserId("");
+        setProjectMemberRole("participant");
+        setShowProjectMemberModal(true);
+    };
+
+    const openEditProjectMember = (member: any) => {
+        setEditingProjectMember(member);
+        setProjectMemberUserId(member.userId);
+        setProjectMemberRole(member.memberRole);
+        setShowProjectMemberModal(true);
     };
 
     const handleExportIssues = () => {
@@ -1129,7 +1197,11 @@ export function WbsManagementPage() {
                                 <span className="text-muted-foreground">業務部門</span>
                                 <span className="font-medium text-right">{sr.salesDepartment || "未填寫"}</span>
                             </div>
-                            {canManageProjectMembers && (
+                            <div className="flex justify-between gap-3">
+                                <span className="text-muted-foreground">PM</span>
+                                <span className="font-medium text-right">{pmDisplayName}</span>
+                            </div>
+                            {canEditSalesOwner && (
                                 <button
                                     onClick={() => {
                                         setEditedSalesUserId(sr.salesUserId || "");
@@ -1207,9 +1279,9 @@ export function WbsManagementPage() {
                     <div className="bg-card border border-border rounded-xl p-5 shadow-sm">
                         <div className="mb-3 flex items-center justify-between">
                             <h3 className="font-semibold text-base flex items-center"><Users className="w-4 h-4 mr-2 text-primary" />專案參與人員</h3>
-                            {canEditSalesOwner && (
+                            {canManageProjectMembers && (
                                 <button
-                                    onClick={() => setShowProjectMemberModal(true)}
+                                    onClick={openAddProjectMember}
                                     className="inline-flex items-center rounded-md px-2 py-1 text-xs font-semibold text-primary hover:bg-primary/10"
                                 >
                                     <UserPlus className="w-3.5 h-3.5 mr-1" />新增
@@ -1224,15 +1296,19 @@ export function WbsManagementPage() {
                                     <div key={member.id} className="flex items-center justify-between gap-2 rounded-lg border border-border bg-muted/20 px-3 py-2 text-sm">
                                         <div className="min-w-0">
                                             <div className="truncate font-medium">{member.userName}</div>
-                                            <div className="truncate text-xs text-muted-foreground">{member.department || "未指定部門"} / {member.memberRole === "participant" ? "參與人員" : member.memberRole === "watcher" ? "觀察者" : member.memberRole}</div>
+                                            <div className="truncate text-xs text-muted-foreground">{member.department || "未指定部門"}</div>
+                                            <div className="mt-1 flex flex-wrap gap-1 text-[10px]">
+                                                <span className="rounded bg-slate-100 px-1.5 py-0.5 text-slate-700">帳號權限：{accountRoleLabels[member.role] || member.role || "未設定"}</span>
+                                                <span className="rounded bg-primary/10 px-1.5 py-0.5 text-primary">專案權限：{projectMemberRoleLabels[member.memberRole] || member.memberRole}</span>
+                                            </div>
                                         </div>
                                         {canManageProjectMembers && member.memberRole !== "owner" && (
                                             <button
-                                                onClick={() => removeProjectMemberMutation.mutate({ srId, memberId: member.id })}
-                                                className="rounded p-1 text-muted-foreground hover:bg-red-50 hover:text-red-500"
-                                                title="移除成員"
+                                                onClick={() => openEditProjectMember(member)}
+                                                className="rounded p-1 text-muted-foreground hover:bg-primary/10 hover:text-primary"
+                                                title="編輯成員權限"
                                             >
-                                                <Trash2 className="w-3.5 h-3.5" />
+                                                <Pencil className="w-3.5 h-3.5" />
                                             </button>
                                         )}
                                     </div>
@@ -1650,7 +1726,7 @@ export function WbsManagementPage() {
                         </>
                     ) : (
                         // WBS Builder Mode
-                        <div className="bg-card border border-primary/20 rounded-xl shadow-lg ring-1 ring-primary/20 flex flex-col">
+                        <div data-wbs-builder className="bg-card border border-primary/20 rounded-xl shadow-lg ring-1 ring-primary/20 flex flex-col">
                             <div className="p-4 border-b border-border bg-muted/30 flex justify-between items-center rounded-t-xl">
 	                                <h3 className="font-bold text-lg flex items-center"><Plus className="w-5 h-5 mr-2 text-primary" />草稿：建立版本 v{nextVersionNumber}</h3>
 	                                <div className="flex items-center gap-2">
@@ -1690,9 +1766,25 @@ export function WbsManagementPage() {
                             </div>
                             <div className="p-4 space-y-4 flex-1">
                                 <div className="rounded-lg border border-primary/15 bg-primary/5 px-4 py-3 text-sm text-muted-foreground">
-                                    在此規劃專案的工作分解結構 (WBS)，包含各項子任務、預估工時，並指派給對應的技術人員。
+                                    在此規劃專案的工作分解結構 (WBS)，包含各項子任務、預估工時；可指派給 Tech 或已加入此專案的非觀察者成員。
                                     {latestVersion?.items?.length ? ` 已自動帶入 v${latestVersion.version} 作為草稿基底，可直接微調後送審。` : ""}
                                 </div>
+                                {wbsSubmitFailure && (
+                                    <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+                                        <div className="flex min-w-0 items-start gap-2">
+                                            <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
+                                            <span>{wbsSubmitFailure.message}</span>
+                                        </div>
+                                        <button
+                                            type="button"
+                                            onClick={() => focusWbsFailure(wbsSubmitFailure.rowIndex)}
+                                            className="inline-flex shrink-0 items-center gap-1 rounded-md border border-red-300 bg-white px-3 py-1.5 text-xs font-semibold hover:bg-red-100"
+                                        >
+                                            <MapPin className="h-3.5 w-3.5" />
+                                            {wbsSubmitFailure.rowIndex === undefined ? "定位 WBS 編輯區" : `定位第 ${wbsSubmitFailure.rowIndex + 1} 筆`}
+                                        </button>
+                                    </div>
+                                )}
                                 {pendingImport && (
                                     <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-4 text-sm shadow-sm">
                                         <div className="flex items-start justify-between gap-4">
@@ -1771,7 +1863,12 @@ export function WbsManagementPage() {
                                             const endDateValue = item.endDate ? typeof item.endDate === "string" ? item.endDate : new Date(item.endDate).toISOString().slice(0, 10) : "";
 
                                             return (
-                                                <div key={idx} className="bg-background rounded-lg border border-border group hover:border-primary/40 transition-colors" style={{ marginLeft: `${(item.level || 0) * 1.5}rem` }}>
+                                                <div
+                                                    key={idx}
+                                                    data-wbs-row-index={idx}
+                                                    className={`bg-background rounded-lg border group transition-colors ${wbsSubmitFailure?.rowIndex === idx ? "border-red-400 ring-2 ring-red-200" : "border-border hover:border-primary/40"}`}
+                                                    style={{ marginLeft: `${(item.level || 0) * 1.5}rem` }}
+                                                >
                                                     <div className="flex gap-2 p-3">
                                                         <div className="flex-1 min-w-0 space-y-3">
                                                             <div className="flex flex-wrap items-center gap-2">
@@ -1820,6 +1917,7 @@ export function WbsManagementPage() {
                                                                     <UserSearchPicker
                                                                         users={techs || []}
                                                                         assignmentContext="wbs"
+                                                                        assignmentScopeId={srId}
                                                                         selectedUserId={item.assigneeId}
                                                                         placeholder="搜尋姓名或 Email..."
                                                                         onSelect={(selectedUser) => handleSetPrimaryAssignee(idx, selectedUser.id)}
@@ -1828,11 +1926,12 @@ export function WbsManagementPage() {
                                                                     {(item.assigneeIds || []).length > 0 && (
                                                                         <div className="mt-1 flex flex-wrap gap-1">
                                                                             {(item.assigneeIds || []).map((userId) => {
+                                                                                const projectMember = (projectMembers || []).find((member: any) => member.userId === userId);
                                                                                 const person = (allUsers?.items || []).find((user: any) => user.id === userId) || (techs || []).find((user: any) => user.id === userId);
                                                                                 const snapshot = item.assigneeSnapshots?.find((entry: any) => entry.userId === userId);
                                                                                 return (
                                                                                     <span key={userId} className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[10px] ${item.assigneeId === userId ? "border-primary/30 bg-primary/10 text-primary" : "border-border bg-muted text-muted-foreground"}`}>
-                                                                                        {person?.name || snapshot?.name || `歷史帳號 ${userId}`}{!person && snapshot?.isActive === false ? "（已停用）" : ""}
+                                                                                        {person?.name || projectMember?.userName || snapshot?.name || `歷史帳號 ${userId}`}{!person && !projectMember && snapshot?.isActive === false ? "（已停用）" : ""}
                                                                                         {item.assigneeId !== userId && (
                                                                                             <button type="button" onClick={() => handleRemoveDraftAssignee(idx, userId)} className="hover:text-red-500">×</button>
                                                                                         )}
@@ -1845,6 +1944,7 @@ export function WbsManagementPage() {
                                                                         key={`${idx}-${(item.assigneeIds || []).join(",")}`}
                                                                         users={techs || []}
                                                                         assignmentContext="wbs"
+                                                                        assignmentScopeId={srId}
                                                                         selectedUserId=""
                                                                         placeholder="新增其他指派人員..."
                                                                         onSelect={(selectedUser) => handleAddDraftAssignee(idx, selectedUser.id)}
@@ -1996,8 +2096,11 @@ export function WbsManagementPage() {
                 <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4 backdrop-blur-sm">
                     <div className="max-h-[calc(100dvh-2rem)] w-full max-w-md space-y-5 overflow-y-auto overscroll-contain rounded-xl border border-border bg-card p-6 shadow-xl">
                         <div className="flex justify-between items-center">
-                            <h2 className="text-lg font-bold flex items-center"><UserPlus className="w-5 h-5 mr-2 text-primary" />新增專案參與人員</h2>
-                            <button onClick={() => setShowProjectMemberModal(false)} className="p-1 rounded-full hover:bg-muted"><X className="w-5 h-5 text-muted-foreground" /></button>
+                            <h2 className="text-lg font-bold flex items-center">
+                                {editingProjectMember ? <Pencil className="w-5 h-5 mr-2 text-primary" /> : <UserPlus className="w-5 h-5 mr-2 text-primary" />}
+                                {editingProjectMember ? "編輯專案參與人員" : "新增專案參與人員"}
+                            </h2>
+                            <button onClick={() => { setShowProjectMemberModal(false); setEditingProjectMember(null); }} className="p-1 rounded-full hover:bg-muted"><X className="w-5 h-5 text-muted-foreground" /></button>
                         </div>
                         <div className="space-y-4">
                             <div>
@@ -2007,6 +2110,7 @@ export function WbsManagementPage() {
                                     assignmentContext="project_member"
                                     selectedUserId={projectMemberUserId}
                                     placeholder="搜尋姓名或 Email..."
+                                    disabled={Boolean(editingProjectMember)}
                                     onSelect={(selectedUser) => setProjectMemberUserId(selectedUser.id)}
                                     onClear={() => setProjectMemberUserId("")}
                                     filterUser={(pickerUser) => projectMemberRole === "owner"
@@ -2018,24 +2122,46 @@ export function WbsManagementPage() {
                                 <label className="block text-sm font-medium mb-1">角色</label>
                                 <select
                                     value={projectMemberRole}
-                                    onChange={event => setProjectMemberRole(event.target.value as "owner" | "participant" | "watcher")}
+                                    onChange={event => setProjectMemberRole(event.target.value as ProjectMemberRole)}
                                     className="w-full border border-border rounded-lg px-3 py-2 bg-background text-sm focus:outline-none focus:ring-2 focus:ring-primary/50"
                                 >
                                     <option value="owner">負責人 (Owner)</option>
+                                    <option value="assignee">執行人員 (Assignee)</option>
                                     <option value="participant">參與人員</option>
                                     <option value="watcher">觀察者 / 學習</option>
                                 </select>
+                                {editingProjectMember && (
+                                    <p className="mt-1 text-xs text-muted-foreground">
+                                        帳號權限：{accountRoleLabels[editingProjectMember.role] || editingProjectMember.role || "未設定"}；儲存後會更新此專案內的權限。
+                                    </p>
+                                )}
                             </div>
                         </div>
-                        <div className="flex justify-end space-x-3">
-                            <button onClick={() => setShowProjectMemberModal(false)} className="px-4 py-2 text-sm border border-border rounded-lg hover:bg-muted">取消</button>
+                        <div className="flex flex-wrap justify-between gap-3">
+                            <div>
+                                {editingProjectMember && editingProjectMember.memberRole !== "owner" && (
+                                    <button
+                                        onClick={() => {
+                                            if (!window.confirm(`確定要移除 ${editingProjectMember.userName} 嗎？`)) return;
+                                            removeProjectMemberMutation.mutate({ srId, memberId: editingProjectMember.id });
+                                        }}
+                                        disabled={removeProjectMemberMutation.isPending}
+                                        className="inline-flex items-center gap-1 px-4 py-2 text-sm border border-red-200 text-red-600 rounded-lg hover:bg-red-50 disabled:opacity-50"
+                                    >
+                                        <Trash2 className="h-4 w-4" />移除人員
+                                    </button>
+                                )}
+                            </div>
+                            <div className="flex gap-3">
+                            <button onClick={() => { setShowProjectMemberModal(false); setEditingProjectMember(null); }} className="px-4 py-2 text-sm border border-border rounded-lg hover:bg-muted">取消</button>
                             <button
                                 onClick={handleAddProjectMember}
                                 disabled={addProjectMemberMutation.isPending}
                                 className="px-4 py-2 text-sm bg-primary text-primary-foreground rounded-lg hover:bg-primary/90 disabled:opacity-50"
                             >
-                                {addProjectMemberMutation.isPending ? "新增中..." : "確認新增"}
+                                {addProjectMemberMutation.isPending ? "儲存中..." : editingProjectMember ? "儲存權限" : "確認新增"}
                             </button>
+                            </div>
                         </div>
                     </div>
                 </div>
@@ -2119,12 +2245,16 @@ export function WbsManagementPage() {
                             </label>
                             <label className="text-sm font-medium">
                                 PM
-                                <select value={editedPmId} onChange={event => setEditedPmId(event.target.value)} className="mt-1 w-full rounded-lg border border-border bg-background px-3 py-2 font-normal">
-                                    <option value="">未指派</option>
-                                    {(allUsers?.items || []).filter((item: any) => item.role === "pm").map((item: any) => (
-                                        <option key={item.id} value={item.id}>{item.name}</option>
-                                    ))}
-                                </select>
+                                <div className="mt-1 font-normal">
+                                    <UserSearchPicker
+                                        users={(allUsers?.items || []).filter((item: any) => item.role === "pm")}
+                                        assignmentContext="project_pm"
+                                        selectedUserId={editedPmId}
+                                        placeholder="搜尋並選擇 PM..."
+                                        onSelect={(selectedUser) => setEditedPmId(selectedUser.id)}
+                                        onClear={() => setEditedPmId("")}
+                                    />
+                                </div>
                             </label>
                             <label className="text-sm font-medium">
                                 預計開始日

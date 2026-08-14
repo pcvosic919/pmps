@@ -18,6 +18,15 @@ export type PickerUser = {
 
 export type AssignmentContext = "project_pm" | "project_owner" | "project_member" | "presales" | "wbs" | "issue_assignee";
 
+const assignmentRoleDefaults: Record<AssignmentContext, readonly string[]> = {
+    project_pm: ["pm"],
+    project_owner: ["admin", "manager", "presales", "pm"],
+    project_member: ["admin", "manager", "presales", "pm", "tech", "business"],
+    presales: ["presales", "tech", "pm"],
+    wbs: ["tech"],
+    issue_assignee: ["tech", "presales", "pm"]
+};
+
 type UserSearchPickerProps = {
     users?: PickerUser[];
     selectedUserId?: string;
@@ -29,6 +38,7 @@ type UserSearchPickerProps = {
     onClear?: () => void;
     filterUser?: (user: PickerUser) => boolean;
     assignmentContext?: AssignmentContext;
+    assignmentScopeId?: string;
     allowIneligibleUserIds?: string[];
 };
 
@@ -99,6 +109,7 @@ export function UserSearchPicker({
     onClear,
     filterUser,
     assignmentContext,
+    assignmentScopeId,
     allowIneligibleUserIds = []
 }: UserSearchPickerProps) {
     const [searchTerm, setSearchTerm] = useState("");
@@ -117,7 +128,8 @@ export function UserSearchPicker({
             context: assignmentContext || "project_member",
             search: debouncedSearchTerm || undefined,
             limit: 50,
-            includeIds: selectedUserId ? [selectedUserId] : []
+            includeIds: selectedUserId ? [selectedUserId] : [],
+            scopeId: assignmentScopeId
         },
         { enabled: Boolean(assignmentContext) && (isOpen || Boolean(selectedUserId)) }
     );
@@ -139,11 +151,15 @@ export function UserSearchPicker({
 
     const activeUsers = useMemo(
         () => mergedUsers.filter((user) => {
+            const contextEligible = !assignmentContext
+                || user.eligible === true
+                || allowIneligibleUserIds.includes(user.id)
+                || (user.eligible === undefined && assignmentRoleDefaults[assignmentContext].includes(user.role || ""));
             return user.isActive !== false
-                && (user.eligible !== false || allowIneligibleUserIds.includes(user.id))
+                && contextEligible
                 && (!filterUser || filterUser(user));
         }),
-        [allowIneligibleUserIds, filterUser, mergedUsers]
+        [allowIneligibleUserIds, assignmentContext, filterUser, mergedUsers]
     );
     const selectedUserFromList = mergedUsers.find((user) => user.id === selectedUserId);
     const selectedUser = selectedUserFromList ||
