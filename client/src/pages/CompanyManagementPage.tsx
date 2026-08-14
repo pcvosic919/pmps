@@ -4,6 +4,9 @@ import { Building2, Download, Edit, FileSpreadsheet, Plus, Search, Trash2, Uploa
 import { trpc } from "../lib/trpc";
 import { useCurrentUser } from "../lib/useCurrentUser";
 import { exportRowsToXlsx, formatExportDate, makeXlsxFileName } from "../lib/exportXlsx";
+import { useDebounce } from "../lib/useDebounce";
+
+const PAGE_SIZE = 100;
 
 type CompanyForm = {
     id?: string;
@@ -47,13 +50,24 @@ const formatDateTime = (value?: string | Date) => {
 
 export function CompanyManagementPage() {
     const [search, setSearch] = useState("");
+    const [page, setPage] = useState(1);
     const [form, setForm] = useState<CompanyForm>(emptyForm);
     const [isImporting, setIsImporting] = useState(false);
     const fileInputRef = useRef<HTMLInputElement>(null);
     const { user } = useCurrentUser();
     const canDelete = user?.isPlatformOwner === true;
     const utils = trpc.useUtils();
-    const { data, isLoading, refetch } = trpc.companies.list.useQuery({ search, limit: 500, includeInactive: true });
+    const debouncedSearch = useDebounce(search, 300);
+    const { data, isLoading, refetch } = trpc.companies.list.useQuery({
+        search: debouncedSearch,
+        page,
+        limit: PAGE_SIZE,
+        includeInactive: true
+    });
+    const exportQuery = trpc.companies.exportList.useQuery(
+        { search: debouncedSearch, includeInactive: true },
+        { enabled: false }
+    );
 
     const createCompany = trpc.companies.create.useMutation({
         onSuccess: async () => {
@@ -79,6 +93,8 @@ export function CompanyManagementPage() {
     });
 
     const companies = data?.items || [];
+    const total = data?.total || 0;
+    const totalPages = data?.totalPages || 1;
     const title = form.id ? "編輯公司" : "新增公司";
     const canSave = form.name.trim().length > 0 && !createCompany.isPending && !updateCompany.isPending;
 
@@ -153,8 +169,10 @@ export function CompanyManagementPage() {
         }
     };
 
-    const handleExport = () => {
-        const rows = companies.map((company: any) => ({
+    const handleExport = async () => {
+        const result = await exportQuery.refetch();
+        const exportCompanies = result.data?.items || [];
+        const rows = exportCompanies.map((company: any) => ({
             公司名稱: company.name || "",
             統一編號: company.taxId || "",
             產業: company.industry || "",
@@ -190,12 +208,12 @@ export function CompanyManagementPage() {
                     />
                     <button
                         type="button"
-                        onClick={handleExport}
-                        disabled={companies.length === 0}
+                        onClick={() => void handleExport()}
+                        disabled={total === 0 || exportQuery.isFetching}
                         className="inline-flex items-center rounded-lg border border-border px-4 py-2 text-sm font-medium hover:bg-muted disabled:cursor-not-allowed disabled:opacity-50"
                     >
                         <Download className="mr-2 h-4 w-4" />
-                        匯出 Excel
+                        {exportQuery.isFetching ? "匯出中..." : "匯出 Excel"}
                     </button>
 	                    <button
 	                        type="button"
@@ -286,13 +304,18 @@ export function CompanyManagementPage() {
                     <div className="flex flex-col gap-3 border-b p-4 md:flex-row md:items-center md:justify-between">
                         <div>
                             <h3 className="text-lg font-bold">公司清單</h3>
-                            <p className="text-sm text-muted-foreground">共 {companies.length} 筆資料</p>
+                            <p className="text-sm text-muted-foreground">
+                                共 {total.toLocaleString()} 筆資料，顯示第 {page.toLocaleString()} / {totalPages.toLocaleString()} 頁
+                            </p>
                         </div>
                         <div className="relative w-full md:w-80">
                             <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
                             <input
                                 value={search}
-                                onChange={(event) => setSearch(event.target.value)}
+                                onChange={(event) => {
+                                    setSearch(event.target.value);
+                                    setPage(1);
+                                }}
                                 placeholder="搜尋公司、統編、產業..."
                                 className="w-full rounded-md border border-input bg-background py-2 pl-9 pr-3 text-sm"
                             />
@@ -357,6 +380,27 @@ export function CompanyManagementPage() {
                                 ))}
                             </tbody>
                         </table>
+                    </div>
+                    <div className="flex flex-col gap-2 border-t px-4 py-3 text-sm sm:flex-row sm:items-center sm:justify-between">
+                        <span className="text-muted-foreground">搜尋會涵蓋全部公司資料，不受單頁筆數限制。</span>
+                        <div className="flex items-center gap-2">
+                            <button
+                                type="button"
+                                disabled={page <= 1 || isLoading}
+                                onClick={() => setPage((current) => Math.max(1, current - 1))}
+                                className="rounded-md border border-border px-3 py-1.5 hover:bg-muted disabled:cursor-not-allowed disabled:opacity-50"
+                            >
+                                上一頁
+                            </button>
+                            <button
+                                type="button"
+                                disabled={page >= totalPages || isLoading}
+                                onClick={() => setPage((current) => Math.min(totalPages, current + 1))}
+                                className="rounded-md border border-border px-3 py-1.5 hover:bg-muted disabled:cursor-not-allowed disabled:opacity-50"
+                            >
+                                下一頁
+                            </button>
+                        </div>
                     </div>
                 </div>
             </div>

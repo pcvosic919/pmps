@@ -54,6 +54,38 @@ export const companiesRouter = router({
         .input(z.object({
             search: z.string().trim().optional(),
             limit: z.number().int().min(1).max(500).default(100),
+            page: z.number().int().min(1).default(1),
+            includeInactive: z.boolean().default(false)
+        }).optional())
+        .query(async ({ input }) => {
+            const query: Record<string, unknown> = {
+                ...buildSearchQuery(input?.search)
+            };
+            if (!input?.includeInactive) {
+                query.isActive = true;
+            }
+            const limit = input?.limit ?? 100;
+            const page = input?.page ?? 1;
+            const [items, total] = await Promise.all([
+                CompanyModel.find(query)
+                    .sort({ name: 1, _id: 1 })
+                    .skip((page - 1) * limit)
+                    .limit(limit)
+                    .lean(),
+                CompanyModel.countDocuments(query)
+            ]);
+            return {
+                items: items.map(toCompanyDto),
+                total,
+                page,
+                pageSize: limit,
+                totalPages: Math.max(1, Math.ceil(total / limit))
+            };
+        }),
+
+    exportList: roleProcedure(["admin", "manager"])
+        .input(z.object({
+            search: z.string().trim().optional(),
             includeInactive: z.boolean().default(false)
         }).optional())
         .query(async ({ input }) => {
@@ -64,10 +96,9 @@ export const companiesRouter = router({
                 query.isActive = true;
             }
             const items = await CompanyModel.find(query)
-                .sort({ name: 1 })
-                .limit(input?.limit ?? 100)
+                .sort({ name: 1, _id: 1 })
                 .lean();
-            return { items: items.map(toCompanyDto) };
+            return { items: items.map(toCompanyDto), total: items.length };
         }),
 
     create: roleProcedure(["admin", "manager", "business"])
