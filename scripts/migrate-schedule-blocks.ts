@@ -10,6 +10,48 @@ dotenv.config({ path: process.env.NODE_ENV === "test" ? ".env.test" : ".env.loca
 const uri = process.env.MONGODB_URI;
 if (!uri) throw new Error("MONGODB_URI is required");
 
+const migrationIndexes = [
+    {
+        name: "migratedFromCalendarTaskId_1_date_1",
+        key: { migratedFromCalendarTaskId: 1, date: 1 },
+        field: "migratedFromCalendarTaskId",
+        bsonType: "objectId"
+    },
+    {
+        name: "migratedFromWbsKey_1_date_1",
+        key: { migratedFromWbsKey: 1, date: 1 },
+        field: "migratedFromWbsKey",
+        bsonType: "string"
+    }
+] as const;
+
+const ensureMigrationIndexes = async () => {
+    const collection = ScheduleBlockModel.collection;
+    const existingIndexes = await collection.indexes();
+    const repaired: string[] = [];
+
+    for (const definition of migrationIndexes) {
+        const existing = existingIndexes.find(index => index.name === definition.name);
+        const fieldFilter = existing?.partialFilterExpression?.[definition.field] as { $type?: string } | undefined;
+        const isExpected = existing?.unique === true && fieldFilter?.$type === definition.bsonType;
+
+        if (existing && !isExpected) {
+            await collection.dropIndex(definition.name);
+            repaired.push(definition.name);
+        }
+
+        if (!existing || !isExpected) {
+            await collection.createIndex(definition.key, {
+                name: definition.name,
+                unique: true,
+                partialFilterExpression: { [definition.field]: { $type: definition.bsonType } }
+            });
+        }
+    }
+
+    return repaired;
+};
+
 const migrateCalendarTasks = async () => {
     const tasks = await CalendarTaskModel.find({ startDate: { $exists: true }, endDate: { $exists: true } }).lean();
     let inserted = 0;
@@ -95,9 +137,10 @@ const migrateLegacyWbsDates = async () => {
 
 const run = async () => {
     await mongoose.connect(uri);
+    const repairedIndexes = await ensureMigrationIndexes();
     const calendar = await migrateCalendarTasks();
     const wbs = await migrateLegacyWbsDates();
-    console.log(JSON.stringify({ calendar, wbs, completedAt: new Date().toISOString() }, null, 2));
+    console.log(JSON.stringify({ repairedIndexes, calendar, wbs, completedAt: new Date().toISOString() }, null, 2));
 };
 
 void run()
