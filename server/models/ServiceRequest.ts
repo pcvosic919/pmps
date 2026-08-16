@@ -1,5 +1,5 @@
 import mongoose, { Schema, Document } from "mongoose";
-import { attachmentCategories, changeRequestStatuses, memberRoles, projectConversionModes, srStatuses, srTypes, wbsItemStatuses, wbsVersionStatuses, type ChangeRequestInput, type ChangeRequestStatus, type CustomFieldValue, type DepartmentApproval, type MemberRole, type ProjectConversionMode, type ServiceRequestAttachment, type SrStatus, type SrType, type WbsItemInput, type WbsVersionInput, type WbsVersionStatus } from "../../shared/types";
+import { attachmentCategories, changeRequestStatuses, memberRoles, projectConversionModes, resourcePlanningModes, srStatuses, srTypes, wbsItemStatuses, wbsVersionStatuses, type ChangeRequestInput, type ChangeRequestStatus, type CustomFieldValue, type DepartmentApproval, type MemberRole, type ProjectConversionMode, type ResourcePlanningMode, type ServiceRequestAttachment, type SrStatus, type SrType, type WbsItemInput, type WbsVersionInput, type WbsVersionStatus } from "../../shared/types";
 import { generateBusinessCode } from "../services/BusinessCodeService";
 
 export interface IWbsItem extends Omit<WbsItemInput, "assigneeId" | "assigneeIds" | "assigneeSnapshots"> {
@@ -81,6 +81,7 @@ export interface IServiceRequest extends Document {
     sourceOpportunityCodeSnapshot?: string;
     sourceQuoteCodeSnapshot?: string;
     isQuoteWorkspace?: boolean;
+    resourcePlanningMode: ResourcePlanningMode;
     conversionMode?: ProjectConversionMode;
     conversionExceptionReason?: string;
     conversionExceptionById?: mongoose.Types.ObjectId;
@@ -278,6 +279,7 @@ const ServiceRequestSchema = new Schema<IServiceRequest>({
     sourceOpportunityCodeSnapshot: { type: String },
     sourceQuoteCodeSnapshot: { type: String },
     isQuoteWorkspace: { type: Boolean, default: false },
+    resourcePlanningMode: { type: String, enum: resourcePlanningModes, default: "legacy", required: true },
     conversionMode: { type: String, enum: projectConversionModes },
     conversionExceptionReason: { type: String, trim: true },
     conversionExceptionById: { type: Schema.Types.ObjectId, ref: "User" },
@@ -379,6 +381,7 @@ ServiceRequestSchema.index(
 );
 ServiceRequestSchema.index({ sourceQuoteId: 1 }, { sparse: true });
 ServiceRequestSchema.index({ isQuoteWorkspace: 1, createdAt: -1 });
+ServiceRequestSchema.index({ resourcePlanningMode: 1, createdAt: -1 });
 ServiceRequestSchema.index({ conversionMode: 1, createdAt: -1 });
 ServiceRequestSchema.index({ "members.userId": 1, createdAt: -1 });
 ServiceRequestSchema.index({ createdByDepartment: 1, createdAt: -1 });

@@ -234,7 +234,10 @@ Cosmos DB 免費方案常見總吞吐量上限為 1000 RU/s；若每個 collecti
 | `opportunities` | 商機資料 |
 | `servicerequests` | 專案/服務請求、WBS、變更請求、附件中繼資料 |
 | `timesheets` | 工時資料 |
-| `calendartasks` | Calendar 手動任務與排程 |
+| `calendartasks` | 舊版 Calendar 排程（遷移後保留供回復） |
+| `scheduleblocks` | 每人每日 AM／PM／全天正式排程 |
+| `schedulemanagernotes` | 主管排程標記與通知關聯 |
+| `schedulerevisions` | 個人排程批次儲存修訂號 |
 | `issues` | 問題與風險 |
 | `notifications` | 系統通知 |
 | `settlementlocks` | 結算鎖定紀錄 |
@@ -289,7 +292,7 @@ Cosmos DB 免費方案常見總吞吐量上限為 1000 RU/s；若每個 collecti
 | `/opportunities/:id` | `OpportunityDetailPage` | 上線 | 商機詳情 + 成員管理 |
 | `/projects` | `ProjectManagementPage` | 上線（權限控管） | 正式專案管理入口，Admin / Manager / PM / Tech 可檢視 |
 | `/pm-dashboard` | `PmDashboardPage` | 上線 | 專案高階儀表板與卡片看板 |
-| `/calendar` | `CalendarPage` | 上線 | Calendar 排程與個人/組織檢視 |
+| `/calendar` | `CalendarPage` | 上線 | 個人 AM／PM 排程、團隊負載與配置缺口 |
 | `/service-requests` | `ServiceRequestsPage` | 上線 | SR 服務請求清單 |
 | `/service-requests/:id` | `WbsManagementPage` | 上線 | SR WBS 版本管理 |
 | `/change-requests` | `ChangeRequestsPage` | 上線 | 變更請求審核 |
@@ -319,7 +322,7 @@ Cosmos DB 免費方案常見總吞吐量上限為 1000 RU/s；若每個 collecti
 | `OpportunityDetailPage.tsx` | 保留 / 上線 | `/opportunities/:id` | 商機詳情 |
 | `ProjectManagementPage.tsx` | 保留 / 上線（權限控管） | `/projects` | 正式專案管理入口 |
 | `PmDashboardPage.tsx` | 保留 / 上線 | `/pm-dashboard` | 專案高階儀表板 |
-| `CalendarPage.tsx` | 保留 / 上線 | `/calendar` | Calendar 排程 |
+| `CalendarPage.tsx` | 保留 / 上線 | `/calendar` | 排程與人力入口 |
 | `ServiceRequestsPage.tsx` | 保留 / 上線 | `/service-requests` | SR 清單 |
 | `WbsManagementPage.tsx` | 保留 / 上線 | `/service-requests/:id` | WBS 管理 |
 | `ChangeRequestsPage.tsx` | 保留 / 上線 | `/change-requests` | CR 模組 |
@@ -350,7 +353,10 @@ users                  # 使用者、角色、技能、費率、登入紀錄
 companies              # 公司主檔與客戶名稱來源
 opportunities          # 商機、成員、協銷指派、自訂欄位值、附件
 servicerequests        # SR / 專案、附件、WBS 版本、變更請求、成員
-calendartasks          # Calendar 手動任務與 WBS 排程
+calendartasks          # 舊版 Calendar 排程（唯讀保留）
+scheduleblocks         # 每日 AM / PM / 全天排程
+schedulemanagernotes   # 主管排程標記
+schedulerevisions      # 排程批次版本控制
 issues                 # 專案議題、優先級、處理狀態
 timesheets             # 協銷 / 專案 / 其他活動工時
 notifications          # 系統通知
@@ -408,6 +414,10 @@ user       → 一般用戶
 - `reviewWbsVersion` — 跨部門 WBS 核准 / 退回
 - `scheduleWbsItem` / `updateWbsItemSchedule` — WBS 排程
 - `createCalendarTask` / `updateCalendarTaskSchedule` — Calendar 手動任務
+- `schedule.listMine` / `schedule.listSources` — 個人排程與可排來源
+- `schedule.previewChanges` / `schedule.commitChanges` — 草稿檢查與批次儲存
+- `schedule.getCapacityMatrix` — 團隊忙碌、配置與缺口矩陣
+- `schedule.createManagerNote` — 主管標記與通知
 - `generateWbsQuote` — WBS 轉報價單資料
 - `logProjectTime` — 記錄專案工時
 - `createCr` / `crList` / `reviewCr` — 變更請求

@@ -4,7 +4,6 @@ import { Link, useLocation } from "wouter";
 import { useTranslation } from "react-i18next";
 import { GlobalSearch } from "./GlobalSearch";
 import {
-    Activity,
     Bell,
     Building2,
     CalendarDays,
@@ -85,7 +84,7 @@ const navGroups: NavGroup[] = [
     },
     {
         key: "delivery",
-        label: "專案 / 工時",
+        label: "專案管理（事）",
         items: [
             { icon: LayoutDashboard, label: "專案總表", href: "/pm-dashboard", roles: ["admin", "manager", "pm", "presales"] },
             { icon: FolderKanban, label: "專案管理", href: "/projects", roles: ["admin", "manager", "pm", "tech", "presales"], permission: "module.projects.view" },
@@ -97,15 +96,14 @@ const navGroups: NavGroup[] = [
         key: "schedule",
         label: "排程",
         items: [
-            { icon: CalendarDays, label: "排程行事曆", href: "/calendar", roles: ["admin", "manager", "pm", "tech", "presales"], permission: "module.calendar.view" },
+            { icon: CalendarDays, label: "排程與人力", href: "/calendar", roles: ["admin", "manager", "pm", "tech", "presales"], permission: "module.calendar.view" },
         ],
     },
     {
         key: "people",
-        label: "人力管理",
+        label: "資源管理（人）",
         items: [
-            { icon: Users, label: "資源池", href: "/resources", roles: ["admin", "manager"] },
-            { icon: Activity, label: "稼動率", href: "/utilization", roles: ["admin", "manager"] },
+            { icon: Users, label: "資源管理中心", href: "/resources", roles: ["admin", "manager", "pm", "presales", "business", "tech"], permission: "module.resources.view" },
         ],
     },
     {

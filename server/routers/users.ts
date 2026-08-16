@@ -11,6 +11,7 @@ import mongoose from "mongoose";
 import { scanAssignmentIntegrity } from "../services/AssignmentIntegrityService";
 import { ServiceRequestModel } from "../models/ServiceRequest";
 import { canViewProject } from "../_core/projectAuthorization";
+import { ResourceAllocationModel } from "../models/ResourceAllocation";
 
 const userSortFields = ["name", "email", "role", "createdAt"] as const;
 const assignmentContexts = ["project_pm", "project_owner", "project_member", "presales", "wbs", "issue_assignee"] as const;
@@ -63,9 +64,12 @@ export const buildUserListQuery = (search?: string, departments: string[] = []) 
 export const buildAssignmentCandidateQuery = (
     context: AssignmentContext,
     search?: string,
-    scopedUserIds: mongoose.Types.ObjectId[] = []
+    scopedUserIds: mongoose.Types.ObjectId[] = [],
+    strictScopedUserIds = false
 ) => {
-    const roleClause = context === "wbs" && scopedUserIds.length > 0
+    const roleClause = context === "wbs" && strictScopedUserIds
+        ? { _id: { $in: scopedUserIds } }
+        : context === "wbs" && scopedUserIds.length > 0
         ? { $or: [{ role: { $in: assignmentRoles[context] } }, { _id: { $in: scopedUserIds } }] }
         : { role: { $in: assignmentRoles[context] } };
     const clauses: Record<string, unknown>[] = [
@@ -92,27 +96,36 @@ const getScopedAssignmentUserIds = async (
     scopeId: string | undefined,
     user: Parameters<typeof canViewProject>[0]
 ) => {
-    if (context !== "wbs" || !scopeId) return [];
+    if (context !== "wbs" || !scopeId) return { ids: [] as mongoose.Types.ObjectId[], strict: false };
     if (!mongoose.isValidObjectId(scopeId)) {
         throw new TRPCError({ code: "BAD_REQUEST", message: "專案識別碼格式錯誤" });
     }
     const project: any = await ServiceRequestModel.findById(scopeId)
-        .select("createdById pmId members opportunityId wbsVersions.items.assigneeId changeRequests")
+        .select("createdById pmId members opportunityId resourcePlanningMode wbsVersions.items.assigneeId changeRequests")
         .lean();
     if (!project) throw new TRPCError({ code: "NOT_FOUND", message: "找不到該專案" });
     if (!await canViewProject(user, project)) {
         throw new TRPCError({ code: "FORBIDDEN", message: "您沒有權限查詢此專案的 WBS 指派人員" });
     }
+    if (project.resourcePlanningMode === "managed") {
+        const approved = await ResourceAllocationModel.find({
+            projectId: project._id,
+            status: "approved",
+            requestType: { $ne: "cancel" },
+            assigneeId: { $exists: true }
+        }).select("assigneeId").lean();
+        return { ids: approved.map((item: any) => toObjectId(item.assigneeId.toString())), strict: true };
+    }
     const memberIds = (project.members || [])
         .filter((member: any) => member.memberRole !== "watcher")
         .map((member: any) => toObjectId(member.userId.toString()));
-    if (memberIds.length === 0) return [];
+    if (memberIds.length === 0) return { ids: [] as mongoose.Types.ObjectId[], strict: false };
     const eligibleMembers = await UserModel.find({
         _id: { $in: memberIds },
         isActive: { $ne: false },
         role: { $ne: "user" }
     }).select("_id").lean();
-    return eligibleMembers.map((member) => member._id);
+    return { ids: eligibleMembers.map((member) => member._id), strict: false };
 };
 
 export const usersRouter = router({
@@ -192,8 +205,9 @@ export const usersRouter = router({
         }))
         .query(async ({ input, ctx }) => {
             const cursor = input.cursor ? decodeCursor(input.cursor) : null;
-            const scopedUserIds = await getScopedAssignmentUserIds(input.context, input.scopeId, ctx.user);
-            let query: Record<string, unknown> = buildAssignmentCandidateQuery(input.context, input.search, scopedUserIds);
+            const assignmentScope = await getScopedAssignmentUserIds(input.context, input.scopeId, ctx.user);
+            const scopedUserIds = assignmentScope.ids;
+            let query: Record<string, unknown> = buildAssignmentCandidateQuery(input.context, input.search, scopedUserIds, assignmentScope.strict);
             if (cursor) {
                 query = {
                     $and: [
@@ -231,7 +245,9 @@ export const usersRouter = router({
 
             return {
                 items: [...byId.values()].map((user) => {
-                    const roleEligible = allowedRoles.has(user.role) || scopedUserIdSet.has(user._id.toString());
+                    const roleEligible = assignmentScope.strict
+                        ? scopedUserIdSet.has(user._id.toString())
+                        : allowedRoles.has(user.role) || scopedUserIdSet.has(user._id.toString());
                     const active = user.isActive !== false;
                     return {
                         id: user._id.toString(),
@@ -262,8 +278,11 @@ export const usersRouter = router({
         .query(async ({ input, ctx }) => {
             const uniqueValues = [...new Set(input.values.map((value) => value.trim()).filter(Boolean))];
             const objectIds = uniqueValues.filter(mongoose.isValidObjectId).map(toObjectId);
-            const scopedUserIds = await getScopedAssignmentUserIds(input.context, input.scopeId, ctx.user);
-            const eligibilityClause = input.context === "wbs" && scopedUserIds.length > 0
+            const assignmentScope = await getScopedAssignmentUserIds(input.context, input.scopeId, ctx.user);
+            const scopedUserIds = assignmentScope.ids;
+            const eligibilityClause = input.context === "wbs" && assignmentScope.strict
+                ? { _id: { $in: scopedUserIds } }
+                : input.context === "wbs" && scopedUserIds.length > 0
                 ? { $or: [{ role: { $in: assignmentRoles[input.context] } }, { _id: { $in: scopedUserIds } }] }
                 : { role: { $in: assignmentRoles[input.context] } };
             const users = await UserModel.find({
@@ -325,12 +344,11 @@ export const usersRouter = router({
     }),
 
     resourceList: protectedProcedure.query(async () => {
-        const resourceRoles = ["tech", "presales", "pm"];
         const users = await UserModel.find({
             isActive: { $ne: false },
-            role: { $in: resourceRoles }
+            role: { $ne: "user" }
         })
-            .select("name email employeeCode department title role isActive provider costRate skills")
+            .select("name email employeeCode department title role isActive provider skills dailyCapacityHours")
             .sort({ department: 1, name: 1 })
             .lean();
         return users.map(u => ({ ...u, id: u._id.toString() }));
@@ -553,7 +571,8 @@ export const usersRouter = router({
                 allow: z.array(z.enum(featurePermissions)),
                 deny: z.array(z.enum(featurePermissions))
             }).optional(),
-            isActive: z.boolean().optional()
+            isActive: z.boolean().optional(),
+            dailyCapacityHours: z.number().min(0).max(24).optional()
         }))
         .mutation(async ({ input, ctx }) => {
             const { id, ...data } = input;

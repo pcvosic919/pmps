@@ -108,6 +108,7 @@ export function WbsManagementPage() {
     const { data: allUsers } = trpc.users.list.useQuery({ limit: 500 });
     const { data: attachments, refetch: refetchAttachments } = trpc.projects.srAttachmentsList.useQuery({ srId }, { enabled: !!srId });
     const { data: projectMembers, refetch: refetchProjectMembers } = trpc.projects.getSrMembers.useQuery({ srId }, { enabled: !!srId });
+    const { data: resourceAllocations } = trpc.resources.listAllocations.useQuery({ projectId: srId }, { enabled: !!srId });
     const { data: wbsQuote, refetch: refetchWbsQuote } = trpc.projects.generateWbsQuote.useQuery({ srId }, { enabled: false });
     const { data: projectHistory, refetch: refetchProjectHistory, isFetching: isFetchingProjectHistory } = trpc.projects.getBusinessHistory.useQuery(
         { projectId: srId, limit: 100 },
@@ -1276,6 +1277,22 @@ export function WbsManagementPage() {
                         </div>
                     </div>
 
+                    <div className="rounded-xl border border-sky-200 bg-sky-50/60 p-5 shadow-sm dark:border-sky-900 dark:bg-sky-950/20">
+                        <div className="flex items-start justify-between gap-3">
+                            <div>
+                                <h3 className="flex items-center text-base font-semibold"><Users className="mr-2 h-4 w-4 text-sky-600" />專案人力規劃</h3>
+                                <p className="mt-1 text-xs text-muted-foreground">
+                                    {sr.resourcePlanningMode === "managed"
+                                        ? `已核定 ${(resourceAllocations || []).filter((item: any) => item.status === "approved" && item.requestType !== "cancel").length} 筆配置；WBS 僅能選擇核定人員。`
+                                        : "既有專案維持原派工方式，不需要重新核定。"}
+                                </p>
+                            </div>
+                            <Link href={`/service-requests/${srId}/resources`}>
+                                <a className="whitespace-nowrap rounded-lg bg-sky-600 px-3 py-2 text-xs font-semibold text-white hover:bg-sky-700">開啟規劃</a>
+                            </Link>
+                        </div>
+                    </div>
+
                     <div className="bg-card border border-border rounded-xl p-5 shadow-sm">
                         <div className="mb-3 flex items-center justify-between">
                             <h3 className="font-semibold text-base flex items-center"><Users className="w-4 h-4 mr-2 text-primary" />專案參與人員</h3>
@@ -1915,7 +1932,7 @@ export function WbsManagementPage() {
                                                                 <div className="flex flex-col gap-1 text-xs text-muted-foreground">
                                                                     <label>指派給 (人員)</label>
                                                                     <UserSearchPicker
-                                                                        users={techs || []}
+                                                                        users={sr.resourcePlanningMode === "managed" ? [] : techs || []}
                                                                         assignmentContext="wbs"
                                                                         assignmentScopeId={srId}
                                                                         selectedUserId={item.assigneeId}
@@ -1942,7 +1959,7 @@ export function WbsManagementPage() {
                                                                     )}
                                                                     <UserSearchPicker
                                                                         key={`${idx}-${(item.assigneeIds || []).join(",")}`}
-                                                                        users={techs || []}
+                                                                        users={sr.resourcePlanningMode === "managed" ? [] : techs || []}
                                                                         assignmentContext="wbs"
                                                                         assignmentScopeId={srId}
                                                                         selectedUserId=""
