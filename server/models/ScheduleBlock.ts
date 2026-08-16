@@ -50,11 +50,17 @@ ScheduleBlockSchema.index({ opportunityId: 1, date: 1, status: 1 });
 ScheduleBlockSchema.index({ batchId: 1 });
 ScheduleBlockSchema.index(
     { migratedFromCalendarTaskId: 1, date: 1 },
-    { unique: true, sparse: true }
+    {
+        unique: true,
+        partialFilterExpression: { migratedFromCalendarTaskId: { $type: "objectId" } }
+    }
 );
 ScheduleBlockSchema.index(
     { migratedFromWbsKey: 1, date: 1 },
-    { unique: true, sparse: true }
+    {
+        unique: true,
+        partialFilterExpression: { migratedFromWbsKey: { $type: "string" } }
+    }
 );
 
 export const ScheduleBlockModel = mongoose.models.ScheduleBlock || mongoose.model<IScheduleBlock>("ScheduleBlock", ScheduleBlockSchema);
