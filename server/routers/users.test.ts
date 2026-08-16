@@ -77,4 +77,10 @@ describe("assignment candidate query", () => {
             ]
         });
     });
+
+    it("limits managed-project WBS candidates to approved allocation users", () => {
+        const approvedId = new mongoose.Types.ObjectId();
+        const query = buildAssignmentCandidateQuery("wbs", undefined, [approvedId], true);
+        expect((query.$and as Array<any>)[1]).toEqual({ _id: { $in: [approvedId] } });
+    });
 });

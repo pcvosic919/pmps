@@ -9,6 +9,7 @@ import { UserModel } from "../models/User";
 import { OpportunityModel } from "../models/Opportunity";
 import { OpportunityQuoteModel } from "../models/OpportunityQuote";
 import { CalendarTaskModel } from "../models/CalendarTask";
+import { ResourceAllocationModel } from "../models/ResourceAllocation";
 import { IssueModel } from "../models/Issue";
 import mongoose from "mongoose";
 import path from "node:path";
@@ -408,7 +409,7 @@ const attachAssigneeSnapshots = async <T extends { assigneeId?: string; assignee
 };
 
 const assertWbsAssigneesEligible = async (
-    project: { members?: Array<{ userId: unknown; memberRole: string }> },
+    project: { _id?: unknown; resourcePlanningMode?: string; members?: Array<{ userId: unknown; memberRole: string }> },
     items: Array<{ assigneeId?: string; assigneeIds?: string[] }>
 ) => {
     const memberIds = new Set((project.members || [])
@@ -424,6 +425,16 @@ const assertWbsAssigneesEligible = async (
         throw new TRPCError({ code: "BAD_REQUEST", message: `第 ${rowIndex + 1} 筆指派人員帳號格式錯誤` });
     }
     if (assigneeIds.length === 0) return;
+    let approvedManagedIds: Set<string> | null = null;
+    if (project.resourcePlanningMode === "managed") {
+        const approved = await ResourceAllocationModel.find({
+            projectId: project._id,
+            status: "approved",
+            requestType: { $ne: "cancel" },
+            assigneeId: { $in: assigneeIds.map(toObjectId) }
+        }).select("assigneeId").lean();
+        approvedManagedIds = new Set(approved.map((item: any) => idString(item.assigneeId)));
+    }
     const users = await UserModel.find({ _id: { $in: assigneeIds.map(toObjectId) } })
         .select("role isActive")
         .lean();
@@ -434,6 +445,12 @@ const assertWbsAssigneesEligible = async (
             const user = userMap.get(userId);
             if (!user || user.isActive === false) {
                 throw new TRPCError({ code: "BAD_REQUEST", message: `第 ${index + 1} 筆指派人員不存在或帳號已停用` });
+            }
+            if (approvedManagedIds && !approvedManagedIds.has(userId)) {
+                throw new TRPCError({
+                    code: "BAD_REQUEST",
+                    message: `第 ${index + 1} 筆指派人員尚未通過此專案的人力配置核定`
+                });
             }
             if (user.role === "user" || (user.role !== "tech" && !memberIds.has(userId))) {
                 throw new TRPCError({
@@ -748,6 +765,7 @@ export const projectsRouter = router({
                 conversionExceptionById: input.opportunityId ? toObjectId(ctx.user.id) : undefined,
                 conversionExceptionAt,
                 status: "new",
+                resourcePlanningMode: "managed",
                 members: input.opportunityId
                     ? buildOpportunityProjectMembers(opportunityOwnerId, {
                         pmId: input.joinPmAsMember ? input.pmId : undefined,
@@ -1891,7 +1909,7 @@ export const projectsRouter = router({
         .mutation(async ({ input, ctx }) => {
             const sr: any = assertFound(
                 await ServiceRequestModel.findById(input.srId)
-                    .select("isQuoteWorkspace status conversionMode createdById pmId members wbsVersions.items.assigneeId changeRequests opportunityId wbsDrafts"),
+                    .select("isQuoteWorkspace resourcePlanningMode status conversionMode createdById pmId members wbsVersions.items.assigneeId changeRequests opportunityId wbsDrafts"),
                 "找不到該專案"
             );
             assertQuoteWorkspaceOrPermission(ctx.user, sr, "wbs.submit", ["admin", "manager", "tech", "presales", "pm"]);

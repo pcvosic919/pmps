@@ -18,6 +18,7 @@ export interface IUser extends Document {
     providerId?: string;
     isActive: boolean;
     skills: UserSkill[];
+    dailyCapacityHours: number;
     costRate: UserCostRate;
     costRateHistory?: UserCostRateHistory[];
     lastLoginAt?: Date;
@@ -48,6 +49,7 @@ const UserSchema = new Schema<IUser>({
         category: { type: String, required: true },
         level: { type: String, enum: skillLevels, required: true }
     }],
+    dailyCapacityHours: { type: Number, default: 8, min: 0, max: 24, required: true },
     costRate: {
         dailyRate: { type: Number, default: 0 },
         hourlyRate: { type: Number, default: 0 },

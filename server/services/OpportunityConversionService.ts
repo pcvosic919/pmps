@@ -62,6 +62,7 @@ export const createProjectForOpportunityOnce = async (
     try {
         const project = await ServiceRequestModel.create({
             ...attributes,
+            resourcePlanningMode: attributes.resourcePlanningMode || "managed",
             opportunityId: toObjectId(opportunityId)
         });
         return { project, created: true };
@@ -116,6 +117,7 @@ export const ensureQuotePreparationWorkspace = async (
         sourceQuoteCodeSnapshot: quote.quoteCode,
         conversionMode: "confirmed_quote",
         isQuoteWorkspace: true,
+        resourcePlanningMode: "legacy",
         createdById: toObjectId(actor.id),
         createdByNameSnapshot: actor.name || actor.email || "",
         createdByDepartment: actor.department || "",
@@ -250,6 +252,7 @@ export const confirmQuoteAndCreateDraftProject = async (input: {
     const promotedQuoteWorkspace = project.isQuoteWorkspace === true;
     if (promotedQuoteWorkspace) {
         project.isQuoteWorkspace = false;
+        project.resourcePlanningMode = "managed";
     }
     if (conversionResult.created || promotedQuoteWorkspace) {
         try {

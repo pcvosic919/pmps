@@ -16,6 +16,7 @@ export const featurePermissions = [
     "module.opportunities.view",
     "module.projects.view",
     "module.calendar.view",
+    "module.resources.view",
     "project.create_sr",
     "project.edit",
     "project.financials.view",
@@ -24,7 +25,10 @@ export const featurePermissions = [
     "project.archive",
     "project.delete",
     "wbs.submit",
-    "wbs.review"
+    "wbs.review",
+    "resource.request",
+    "resource.approve",
+    "resource.capacity.manage"
 ] as const;
 
 export type FeaturePermission = typeof featurePermissions[number];
@@ -45,6 +49,25 @@ export const skillLevels = [
 ] as const;
 
 export type SkillLevel = typeof skillLevels[number];
+
+export const resourcePlanningModes = ["legacy", "managed"] as const;
+export type ResourcePlanningMode = typeof resourcePlanningModes[number];
+
+export const resourceAllocationStatuses = [
+    "draft",
+    "submitted",
+    "approved",
+    "rejected",
+    "superseded",
+    "cancelled"
+] as const;
+export type ResourceAllocationStatus = typeof resourceAllocationStatuses[number];
+
+export const resourceAllocationRequestTypes = ["create", "amend", "cancel"] as const;
+export type ResourceAllocationRequestType = typeof resourceAllocationRequestTypes[number];
+
+export const resourceRoles = ["admin", "manager", "pm", "presales", "business", "tech"] as const;
+export type ResourceRole = typeof resourceRoles[number];
 
 export const memberRoles = ["owner", "assignee", "participant", "watcher"] as const;
 export type MemberRole = typeof memberRoles[number];
@@ -185,6 +208,11 @@ export interface AuditLog {
 export interface UserSkill {
     category: string;
     level: SkillLevel;
+}
+
+export interface ResourceSkillRequirement {
+    category: string;
+    minimumLevel: SkillLevel;
 }
 
 export interface UserCostRate {

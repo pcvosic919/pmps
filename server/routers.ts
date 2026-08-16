@@ -12,6 +12,8 @@ import { auditRouter } from "./routers/audit";
 import { recognitionRouter } from "./routers/recognition";
 import { reportsRouter } from "./routers/reports";
 import { platformRouter } from "./routers/platform";
+import { resourcesRouter } from "./routers/resources";
+import { scheduleRouter } from "./routers/schedule";
 
 export const appRouter = router({
     auth: authRouter,
@@ -26,7 +28,9 @@ export const appRouter = router({
     audit: auditRouter,
     recognition: recognitionRouter,
     reports: reportsRouter,
-    platform: platformRouter
+    platform: platformRouter,
+    resources: resourcesRouter,
+    schedule: scheduleRouter
 });
 
 export type AppRouter = typeof appRouter;

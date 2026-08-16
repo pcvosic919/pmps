@@ -40,6 +40,7 @@ const permissionLabels: Record<FeaturePermission, string> = {
     "module.opportunities.view": "檢視商機管理",
     "module.projects.view": "檢視專案管理",
     "module.calendar.view": "檢視排程行事曆",
+    "module.resources.view": "檢視資源管理",
     "project.create_sr": "建立 SR",
     "project.edit": "編輯專案",
     "project.financials.view": "檢視專案財務資訊",
@@ -48,7 +49,10 @@ const permissionLabels: Record<FeaturePermission, string> = {
     "project.archive": "封存／還原專案",
     "project.delete": "永久刪除專案",
     "wbs.submit": "編輯與送審 WBS",
-    "wbs.review": "審核 WBS"
+    "wbs.review": "審核 WBS",
+    "resource.request": "提出資源需求",
+    "resource.approve": "核定資源配置",
+    "resource.capacity.manage": "管理人員容量"
 };
 
 export function UserManagementPage() {

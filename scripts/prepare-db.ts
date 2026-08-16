@@ -25,6 +25,11 @@ import { RecognitionRecordModel } from "../server/models/RecognitionRecord";
 import { RecognitionEventModel } from "../server/models/RecognitionEvent";
 import { ProductCategoryModel } from "../server/models/ProductCategory";
 import { ProductApprovalModel } from "../server/models/ProductApproval";
+import { ResourceAllocationModel } from "../server/models/ResourceAllocation";
+import { SkillCatalogModel } from "../server/models/SkillCatalog";
+import { ScheduleBlockModel } from "../server/models/ScheduleBlock";
+import { ScheduleManagerNoteModel } from "../server/models/ScheduleManagerNote";
+import { ScheduleRevisionModel } from "../server/models/ScheduleRevision";
 
 const envFile = process.env.NODE_ENV === "test" ? ".env.test" : ".env.local";
 const pathsToTry = [
@@ -62,6 +67,11 @@ const appModels = [
     RecognitionEventModel,
     ProductCategoryModel,
     ProductApprovalModel,
+    ResourceAllocationModel,
+    SkillCatalogModel,
+    ScheduleBlockModel,
+    ScheduleManagerNoteModel,
+    ScheduleRevisionModel,
 ];
 
 function shouldSyncIndexes() {

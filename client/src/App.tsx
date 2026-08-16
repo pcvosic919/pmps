@@ -23,7 +23,6 @@ const LoginPage = lazy(() => import("./pages/LoginPage").then((module) => ({ def
 const UserManagementPage = lazy(() => import("./pages/UserManagementPage").then((module) => ({ default: module.UserManagementPage })));
 const AssignmentIntegrityPage = lazy(() => import("./pages/AssignmentIntegrityPage").then((module) => ({ default: module.AssignmentIntegrityPage })));
 const CostRatesPage = lazy(() => import("./pages/CostRatesPage").then((module) => ({ default: module.CostRatesPage })));
-const UtilizationPage = lazy(() => import("./pages/UtilizationPage").then((module) => ({ default: module.UtilizationPage })));
 const SettlementsPage = lazy(() => import("./pages/RecognitionCenterPage").then((module) => ({ default: module.RecognitionCenterPage })));
 const NotificationsPage = lazy(() => import("./pages/NotificationsPage").then((module) => ({ default: module.NotificationsPage })));
 const SystemSettingsPage = lazy(() => import("./pages/SystemSettingsPage").then((module) => ({ default: module.SystemSettingsPage })));
@@ -41,6 +40,7 @@ const PmDashboardPage = lazy(() => import("./pages/PmDashboardPage").then((modul
 const CalendarPage = lazy(() => import("./pages/CalendarPage").then((module) => ({ default: module.CalendarPage })));
 const ReportBuilderPage = lazy(() => import("./pages/ReportCenterPage").then((module) => ({ default: module.ReportCenterPage })));
 const ResourcesPage = lazy(() => import("./pages/ResourcesPage").then((module) => ({ default: module.ResourcesPage })));
+const ProjectResourcesPage = lazy(() => import("./pages/ProjectResourcesPage").then((module) => ({ default: module.ProjectResourcesPage })));
 const OpportunityDetailPage = lazy(() => import("./pages/OpportunityDetailPage").then((module) => ({ default: module.OpportunityDetailPage })));
 const ProjectManagementPage = lazy(() => import("./pages/ProjectManagementPage").then((module) => ({ default: module.ProjectManagementPage })));
 const ProfitCenterFormulaPage = lazy(() => import("./pages/ProfitCenterFormulaPage"));
@@ -105,7 +105,7 @@ function CalendarRoute() {
   if (isLoading) return <AppLoadingFallback />;
   return hasPermission("module.calendar.view", ["admin", "manager", "pm", "tech", "presales"])
     ? <CalendarPage />
-    : <RestrictedPage message="您沒有權限存取排程行事曆。" />;
+    : <RestrictedPage message="您沒有權限存取排程與人力。" />;
 }
 
 function OpportunitiesRoute() {
@@ -138,6 +138,28 @@ function WbsRoute() {
   return hasPermission("module.projects.view", ["admin", "manager", "pm", "tech", "presales"])
     ? <WbsManagementPage />
     : <RestrictedPage message="您沒有權限存取專案管理。" />;
+}
+
+function ResourcesRoute() {
+  const { hasPermission, isLoading } = useCurrentUser();
+  if (isLoading) return <AppLoadingFallback />;
+  return hasPermission("module.resources.view", ["admin", "manager", "pm", "presales", "business", "tech"])
+    ? <ResourcesPage />
+    : <RestrictedPage message="您沒有權限存取資源管理。" />;
+}
+
+function ProjectResourcesRoute() {
+  const { hasPermission, isLoading } = useCurrentUser();
+  if (isLoading) return <AppLoadingFallback />;
+  return hasPermission("module.resources.view", ["admin", "manager", "pm", "presales", "business", "tech"])
+    ? <ProjectResourcesPage />
+    : <RestrictedPage message="您沒有權限存取專案人力規劃。" />;
+}
+
+function UtilizationRedirect() {
+  const [, setLocation] = useLocation();
+  useEffect(() => setLocation("/resources?tab=utilization", { replace: true }), [setLocation]);
+  return <AppLoadingFallback />;
 }
 
 function PmDashboardRoute() {
@@ -206,11 +228,11 @@ function ProfitCenterFormulaRoute() {
 
 const activeRoutes: ActiveRouteDefinition[] = [
   { path: "/", component: DashboardPage, pageFile: "DashboardPage.tsx", lifecycle: "保留 / 上線", notes: "主儀表板首頁。" },
-  { path: "/resources", component: ResourcesPage, pageFile: "ResourcesPage.tsx", lifecycle: "保留 / 上線", notes: "資源池與人力配置視圖。" },
+  { path: "/resources", component: ResourcesRoute, pageFile: "ResourcesPage.tsx", lifecycle: "保留 / 上線", notes: "人員、容量、配置、核定與實際稼動整合中心。" },
   { path: "/users", component: UserManagementPage, pageFile: "UserManagementPage.tsx", lifecycle: "保留 / 上線", notes: "正式帳號管理頁，取代舊版 UsersPage。" },
   { path: "/assignment-integrity", component: AssignmentIntegrityPage, pageFile: "AssignmentIntegrityPage.tsx", lifecycle: "保留 / 上線", notes: "歷史指派資料掃描與安全修復。" },
   { path: "/cost-rates", component: CostRatesPage, pageFile: "CostRatesPage.tsx", lifecycle: "保留 / 上線", notes: "費率設定。" },
-  { path: "/utilization", component: UtilizationPage, pageFile: "UtilizationPage.tsx", lifecycle: "保留 / 上線", notes: "稼動率看板。" },
+  { path: "/utilization", component: UtilizationRedirect, pageFile: "ResourcesPage.tsx", lifecycle: "保留 / 上線", notes: "相容導向資源管理的實際稼動分頁。" },
   { path: "/settlements", component: SettlementsPage, pageFile: "RecognitionCenterPage.tsx", lifecycle: "保留 / 上線", notes: "協銷與專案認列結算中心。" },
   { path: "/notifications", component: NotificationsPage, pageFile: "NotificationsPage.tsx", lifecycle: "保留 / 上線", notes: "通知中心。" },
   { path: "/system-settings", component: SystemSettingsRoute, pageFile: "SystemSettingsPage.tsx", lifecycle: "保留 / 上線", notes: "Platform Owner 系統設定。" },
@@ -220,8 +242,9 @@ const activeRoutes: ActiveRouteDefinition[] = [
   { path: "/opportunities/:id", component: OpportunityDetailRoute, pageFile: "OpportunityDetailPage.tsx", lifecycle: "保留 / 上線", notes: "商機詳情。" },
   { path: "/projects", component: ProjectManagementRoute, pageFile: "ProjectManagementPage.tsx", lifecycle: "保留 / 上線（權限控管）", notes: "正式專案管理入口，僅 Manager / PM 可見。" },
   { path: "/pm-dashboard", component: PmDashboardRoute, pageFile: "PmDashboardPage.tsx", lifecycle: "保留 / 上線", notes: "專案高階儀表板與卡片看板" },
-  { path: "/calendar", component: CalendarRoute, pageFile: "CalendarPage.tsx", lifecycle: "保留 / 上線", notes: "技服人員的行事曆排程" },
+  { path: "/calendar", component: CalendarRoute, pageFile: "CalendarPage.tsx", lifecycle: "保留 / 上線", notes: "個人 AM／PM 排程與主管團隊負載" },
   { path: "/service-requests", component: ServiceRequestsRoute, pageFile: "ServiceRequestsPage.tsx", lifecycle: "保留 / 上線", notes: "SR 清單。" },
+  { path: "/service-requests/:id/resources", component: ProjectResourcesRoute, pageFile: "ProjectResourcesPage.tsx", lifecycle: "保留 / 上線（權限控管）", notes: "專案人力需求、配置異動與取消入口。" },
   { path: "/service-requests/:id", component: WbsRoute, pageFile: "WbsManagementPage.tsx", lifecycle: "保留 / 上線", notes: "SR 對應 WBS 管理。" },
   { path: "/change-requests", component: ChangeRequestsRoute, pageFile: "ChangeRequestsPage.tsx", lifecycle: "保留 / 上線", notes: "CR 清單與審核。" },
   { path: "/presales-timesheets", component: PresalesTimesheetsPage, pageFile: "PresalesTimesheetsPage.tsx", lifecycle: "保留 / 上線", notes: "協銷工時填報。" },
