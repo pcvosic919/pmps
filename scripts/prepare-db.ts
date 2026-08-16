@@ -25,6 +25,7 @@ import { RecognitionRecordModel } from "../server/models/RecognitionRecord";
 import { RecognitionEventModel } from "../server/models/RecognitionEvent";
 import { ProductCategoryModel } from "../server/models/ProductCategory";
 import { ProductApprovalModel } from "../server/models/ProductApproval";
+import { ProductCatalogChangeModel } from "../server/models/ProductCatalogChange";
 import { ResourceAllocationModel } from "../server/models/ResourceAllocation";
 import { SkillCatalogModel } from "../server/models/SkillCatalog";
 import { ScheduleBlockModel } from "../server/models/ScheduleBlock";
@@ -67,6 +68,7 @@ const appModels = [
     RecognitionEventModel,
     ProductCategoryModel,
     ProductApprovalModel,
+    ProductCatalogChangeModel,
     ResourceAllocationModel,
     SkillCatalogModel,
     ScheduleBlockModel,

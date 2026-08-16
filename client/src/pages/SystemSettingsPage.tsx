@@ -1,7 +1,9 @@
 import { useEffect, useState } from "react";
-import { Settings, Save, Database, Shield, Layout, Bell, Activity } from "lucide-react";
+import { Settings, Save, Database, Shield, Layout, Bell, Activity, Boxes } from "lucide-react";
 import { toast } from "react-hot-toast";
 import { trpc } from "../lib/trpc";
+import { useCurrentUser } from "../lib/useCurrentUser";
+import { ProductCatalogSettings } from "../components/ProductCatalogSettings";
 
 const defaultSettings = {
     companyName: "PMP System",
@@ -27,11 +29,16 @@ const defaultSettings = {
 };
 
 export function SystemSettingsPage() {
-    const [activeTab, setActiveTab] = useState("general");
+    const { user } = useCurrentUser();
+    const isPlatformOwner = user?.isPlatformOwner === true;
+    const requestedTab = new URLSearchParams(window.location.search).get("tab");
+    const [activeTab, setActiveTab] = useState(requestedTab === "products" || !isPlatformOwner ? "products" : "general");
     const [settings, setSettings] = useState(defaultSettings);
 
     const utils = trpc.useUtils();
-    const { data, isLoading } = trpc.system.getSettings.useQuery();
+    const { data, isLoading } = trpc.system.getSettings.useQuery(undefined, {
+        enabled: isPlatformOwner
+    });
     const updateSettings = trpc.system.updateSettings.useMutation({
         onSuccess: async () => {
             toast.success("系統設定已儲存至資料庫");
@@ -58,10 +65,11 @@ export function SystemSettingsPage() {
     });
 
     const handleSave = () => {
+        if (!isPlatformOwner) return;
         updateSettings.mutate(settings);
     };
 
-    if (isLoading) {
+    if (isPlatformOwner && isLoading) {
         return <div className="p-8 text-center text-muted-foreground">載入系統設定中...</div>;
     }
 
@@ -75,25 +83,26 @@ export function SystemSettingsPage() {
                         <p className="text-muted-foreground mt-1">管理 PMP 系統全域行為與安全策略</p>
                     </div>
                 </div>
-                <button
+                {isPlatformOwner && <button
                     onClick={handleSave}
                     disabled={updateSettings.isPending}
                     className="bg-primary text-primary-foreground hover:bg-primary/90 px-5 py-2.5 rounded-lg flex items-center text-sm font-medium transition-all shadow-md active:scale-95 disabled:opacity-50"
                 >
                     <Save className="w-4 h-4 mr-2" />
                     {updateSettings.isPending ? "儲存中..." : "儲存設定"}
-                </button>
+                </button>}
             </div>
 
             <div className="flex flex-col md:flex-row gap-6">
                 <div className="w-full md:w-64 space-y-1">
                     {[
                         { key: "general", icon: <Layout className="w-5 h-5" />, label: "一般設定" },
+                        { key: "products", icon: <Boxes className="w-5 h-5" />, label: "產品列表" },
                         { key: "security", icon: <Shield className="w-5 h-5" />, label: "安全與存取" },
                         { key: "notifications", icon: <Bell className="w-5 h-5" />, label: "通知與郵件" },
                         { key: "integrations", icon: <Database className="w-5 h-5" />, label: "整合與 API" },
                         { key: "jobs", icon: <Activity className="w-5 h-5" />, label: "背景作業排程" },
-                    ].map(tab => (
+                    ].filter(tab => isPlatformOwner || tab.key === "products").map(tab => (
                         <button
                             key={tab.key}
                             onClick={() => setActiveTab(tab.key)}
@@ -140,20 +149,12 @@ export function SystemSettingsPage() {
                                         className="w-full p-2.5 rounded-lg border border-input bg-background/50 focus:bg-background transition-colors"
                                     />
                                 </div>
-                                <div>
-                                    <label className="block text-sm font-bold mb-2">可選產品列表 (每行一個)</label>
-                                    <textarea
-                                        value={settings.availableProducts?.join("\n") || ""}
-                                        onChange={e => setSettings(s => ({ ...s, availableProducts: e.target.value.split("\n").filter(x => x.trim()) }))}
-                                        rows={5}
-                                        className="w-full p-2.5 rounded-lg border border-input bg-background/50 focus:bg-background transition-colors font-mono text-sm"
-                                        placeholder="例如：\n雲端服務\n資安健檢\n系統開發"
-                                    />
-                                    <p className="text-xs text-muted-foreground mt-1.5">商機管理中可供選擇的產品項目</p>
-                                </div>
+                                <div className="rounded-lg border border-dashed bg-muted/30 p-4 text-sm text-muted-foreground">產品清單已改為三階主檔與核准流程，請至左側「產品列表」維護。</div>
                             </div>
                         </div>
                     )}
+
+                    {activeTab === "products" && <ProductCatalogSettings />}
 
                     {activeTab === "security" && (
                         <div className="space-y-6">

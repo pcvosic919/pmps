@@ -137,6 +137,7 @@ const navGroups: NavGroup[] = [
             { icon: Settings, label: "帳號管理", href: "/users", roles: ["admin"] },
             { icon: ShieldAlert, label: "指派資料檢查", href: "/assignment-integrity", roles: ["admin"] },
             { icon: Building2, label: "公司管理", href: "/companies", roles: ["admin"] },
+            { icon: Settings2, label: "產品列表", href: "/system-settings?tab=products", roles: ["admin", "manager"] },
             { icon: Settings, label: "系統設定", href: "/system-settings", platformOwnerOnly: true },
             { icon: SlidersHorizontal, label: "平台控制中心", href: "/platform-control", platformOwnerOnly: true },
             { icon: ShieldCheck, label: "Audit 稽核中心", href: "/audit", platformOwnerOnly: true },

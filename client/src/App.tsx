@@ -203,11 +203,11 @@ function PlatformControlRoute() {
 }
 
 function SystemSettingsRoute() {
-  const { user, isLoading } = useCurrentUser();
+  const { user, hasRole, isLoading } = useCurrentUser();
   if (isLoading) return <AppLoadingFallback />;
-  return user?.isPlatformOwner
+  return user?.isPlatformOwner || hasRole("admin") || hasRole("manager")
     ? <SystemSettingsPage />
-    : <RestrictedPage message="只有平台擁有者可以修改系統設定。" />;
+    : <RestrictedPage message="只有管理者可以存取系統設定與產品列表。" />;
 }
 
 function CustomFieldsRoute() {

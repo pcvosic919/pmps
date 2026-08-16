@@ -24,6 +24,7 @@
     "migrate:opportunity-quote-project-flow": "tsx scripts/migrate-opportunity-quote-project-flow.ts",
     "migrate:platform-owner": "tsx scripts/migrate-platform-owner.ts",
     "migrate:resource-planning": "tsx scripts/migrate-resource-planning-mode.ts",
+    "migrate:product-catalog": "tsx scripts/migrate-product-catalog-hierarchy.ts",
     "migrate:schedule-blocks": "tsx scripts/migrate-schedule-blocks.ts",
     "cosmos:shared-throughput": "bash scripts/prepare-cosmos-shared-throughput.sh"
   },
