@@ -162,12 +162,13 @@ export function RecognitionCenterPage() {
 
             <div className="flex flex-wrap gap-2">
                 <button type="button" onClick={() => setType("project")} className={`rounded-lg px-4 py-2 text-sm font-medium ${type === "project" ? "bg-primary text-primary-foreground" : "border bg-card"}`}>專案認列</button>
-                <button type="button" onClick={() => setType("presales")} className={`rounded-lg px-4 py-2 text-sm font-medium ${type === "presales" ? "bg-primary text-primary-foreground" : "border bg-card"}`}>協銷認列</button>
+                <button type="button" onClick={() => setType("presales")} className={`rounded-lg px-4 py-2 text-sm font-medium ${type === "presales" ? "bg-primary text-primary-foreground" : "border bg-card"}`}>協銷認列（月結）</button>
                 <span className="mx-1 border-l" />
                 <button type="button" onClick={() => setView("closed")} className={`rounded-lg px-4 py-2 text-sm font-medium ${view === "closed" ? "bg-sky-600 text-white" : "border bg-card"}`}>本月結案待認列</button>
                 <button type="button" onClick={() => setView("recognized")} className={`rounded-lg px-4 py-2 text-sm font-medium ${view === "recognized" ? "bg-emerald-600 text-white" : "border bg-card"}`}>本月正式認列</button>
                 {query.data?.isLocked && <span className="self-center rounded-full bg-amber-100 px-3 py-1 text-xs font-semibold text-amber-800">此月份已鎖帳</span>}
             </div>
+            {type === "presales" && <div className="rounded-lg border border-sky-200 bg-sky-50 px-4 py-3 text-sm text-sky-900">協銷認列維持月結制：依結案月份彙整、於指定認列月份確認，鎖帳後的差異只能在後續月份調整或沖銷。</div>}
 
             <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
                 {[

@@ -104,6 +104,7 @@ export const recognitionRouter = router({
             return {
                 month: input.month,
                 type: input.type,
+                settlementMode: "monthly" as const,
                 view: input.view,
                 isLocked: lock?.isLocked === true,
                 rows,

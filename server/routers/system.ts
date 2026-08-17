@@ -6,7 +6,10 @@ import { sharePointService } from "../services/SharePointService";
 import { z } from "zod";
 import { canDeleteRecord } from "../_core/authorization";
 import { ProductCategoryModel } from "../models/ProductCategory";
-import { syncProductCategories } from "../services/ProductApprovalService";
+import { ProductCatalogChangeModel, productCatalogChangeActions, productCatalogChangeStatuses } from "../models/ProductCatalogChange";
+import { createNotification, createNotifications } from "../_core/notifications";
+import { UserModel } from "../models/User";
+import mongoose from "mongoose";
 
 const settingsPayloadSchema = z.object({
     companyName: z.string().trim().min(1),
@@ -138,6 +141,61 @@ function serializeValue(value: unknown, valueType: SettingDefinition["valueType"
     }
 }
 
+const productCatalogPayloadSchema = z.object({
+    code: z.string().trim().min(1).max(50).transform(value => value.toUpperCase()),
+    name: z.string().trim().min(1).max(160),
+    level: z.union([z.literal(1), z.literal(2), z.literal(3)]),
+    parentId: z.string().optional(),
+    isActive: z.boolean().default(true),
+    sortOrder: z.number().int().min(0).max(100000).default(0)
+});
+const productCatalogIdSchema = z.string().refine(value => mongoose.isValidObjectId(value), "產品主檔識別碼格式錯誤");
+
+const validateProductCatalogPayload = async (
+    payload: z.infer<typeof productCatalogPayloadSchema>,
+    targetId?: string
+) => {
+    if (payload.level === 1 && payload.parentId) {
+        throw new TRPCError({ code: "BAD_REQUEST", message: "第一階產品分類不可指定上層" });
+    }
+    if (payload.level > 1) {
+        if (!payload.parentId || !mongoose.isValidObjectId(payload.parentId)) {
+            throw new TRPCError({ code: "BAD_REQUEST", message: `第 ${payload.level} 階產品必須指定第 ${payload.level - 1} 階上層` });
+        }
+        const parent: any = await ProductCategoryModel.findById(payload.parentId).lean();
+        if (!parent || parent.isActive === false || Number(parent.level || 3) !== payload.level - 1) {
+            throw new TRPCError({ code: "BAD_REQUEST", message: `指定的上層必須是啟用中的第 ${payload.level - 1} 階產品` });
+        }
+    }
+    const duplicate = await ProductCategoryModel.findOne({
+        _id: targetId ? { $ne: targetId } : { $exists: true },
+        $or: [{ code: payload.code }, { name: payload.name }]
+    }).lean();
+    if (duplicate) throw new TRPCError({ code: "CONFLICT", message: "產品代碼或名稱已存在" });
+    if (targetId) {
+        const current: any = await ProductCategoryModel.findById(targetId).lean();
+        if (!current) throw new TRPCError({ code: "NOT_FOUND", message: "找不到要修改的產品" });
+        if (Number(current.level || 3) !== payload.level) {
+            throw new TRPCError({ code: "BAD_REQUEST", message: "既有產品不可變更階層；請在正確階層新增項目" });
+        }
+        if (!payload.isActive && await ProductCategoryModel.exists({ parentId: current._id, isActive: true })) {
+            throw new TRPCError({ code: "BAD_REQUEST", message: "仍有啟用中的下階產品，不可停用此項目" });
+        }
+    }
+};
+
+const mapProductCategory = (category: any) => ({
+    id: category._id.toString(),
+    code: category.code,
+    name: category.name,
+    level: Number(category.level || 3) as 1 | 2 | 3,
+    parentId: category.parentId?.toString() || "",
+    isActive: category.isActive !== false,
+    sortOrder: Number(category.sortOrder || 0),
+    createdAt: category.createdAt,
+    updatedAt: category.updatedAt
+});
+
 export const systemRouter = router({
     getPublicSettings: protectedProcedure.query(async () => {
         const records = await SystemSettingModel.find({
@@ -172,6 +230,12 @@ export const systemRouter = router({
             settings.apiToken = "";
         }
 
+        const approvedProducts = await ProductCategoryModel.find({
+            isActive: true,
+            $or: [{ level: 3 }, { level: { $exists: false } }]
+        }).sort({ sortOrder: 1, name: 1 }).select("name").lean();
+        settings.availableProducts = approvedProducts.map(product => product.name);
+
         return settings;
     }),
 
@@ -179,6 +243,7 @@ export const systemRouter = router({
         .input(settingsPayloadSchema)
         .mutation(async ({ input }) => {
             const operations = (Object.entries(input) as Array<[SettingsKey, z.infer<typeof settingsPayloadSchema>[SettingsKey]]>)
+                .filter(([key]) => key !== "availableProducts")
                 .map(([key, value]) => {
                     const definition = settingDefinitions[key];
                     return {
@@ -200,19 +265,136 @@ export const systemRouter = router({
             if (operations.length > 0) {
                 await SystemSettingModel.bulkWrite(operations);
             }
-            await syncProductCategories(input.availableProducts);
-
             return { success: true };
         }),
 
     getProductCategories: protectedProcedure.query(async () => {
-        const categories = await ProductCategoryModel.find({ isActive: true }).sort({ sortOrder: 1, name: 1 }).lean();
+        const categories = await ProductCategoryModel.find({
+            isActive: true,
+            $or: [{ level: 3 }, { level: { $exists: false } }]
+        }).sort({ sortOrder: 1, name: 1 }).lean();
         return categories.map((category: any) => ({
             id: category._id.toString(),
             code: category.code,
             name: category.name,
+            level: Number(category.level || 3),
+            parentId: category.parentId?.toString() || "",
             sortOrder: category.sortOrder
         }));
+    }),
+
+    getProductCatalog: roleProcedure(["admin", "manager"]).query(async () => {
+        const categories = await ProductCategoryModel.find().sort({ level: 1, sortOrder: 1, name: 1 }).lean();
+        return categories.map(mapProductCategory);
+    }),
+
+    listProductCatalogChanges: roleProcedure(["admin", "manager"]).input(z.object({
+        status: z.enum(productCatalogChangeStatuses).optional()
+    }).optional()).query(async ({ input }) => {
+        const rows = await ProductCatalogChangeModel.find(input?.status ? { status: input.status } : {})
+            .populate("requestedById", "name department role")
+            .populate("decidedById", "name department role")
+            .sort({ requestedAt: -1 }).limit(300).lean();
+        return rows.map((row: any) => ({
+            id: row._id.toString(), action: row.action, targetId: row.targetId?.toString() || "",
+            payload: { ...row.payload, parentId: row.payload.parentId?.toString() || "" },
+            beforeSnapshot: row.beforeSnapshot || null, status: row.status,
+            requestedById: row.requestedById?._id?.toString() || row.requestedById?.toString(),
+            requestedByName: row.requestedById?.name || "", requestedAt: row.requestedAt,
+            decidedByName: row.decidedById?.name || "", decidedAt: row.decidedAt,
+            decisionReason: row.decisionReason || ""
+        }));
+    }),
+
+    submitProductCatalogChange: roleProcedure(["admin", "manager"]).input(z.object({
+        action: z.enum(productCatalogChangeActions),
+        targetId: productCatalogIdSchema.optional(),
+        payload: productCatalogPayloadSchema
+    })).mutation(async ({ input, ctx }) => {
+        if (input.action === "create" && input.targetId) throw new TRPCError({ code: "BAD_REQUEST", message: "新增產品不可指定既有項目" });
+        if (input.action === "update" && !input.targetId) throw new TRPCError({ code: "BAD_REQUEST", message: "修改產品必須指定既有項目" });
+        const target: any = input.targetId
+            ? await ProductCategoryModel.findById(input.targetId).lean()
+            : null;
+        if (input.action === "update" && !target) throw new TRPCError({ code: "NOT_FOUND", message: "找不到要修改的產品" });
+        await validateProductCatalogPayload(input.payload, input.targetId);
+        const pendingConflict = await ProductCatalogChangeModel.exists({
+            status: "pending",
+            $or: [
+                ...(input.targetId ? [{ targetId: input.targetId }] : []),
+                { "payload.code": input.payload.code },
+                { "payload.name": input.payload.name }
+            ]
+        });
+        if (pendingConflict) throw new TRPCError({ code: "CONFLICT", message: "此產品已有待核准的新增或修改申請" });
+        const row = await ProductCatalogChangeModel.create({
+            action: input.action,
+            targetId: input.targetId ? new mongoose.Types.ObjectId(input.targetId) : undefined,
+            payload: { ...input.payload, parentId: input.payload.parentId ? new mongoose.Types.ObjectId(input.payload.parentId) : undefined },
+            beforeSnapshot: target ? mapProductCategory(target) : undefined,
+            status: "pending", requestedById: new mongoose.Types.ObjectId(ctx.user.id), requestedAt: new Date()
+        });
+        const approvers = await UserModel.find({ role: "admin", isActive: { $ne: false } }).select("_id").lean();
+        await createNotifications(approvers.map(approver => ({
+            userId: approver._id.toString(), type: "approval" as const,
+            message: `${ctx.user.name} 提出${input.action === "create" ? "新增" : "修改"}第 ${input.payload.level} 階產品「${input.payload.name}」的申請。`,
+            actionUrl: "/system-settings?tab=products"
+        })));
+        return { id: row._id.toString() };
+    }),
+
+    reviewProductCatalogChange: roleProcedure(["admin"]).input(z.object({
+        id: productCatalogIdSchema,
+        decision: z.enum(["approved", "rejected"]),
+        reason: z.string().trim().max(2000).optional()
+    })).mutation(async ({ input, ctx }) => {
+        const change: any = await ProductCatalogChangeModel.findById(input.id);
+        if (!change) throw new TRPCError({ code: "NOT_FOUND", message: "找不到產品主檔申請" });
+        if (change.status !== "pending") throw new TRPCError({ code: "BAD_REQUEST", message: "此申請已完成審核" });
+        if (input.decision === "rejected" && !input.reason?.trim()) {
+            throw new TRPCError({ code: "BAD_REQUEST", message: "退回產品主檔申請時必須填寫原因" });
+        }
+        if (!ctx.user.isPlatformOwner && change.requestedById.toString() === ctx.user.id) {
+            throw new TRPCError({ code: "FORBIDDEN", message: "申請人不可核准自己的產品主檔異動" });
+        }
+        if (input.decision === "approved") {
+            const payload = {
+                code: change.payload.code,
+                name: change.payload.name,
+                level: Number(change.payload.level) as 1 | 2 | 3,
+                parentId: change.payload.parentId?.toString(),
+                isActive: change.payload.isActive !== false,
+                sortOrder: Number(change.payload.sortOrder || 0)
+            };
+            await validateProductCatalogPayload(payload, change.targetId?.toString());
+            if (change.action === "create") {
+                await ProductCategoryModel.create({
+                    ...payload,
+                    parentId: payload.parentId ? new mongoose.Types.ObjectId(payload.parentId) : undefined
+                });
+            } else {
+                const { parentId, ...scalarPayload } = payload;
+                await ProductCategoryModel.updateOne({ _id: change.targetId }, {
+                    $set: {
+                        ...scalarPayload,
+                        ...(parentId ? { parentId: new mongoose.Types.ObjectId(parentId) } : {})
+                    },
+                    ...(!parentId ? { $unset: { parentId: 1 } } : {})
+                });
+            }
+        }
+        change.status = input.decision;
+        change.decidedById = new mongoose.Types.ObjectId(ctx.user.id);
+        change.decidedAt = new Date();
+        change.decisionReason = input.reason?.trim() || undefined;
+        await change.save();
+        await createNotification({
+            userId: change.requestedById.toString(),
+            type: input.decision === "approved" ? "info" : "warning",
+            message: `產品主檔「${change.payload.name}」${input.decision === "approved" ? "已核准並生效" : `已退回：${input.reason}`}`,
+            actionUrl: "/system-settings?tab=products"
+        });
+        return { success: true };
     }),
 
     getCustomFields: roleProcedure(["admin", "manager"]).query(async () => {
