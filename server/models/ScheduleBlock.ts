@@ -16,7 +16,13 @@ export interface IScheduleBlock extends Document {
     workContent?: string;
     batchId: string;
     overCapacityReason?: string;
-    status: "active" | "cancelled";
+    status: "active" | "stale" | "cancelled";
+    staleReason?: string;
+    staleDetectedAt?: Date;
+    staleResolution?: "cancelled" | "converted_to_manual";
+    staleResolvedAt?: Date;
+    staleResolvedById?: mongoose.Types.ObjectId;
+    staleResolutionReason?: string;
     version: number;
     createdById: mongoose.Types.ObjectId;
     migratedFromCalendarTaskId?: mongoose.Types.ObjectId;
@@ -37,7 +43,13 @@ const ScheduleBlockSchema = new Schema<IScheduleBlock>({
     workContent: { type: String, trim: true, maxlength: 2000 },
     batchId: { type: String, required: true, trim: true },
     overCapacityReason: { type: String, trim: true, maxlength: 1000 },
-    status: { type: String, enum: ["active", "cancelled"], default: "active", required: true },
+    status: { type: String, enum: ["active", "stale", "cancelled"], default: "active", required: true },
+    staleReason: { type: String, trim: true, maxlength: 1000 },
+    staleDetectedAt: { type: Date },
+    staleResolution: { type: String, enum: ["cancelled", "converted_to_manual"] },
+    staleResolvedAt: { type: Date },
+    staleResolvedById: { type: Schema.Types.ObjectId, ref: "User" },
+    staleResolutionReason: { type: String, trim: true, maxlength: 1000 },
     version: { type: Number, default: 1, min: 1, required: true },
     createdById: { type: Schema.Types.ObjectId, ref: "User", required: true },
     migratedFromCalendarTaskId: { type: Schema.Types.ObjectId, ref: "CalendarTask" },

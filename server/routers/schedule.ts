@@ -3,7 +3,7 @@ import { randomUUID } from "node:crypto";
 import mongoose from "mongoose";
 import { z } from "zod";
 import { permissionProcedure, router, type UserSession } from "../_core/trpc";
-import { assertAuthorized, canAccessOpportunity, getManagedDepartments, hasAnyRole } from "../_core/authorization";
+import { assertAuthorized, assertFound, canAccessOpportunity, getManagedDepartments, hasAnyRole } from "../_core/authorization";
 import { toObjectId } from "../_core/cursor";
 import { createNotification } from "../_core/notifications";
 import { buildManagerProjectScopeQuery, canViewProject, directProjectClauses, managerCanAccessUser } from "../_core/projectAuthorization";
@@ -14,6 +14,7 @@ import { ScheduleManagerNoteModel } from "../models/ScheduleManagerNote";
 import { ScheduleRevisionModel } from "../models/ScheduleRevision";
 import { ServiceRequestModel } from "../models/ServiceRequest";
 import { UserModel } from "../models/User";
+import { TimesheetModel } from "../models/Timesheet";
 import { buildDailyPercentMap } from "../services/ResourcePlanningService";
 import {
     buildScheduleCapacityMap,
@@ -59,6 +60,8 @@ const mapBlock = (row: any) => ({
     batchId: row.batchId,
     overCapacityReason: row.overCapacityReason || "",
     status: row.status,
+    staleReason: row.staleReason || "",
+    staleDetectedAt: row.staleDetectedAt,
     version: row.version,
     createdAt: row.createdAt,
     updatedAt: row.updatedAt
@@ -93,9 +96,30 @@ const filterEffectiveWbsBlocks = async (blocks: any[]) => {
         project._id.toString(),
         new Set((getEffectiveWbs(project)?.items || []).map((item: any) => item._id.toString()))
     ]));
-    return blocks.filter(block => block.sourceType !== "wbs"
-        || !!block.projectId && effectiveItemsByProject.get(idString(block.projectId))?.has(idString(block.wbsItemId)));
+    const staleIds = blocks.filter(block => block.sourceType === "wbs"
+        && (!block.projectId || !effectiveItemsByProject.get(idString(block.projectId))?.has(idString(block.wbsItemId))))
+        .map(block => block._id);
+    if (staleIds.length > 0) {
+        await ScheduleBlockModel.updateMany(
+            { _id: { $in: staleIds }, status: "active" },
+            { $set: { status: "stale", staleReason: "WBS 工項已不在最新核准版本", staleDetectedAt: new Date() }, $inc: { version: 1 } }
+        );
+    }
+    const staleSet = new Set(staleIds.map(idString));
+    return blocks.filter(block => !staleSet.has(idString(block._id)));
 };
+
+const mapActual = (row: any) => ({
+    id: row._id.toString(),
+    userId: idString(row.techId),
+    date: scheduleDateKey(row.workDate),
+    hours: Number(row.hours || 0),
+    description: row.description || "",
+    projectId: idString(row.srId) || undefined,
+    projectTitle: row.srId?.title || "",
+    opportunityId: idString(row.opportunityId) || undefined,
+    opportunityTitle: row.opportunityId?.title || ""
+});
 
 const getVisibleProjectQuery = async (user: UserSession) => {
     if (hasAnyRole(user, ["admin"])) return {};
@@ -295,16 +319,19 @@ const getTeamScheduleData = async (user: UserSession, input: z.infer<typeof team
     const userIds = users.map(item => item._id);
     const blockQuery: any = { assigneeId: { $in: userIds }, status: "active", date: { $gte: start, $lte: end } };
     if (input.projectId) blockQuery.projectId = toObjectId(input.projectId);
-    const [blocks, allocations, notes] = await Promise.all([
+    const [blocks, allocations, notes, actualRows] = await Promise.all([
         ScheduleBlockModel.find(blockQuery)
             .populate("assigneeId", "name email department")
             .populate("projectId", "title projectCode")
             .populate("opportunityId", "title opportunityCode").sort({ date: 1, slot: 1 }).lean(),
         ResourceAllocationModel.find({ assigneeId: { $in: userIds }, status: "approved", requestType: { $ne: "cancel" }, startDate: { $lte: end }, endDate: { $gte: start } }).lean(),
         ScheduleManagerNoteModel.find({ assigneeId: { $in: userIds }, date: { $gte: start, $lte: end } })
-            .populate("managerId", "name").sort({ createdAt: -1 }).lean()
+            .populate("managerId", "name").sort({ createdAt: -1 }).lean(),
+        TimesheetModel.find({ techId: { $in: userIds }, workDate: { $gte: start, $lte: end }, ...(input.projectId ? { srId: toObjectId(input.projectId) } : {}) })
+            .populate("srId", "title projectCode").populate("opportunityId", "title opportunityCode").lean()
     ]);
     const blockRows = (await filterEffectiveWbsBlocks(blocks)).map(mapBlock);
+    const actuals = actualRows.map(mapActual);
     const dates: string[] = [];
     for (const cursor = new Date(start); cursor <= end; cursor.setUTCDate(cursor.getUTCDate() + 1)) dates.push(scheduleDateKey(cursor));
     const cells = users.flatMap(item => {
@@ -317,6 +344,8 @@ const getTeamScheduleData = async (user: UserSession, input: z.infer<typeof team
             const day = capacity.get(date);
             const scheduledPercent = day?.busyPercent || 0;
             const allocationPercent = allocationMap.get(date) || 0;
+            const actualHours = actuals.filter(row => row.userId === userId && row.date === date).reduce((sum, row) => sum + row.hours, 0);
+            const scheduledHours = Number(item.dailyCapacityHours ?? 8) * scheduledPercent / 100;
             return {
                 userId,
                 date,
@@ -325,6 +354,9 @@ const getTeamScheduleData = async (user: UserSession, input: z.infer<typeof team
                 scheduledPercent,
                 allocationPercent,
                 gapPercent: Math.max(0, allocationPercent - scheduledPercent),
+                actualHours,
+                scheduledHours,
+                varianceHours: actualHours - scheduledHours,
                 isWeekend: day?.isWeekend ?? [0, 6].includes(normalizeScheduleDate(date).getUTCDay()),
                 isOverloaded: day?.isOverloaded || false,
                 blocks: ownBlocks.filter(block => block.date === date),
@@ -336,7 +368,8 @@ const getTeamScheduleData = async (user: UserSession, input: z.infer<typeof team
         users: users.map(item => ({ id: item._id.toString(), name: item.name, email: item.email, department: item.department || "", role: item.role, dailyCapacityHours: Number(item.dailyCapacityHours ?? 8) })),
         dates,
         cells,
-        departments: Array.from(new Set(users.map(item => item.department).filter(Boolean))).sort()
+        departments: Array.from(new Set(users.map(item => item.department).filter(Boolean))).sort(),
+        actuals
     };
 };
 
@@ -345,7 +378,7 @@ export const scheduleRouter = router({
         .input(rangeInput)
         .query(async ({ ctx, input }) => {
             const { start, end } = assertRange(input.from, input.to);
-            const [blocks, notes, revision] = await Promise.all([
+            const [blocks, notes, revision, actualRows] = await Promise.all([
                 ScheduleBlockModel.find({ assigneeId: toObjectId(ctx.user.id), status: "active", date: { $gte: start, $lte: end } })
                     .populate("assigneeId", "name email department")
                     .populate("projectId", "title projectCode")
@@ -353,10 +386,41 @@ export const scheduleRouter = router({
                     .sort({ date: 1, slot: 1 }).lean(),
                 ScheduleManagerNoteModel.find({ assigneeId: toObjectId(ctx.user.id), date: { $gte: start, $lte: end } })
                     .populate("managerId", "name").sort({ createdAt: -1 }).lean(),
-                ScheduleRevisionModel.findOne({ assigneeId: toObjectId(ctx.user.id) }).lean()
+                ScheduleRevisionModel.findOne({ assigneeId: toObjectId(ctx.user.id) }).lean(),
+                TimesheetModel.find({ techId: toObjectId(ctx.user.id), workDate: { $gte: start, $lte: end } })
+                    .populate("srId", "title projectCode").populate("opportunityId", "title opportunityCode").sort({ workDate: 1 }).lean()
             ]);
             const effectiveBlocks = await filterEffectiveWbsBlocks(blocks);
-            return { revision: revision?.revision || 0, blocks: effectiveBlocks.map(mapBlock), notes: notes.map(mapNote) };
+            return { revision: revision?.revision || 0, blocks: effectiveBlocks.map(mapBlock), notes: notes.map(mapNote), actuals: actualRows.map(mapActual) };
+        }),
+
+    listStaleWbsBlocks: permissionProcedure("module.calendar.view", ["admin", "manager"])
+        .query(async ({ ctx }) => {
+            assertAuthorized(hasAnyRole(ctx.user, ["admin", "manager"]), "只有主管可以管理失效排程");
+            const projectQuery = hasAnyRole(ctx.user, ["admin"]) ? {} : await buildManagerProjectScopeQuery(ctx.user);
+            const projectIds = await ServiceRequestModel.find(projectQuery).distinct("_id");
+            const rows = await ScheduleBlockModel.find({ status: "stale", projectId: { $in: projectIds } })
+                .populate("assigneeId", "name email department").populate("projectId", "title projectCode")
+                .sort({ staleDetectedAt: -1 }).limit(500).lean();
+            return rows.map(mapBlock);
+        }),
+
+    resolveStaleWbsBlock: permissionProcedure("module.calendar.view", ["admin", "manager"])
+        .input(z.object({ id: z.string(), action: z.enum(["cancel", "convert_to_manual"]), reason: z.string().trim().min(3).max(1000) }))
+        .mutation(async ({ ctx, input }) => {
+            assertAuthorized(hasAnyRole(ctx.user, ["admin", "manager"]), "只有主管可以處理失效排程");
+            const block: any = assertFound(await ScheduleBlockModel.findById(input.id).lean(), "找不到排程");
+            if (block.status !== "stale") throw new TRPCError({ code: "BAD_REQUEST", message: "此排程不是待處理的失效排程" });
+            const project = block.projectId ? await ServiceRequestModel.findById(block.projectId).lean() : null;
+            assertAuthorized(!project || await canViewProject(ctx.user, project), "您沒有權限處理此排程");
+            const resolvedAt = new Date();
+            const common = { staleResolvedAt: resolvedAt, staleResolvedById: toObjectId(ctx.user.id), staleResolutionReason: input.reason };
+            if (input.action === "cancel") {
+                await ScheduleBlockModel.updateOne({ _id: block._id, status: "stale" }, { $set: { ...common, status: "cancelled", staleResolution: "cancelled" }, $inc: { version: 1 } });
+            } else {
+                await ScheduleBlockModel.updateOne({ _id: block._id, status: "stale" }, { $set: { ...common, status: "active", sourceType: "manual", staleResolution: "converted_to_manual" }, $unset: { projectId: 1, wbsItemId: 1 }, $inc: { version: 1 } });
+            }
+            return { success: true };
         }),
 
     listSources: permissionProcedure("module.calendar.view", [...calendarRoles])

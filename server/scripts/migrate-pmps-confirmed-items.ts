@@ -1,6 +1,8 @@
 import mongoose from "mongoose";
 import { connectDB, disconnectDB } from "../db";
 import { ServiceRequestModel } from "../models/ServiceRequest";
+import { OpportunityModel } from "../models/Opportunity";
+import { ScheduleBlockModel } from "../models/ScheduleBlock";
 
 const dryRun = process.argv.includes("--dry-run");
 
@@ -46,7 +48,17 @@ async function run() {
             }
         }
         if (!dryRun) await collection.createIndex({ opportunityId: 1 }, { sparse: true, name: "opportunityId_1" });
-        console.log(JSON.stringify({ dryRun, scanned, changed, skipped, conflicted, droppedLegacyOpportunityUniqueIndex: !!legacyUnique }));
+        const [opportunitiesMissingOverrideFlag, scheduleBlocksMissingStatus] = await Promise.all([
+            OpportunityModel.countDocuments({ probabilityOverridden: { $exists: false } }),
+            ScheduleBlockModel.countDocuments({ status: { $exists: false } })
+        ]);
+        if (!dryRun) {
+            await Promise.all([
+                OpportunityModel.updateMany({ probabilityOverridden: { $exists: false } }, { $set: { probabilityOverridden: false } }),
+                ScheduleBlockModel.updateMany({ status: { $exists: false } }, { $set: { status: "active" } })
+            ]);
+        }
+        console.log(JSON.stringify({ dryRun, scanned, changed, skipped, conflicted, opportunitiesMissingOverrideFlag, scheduleBlocksMissingStatus, droppedLegacyOpportunityUniqueIndex: !!legacyUnique }));
     } finally { await disconnectDB(); }
 }
 

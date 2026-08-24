@@ -9,6 +9,7 @@ import type { Role, SrStatus, SrType } from "../../shared/types";
 import { ensureCompanyByName } from "../_core/companies";
 
 type RawRow = Record<string, unknown>;
+const dryRun = process.argv.includes("--dry-run");
 
 const clean = (value: unknown) => String(value ?? "").trim();
 
@@ -98,6 +99,13 @@ function normalizeRows(filePath: string) {
 }
 
 async function importFile(filePath: string) {
+    if (dryRun) {
+        const rows = normalizeRows(filePath);
+        const projectCodes = new Set(rows.map(row => clean(row["專案編號"])).filter(Boolean));
+        const customers = new Set(rows.map(row => clean(row["公司名稱"])).filter(Boolean));
+        console.log(JSON.stringify({ dryRun: true, rows: rows.length, projects: projectCodes.size, companies: customers.size, sourceFileName: path.basename(filePath) }));
+        return;
+    }
     await connectDB();
     const sourceFileName = path.basename(filePath);
     const batch = await ImportBatchModel.create({
@@ -243,9 +251,9 @@ async function importFile(filePath: string) {
     }
 }
 
-const filePath = process.argv[2];
+const filePath = process.argv.slice(2).find(argument => !argument.startsWith("--"));
 if (!filePath) {
-    console.error("Usage: node server/dist/scripts/import-open-dispatch-cases.js <xlsx-path>");
+    console.error("Usage: node server/dist/scripts/import-open-dispatch-cases.js [--dry-run] <xlsx-path>");
     process.exit(1);
 }
 

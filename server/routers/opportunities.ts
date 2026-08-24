@@ -11,6 +11,8 @@ import { TimesheetModel } from "../models/Timesheet";
 import { ServiceRequestModel } from "../models/ServiceRequest";
 import { UserModel } from "../models/User";
 import { ImportBatchModel } from "../models/ImportBatch";
+import { ProductCategoryModel } from "../models/ProductCategory";
+import { OpportunityProjectLinkModel } from "../models/OpportunityProjectLink";
 import { TRPCError } from "@trpc/server";
 import mongoose from "mongoose";
 import { memberRoles, opportunityStatuses, opportunityTypes, productApprovalStatuses } from "../../shared/types";
@@ -123,6 +125,21 @@ const getEffectiveOpportunityType = (opportunity: { opportunityType?: string; es
 
 const opportunityIdString = (opportunity: any) =>
     opportunity?._id?.toString?.() || opportunity?.id?.toString?.() || "";
+
+const resolveProductSelection = async (productIds: string[] = [], fallbackNames: string[] = []) => {
+    const uniqueIds = Array.from(new Set(productIds.filter(id => mongoose.isValidObjectId(id))));
+    if (!uniqueIds.length) return { productIds: [], productCategoryIds: [], productNames: Array.from(new Set(fallbackNames.map(name => name.trim()).filter(Boolean))) };
+    const products: any[] = await ProductCategoryModel.find({ _id: { $in: uniqueIds.map(toObjectId) }, isActive: true, level: 3 }).lean();
+    if (products.length !== uniqueIds.length) throw new TRPCError({ code: "BAD_REQUEST", message: "部分產品不存在、已停用或不是產品層級" });
+    const parentIds = Array.from(new Set(products.map(product => product.parentId?.toString()).filter(Boolean))) as string[];
+    const parents: any[] = parentIds.length ? await ProductCategoryModel.find({ _id: { $in: parentIds.map(toObjectId) } }).lean() : [];
+    const grandParentIds = Array.from(new Set(parents.map(parent => parent.parentId?.toString()).filter(Boolean))) as string[];
+    return {
+        productIds: products.map(product => product._id.toString()),
+        productCategoryIds: Array.from(new Set([...parentIds, ...grandParentIds])),
+        productNames: products.map(product => product.name)
+    };
+};
 
 const canAccessOpportunityInScope = async (user: any, opportunity: any) => {
     if (hasAnyRole(user, ["admin"])) return true;
@@ -284,7 +301,7 @@ export const opportunitiesRouter = router({
             });
 
             const items = await OpportunityModel.find(query)
-                .select("opportunityCode title customerName salesUserId salesDepartment salesRep estimatedValue presalesAmount quotedAmount finalDealAmount currency taxIncluded probability probabilityNote opportunityType status expectedCloseDate ownerId ownerNameSnapshot ownerEmailSnapshot ownerDepartmentCodeSnapshot ownerDepartmentNameSnapshot createdAt members presalesAssignments productNames description")
+                .select("opportunityCode title customerName salesUserId salesDepartment salesRep estimatedValue presalesAmount quotedAmount finalDealAmount currency taxIncluded probability probabilityNote probabilityOverridden probabilityAdjustmentReason opportunityType status expectedCloseDate ownerId ownerNameSnapshot ownerEmailSnapshot ownerDepartmentCodeSnapshot ownerDepartmentNameSnapshot createdAt members presalesAssignments productNames productCategoryIds productIds description")
                 .populate("ownerId", "name")
                 .sort({ [sortBy]: direction })
                 .limit(limit + 1)
@@ -322,6 +339,8 @@ export const opportunitiesRouter = router({
                     ownerDepartmentNameSnapshot: opp.ownerDepartmentNameSnapshot,
                     createdAt: opp.createdAt,
                     productNames: opp.productNames || [],
+                    productCategoryIds: (opp.productCategoryIds || []).map((id: any) => id.toString()),
+                    productIds: (opp.productIds || []).map((id: any) => id.toString()),
                     description: opp.description || ""
                 })),
                 nextCursor: hasMore && lastItem
@@ -349,7 +368,7 @@ export const opportunitiesRouter = router({
             });
             const exportLimit = 10_000;
             const items = await OpportunityModel.find(query)
-                .select("opportunityCode title customerName salesUserId salesDepartment salesRep estimatedValue presalesAmount quotedAmount finalDealAmount currency taxIncluded probability probabilityNote opportunityType status expectedCloseDate ownerId ownerNameSnapshot ownerEmailSnapshot ownerDepartmentCodeSnapshot ownerDepartmentNameSnapshot createdAt productNames description approvedM365 approvedAzure approvedSecurity")
+                .select("opportunityCode title customerName salesUserId salesDepartment salesRep estimatedValue presalesAmount quotedAmount finalDealAmount currency taxIncluded probability probabilityNote probabilityOverridden probabilityAdjustmentReason opportunityType status expectedCloseDate ownerId ownerNameSnapshot ownerEmailSnapshot ownerDepartmentCodeSnapshot ownerDepartmentNameSnapshot createdAt productNames productCategoryIds productIds description approvedM365 approvedAzure approvedSecurity")
                 .populate("salesUserId", "name email department")
                 .populate("ownerId", "name email department")
                 .sort({ [sortBy]: sortOrder === "desc" ? -1 : 1 })
@@ -380,6 +399,8 @@ export const opportunitiesRouter = router({
                     status: opportunity.status,
                     expectedCloseDate: opportunity.expectedCloseDate,
                     productNames: opportunity.productNames || [],
+                    productCategoryIds: (opportunity.productCategoryIds || []).map((id: any) => id.toString()),
+                    productIds: (opportunity.productIds || []).map((id: any) => id.toString()),
                     description: opportunity.description || "",
                     approvedM365: opportunity.approvedM365 === true,
                     approvedAzure: opportunity.approvedAzure === true,
@@ -720,6 +741,8 @@ export const opportunitiesRouter = router({
                 value: z.string()
             })).optional(),
             productNames: z.array(z.string()).optional(),
+            productIds: z.array(z.string()).max(100).optional(),
+            productCategoryIds: z.array(z.string()).max(100).optional(),
             productApprovals: z.array(z.object({
                 productName: z.string().trim().min(1),
                 status: z.enum(productApprovalStatuses)
@@ -735,11 +758,22 @@ export const opportunitiesRouter = router({
             const initialStatus = getInitialOpportunityStatus(hasAnyRole(ctx.user, ["presales"]));
             const ownerSnapshot = await getOwnerSnapshot(ownerId);
             await ensureCompanyByName(input.customerName, ownerId);
+            const selectedProducts = await resolveProductSelection(input.productIds || [], input.productNames || []);
+            const defaultProbability = getProbabilityForOpportunityStatus(initialStatus);
+            const probabilityOverridden = input.probability !== undefined && input.probability !== defaultProbability;
+            if (probabilityOverridden && !input.probabilityNote?.trim()) throw new TRPCError({ code: "BAD_REQUEST", message: "人工調整成功率時必須填寫原因" });
 
             const result = await OpportunityModel.create({
                 ...input,
                 status: initialStatus,
-                probability: input.probability ?? getProbabilityForOpportunityStatus(initialStatus),
+                probability: input.probability ?? defaultProbability,
+                probabilityOverridden,
+                probabilityAdjustmentReason: probabilityOverridden ? input.probabilityNote?.trim() : undefined,
+                probabilityUpdatedAt: new Date(),
+                probabilityUpdatedById: toObjectId(ctx.user.id),
+                productNames: selectedProducts.productNames,
+                productIds: selectedProducts.productIds.map(toObjectId),
+                productCategoryIds: selectedProducts.productCategoryIds.map(toObjectId),
                 salesUserId: salesUserFields?.salesUserId,
                 salesRep: salesUserFields?.salesRep || input.salesRep || "",
                 salesDepartment: salesUserFields?.salesDepartment || input.salesDepartment || "",
@@ -812,6 +846,8 @@ export const opportunitiesRouter = router({
                 id: opp._id.toString(),
                 ownerId: opp.ownerId.toString(),
                 salesUserId: opp.salesUserId?.toString() || "",
+                productIds: (opp.productIds || []).map((value: any) => value.toString()),
+                productCategoryIds: (opp.productCategoryIds || []).map((value: any) => value.toString()),
                 opportunityType: getEffectiveOpportunityType(opp),
                 project: project ? {
                     id: project._id.toString(),
@@ -1377,11 +1413,12 @@ export const opportunitiesRouter = router({
                 $set: {
                     status: targetStatus,
                     probability,
+                    probabilityOverridden: false,
                     reopenedAt,
                     reopenedById: toObjectId(ctx.user.id),
                     reopenReason: input.reason
                 },
-                $unset: { closedAt: 1, cancelledAt: 1, cancellationReason: 1 }
+                $unset: { closedAt: 1, cancelledAt: 1, cancellationReason: 1, probabilityAdjustmentReason: 1, probabilityNote: 1 }
             });
             await recordBusinessHistory({
                 entityType: "opportunity",
@@ -1404,12 +1441,13 @@ export const opportunitiesRouter = router({
             estimatedValue: z.number().min(0, "客戶預算不能為負數").optional(),
             finalDealAmount: z.number().min(0, "最終成交金額不能為負數").optional(),
             probability: opportunityProbabilitySchema.optional(),
+            probabilityMode: z.enum(["preserve", "reset"]).optional(),
             reason: z.string().trim().optional()
         }))
         .mutation(async ({ input, ctx }) => {
             const opportunity = assertFound(
                 await OpportunityModel.findById(input.id)
-                    .select("ownerId members status probability estimatedValue quotedAmount finalDealAmount closedAt cancelledAt cancellationReason")
+                    .select("ownerId members status probability probabilityOverridden probabilityAdjustmentReason probabilityNote estimatedValue quotedAmount finalDealAmount closedAt cancelledAt cancellationReason")
                     .lean(),
                 "找不到該商機"
             );
@@ -1438,10 +1476,17 @@ export const opportunitiesRouter = router({
             }
 
             const occurredAt = new Date();
-            const probability = input.probability ?? getProbabilityForOpportunityStatus(input.status);
+            if (opportunity.probabilityOverridden && opportunity.status !== input.status && input.probabilityMode === undefined && input.probability === undefined) {
+                throw new TRPCError({ code: "BAD_REQUEST", message: "此商機曾人工調整成功率，請選擇保留或依新狀態重設" });
+            }
+            const preserveProbability = input.probabilityMode === "preserve" && input.probability === undefined;
+            const probability = input.probability ?? (preserveProbability ? opportunity.probability : getProbabilityForOpportunityStatus(input.status));
             const set: Record<string, unknown> = {
                 status: input.status,
                 probability,
+                probabilityOverridden: input.probability !== undefined || preserveProbability ? true : false,
+                probabilityUpdatedAt: occurredAt,
+                probabilityUpdatedById: toObjectId(ctx.user.id),
                 ...(!isTerminalOpportunityStatus(opportunity.status) && isTerminalOpportunityStatus(input.status)
                     ? { lastNonTerminalStatus: opportunity.status }
                     : {}),
@@ -1458,9 +1503,11 @@ export const opportunitiesRouter = router({
                 set.cancellationReason = input.reason?.trim();
             }
 
+            const updateOperation: any = { $set: set };
+            if (!set.probabilityOverridden) updateOperation.$unset = { probabilityAdjustmentReason: 1, probabilityNote: 1 };
             await OpportunityModel.updateOne(
                 { _id: input.id },
-                { $set: set }
+                updateOperation
             );
             await recordBusinessHistory({
                 entityType: "opportunity",
@@ -1638,12 +1685,12 @@ export const opportunitiesRouter = router({
         .input(z.object({
             id: z.string(),
             probability: opportunityProbabilitySchema,
-            probabilityNote: z.string().trim().max(2000).optional()
+            probabilityNote: z.string().trim().min(3, "人工調整成功率時必須填寫至少 3 個字的原因").max(2000)
         }))
         .mutation(async ({ input, ctx }) => {
             const opportunity = assertFound(
                 await OpportunityModel.findById(input.id)
-                    .select("ownerId members status probability probabilityNote")
+                    .select("ownerId members status probability probabilityNote probabilityOverridden probabilityAdjustmentReason")
                     .lean(),
                 "找不到該商機"
             );
@@ -1657,7 +1704,7 @@ export const opportunitiesRouter = router({
             const probabilityNote = input.probabilityNote?.trim() || "";
             await OpportunityModel.updateOne(
                 { _id: input.id },
-                { $set: { probability: input.probability, probabilityNote } }
+                { $set: { probability: input.probability, probabilityNote, probabilityOverridden: true, probabilityAdjustmentReason: probabilityNote, probabilityUpdatedAt: new Date(), probabilityUpdatedById: toObjectId(ctx.user.id) } }
             );
             await recordBusinessHistory({
                 entityType: "opportunity",
@@ -1787,6 +1834,7 @@ export const opportunitiesRouter = router({
         .input(z.object({
             opportunityId: z.string(),
             productNames: z.array(z.string().trim().min(1)).max(100),
+            productIds: z.array(z.string()).max(100).optional(),
             approvals: z.array(z.object({
                 productName: z.string().trim().min(1),
                 status: z.enum(productApprovalStatuses)
@@ -1797,11 +1845,14 @@ export const opportunitiesRouter = router({
             assertOpportunityEditable(opportunity);
             assertAuthorized(await canManageOpportunityInScope(ctx.user, opportunity), "您沒有權限修改產品資料");
             const before = { productNames: [...(opportunity.productNames || [])] };
-            opportunity.productNames = input.productNames;
+            const selectedProducts = await resolveProductSelection(input.productIds || [], input.productNames);
+            opportunity.productNames = selectedProducts.productNames;
+            opportunity.productIds = selectedProducts.productIds.map(toObjectId) as any;
+            opportunity.productCategoryIds = selectedProducts.productCategoryIds.map(toObjectId) as any;
             await opportunity.save();
             await syncOpportunityProductApprovals({
                 opportunityId: opportunity._id.toString(),
-                productNames: input.productNames,
+                productNames: selectedProducts.productNames,
                 statuses: Object.fromEntries((input.approvals || []).map((item) => [item.productName, item.status]))
             });
             await recordBusinessHistory({
@@ -1809,7 +1860,7 @@ export const opportunitiesRouter = router({
                 entityId: opportunity._id,
                 action: "products_updated",
                 before,
-                after: { productNames: input.productNames, approvals: input.approvals || [] },
+                after: { productNames: selectedProducts.productNames, productIds: selectedProducts.productIds, productCategoryIds: selectedProducts.productCategoryIds, approvals: input.approvals || [] },
                 actorId: ctx.user.id,
                 actorRole: ctx.user.role,
                 source: "api"
@@ -2001,12 +2052,20 @@ export const opportunitiesRouter = router({
                 { opportunityId: input.opportunityId },
                 { _id: 1 }
             ).lean();
+            const relationLinks = await OpportunityProjectLinkModel.find(
+                { opportunityId: input.opportunityId },
+                { projectId: 1 }
+            ).lean();
+            const linkedProjectIds = [...new Set([
+                ...(linkedProject ? [linkedProject._id.toString()] : []),
+                ...relationLinks.map((link: any) => link.projectId.toString())
+            ])].map(toObjectId);
             const quoteIds = quotes.map((quote) => quote._id);
             const events = await BusinessHistoryEventModel.find({
                 $or: [
                     { entityType: "opportunity", entityId: toObjectId(input.opportunityId) },
                     ...(quoteIds.length > 0 ? [{ entityType: "opportunity_quote", entityId: { $in: quoteIds } }] : []),
-                    ...(linkedProject ? [{ entityType: "project", entityId: linkedProject._id }] : [])
+                    ...(linkedProjectIds.length ? [{ entityType: "project", entityId: { $in: linkedProjectIds } }] : [])
                 ]
             })
                 .sort({ occurredAt: -1, _id: -1 })
@@ -2017,8 +2076,19 @@ export const opportunitiesRouter = router({
                 ? await UserModel.find({ _id: { $in: actorIds.map(toObjectId) } }, { name: 1, email: 1 }).lean()
                 : [];
             const actorMap = new Map(actors.map((actor) => [actor._id.toString(), actor]));
+            const canViewFinancialHistory = ctx.user.isPlatformOwner === true
+                || ["admin", "manager", "business"].includes(ctx.user.role)
+                || opportunity.ownerId?.toString() === ctx.user.id;
+            const moneyKeys = new Set(["estimatedValue", "presalesAmount", "quotedAmount", "finalDealAmount", "amount", "allocationAmount", "total", "contractAmount", "finalPrice", "presalesHourlyRate"]);
+            const maskFinancials = (value: any): any => {
+                if (canViewFinancialHistory || value == null || typeof value !== "object") return value;
+                if (Array.isArray(value)) return value.map(maskFinancials);
+                return Object.fromEntries(Object.entries(value).map(([key, item]) => [key, moneyKeys.has(key) ? "[權限不足]" : maskFinancials(item)]));
+            };
             return events.map((event) => ({
                 ...event,
+                before: maskFinancials(event.before),
+                after: maskFinancials(event.after),
                 id: event._id.toString(),
                 entityId: event.entityId.toString(),
                 actorId: event.actorId?.toString(),

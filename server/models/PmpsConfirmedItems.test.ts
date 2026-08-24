@@ -4,6 +4,9 @@ import { IssueModel } from "./Issue";
 import { OpportunityDepartmentParticipationModel } from "./OpportunityDepartmentParticipation";
 import { OpportunityProjectLinkModel } from "./OpportunityProjectLink";
 import { ServiceRequestModel } from "./ServiceRequest";
+import { CompanyImportConflictModel } from "./CompanyImportConflict";
+import { OpportunityModel } from "./Opportunity";
+import { ScheduleBlockModel } from "./ScheduleBlock";
 
 describe("PMPS confirmed-item data contracts", () => {
     it("stores WBS headings, tasks and milestones explicitly", async () => {
@@ -54,5 +57,17 @@ describe("PMPS confirmed-item data contracts", () => {
             externalUrl: `https://example.com/${"a".repeat(2100)}`
         });
         await expect(issue.validate()).rejects.toThrow();
+    });
+
+    it("persists probability override and stale-schedule audit metadata", () => {
+        expect((OpportunityModel.schema.path("probabilityOverridden") as any).options.default).toBe(false);
+        expect((ScheduleBlockModel.schema.path("status") as any).options.enum).toEqual(["active", "stale", "cancelled"]);
+        expect(ScheduleBlockModel.schema.path("staleReason")).toBeDefined();
+        expect(ScheduleBlockModel.schema.path("staleResolvedById")).toBeDefined();
+    });
+
+    it("stores dispatch company import conflicts for manual resolution", () => {
+        expect((CompanyImportConflictModel.schema.path("status") as any).options.default).toBe("pending");
+        expect((CompanyImportConflictModel.schema.path("reason") as any).options.enum).toEqual(["source_name_mismatch", "source_target_conflict"]);
     });
 });

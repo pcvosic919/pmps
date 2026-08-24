@@ -269,18 +269,25 @@ export const systemRouter = router({
         }),
 
     getProductCategories: protectedProcedure.query(async () => {
-        const categories = await ProductCategoryModel.find({
-            isActive: true,
-            $or: [{ level: 3 }, { level: { $exists: false } }]
-        }).sort({ sortOrder: 1, name: 1 }).lean();
-        return categories.map((category: any) => ({
+        const allCategories = await ProductCategoryModel.find({ isActive: true }).sort({ level: 1, sortOrder: 1, name: 1 }).lean();
+        const byId = new Map(allCategories.map((category: any) => [category._id.toString(), category]));
+        const categories = allCategories.filter((category: any) => Number(category.level || 3) === 3);
+        return categories.map((category: any) => {
+            const line: any = category.parentId ? byId.get(category.parentId.toString()) : undefined;
+            const group: any = line?.parentId ? byId.get(line.parentId.toString()) : undefined;
+            return {
             id: category._id.toString(),
             code: category.code,
             name: category.name,
             level: Number(category.level || 3),
             parentId: category.parentId?.toString() || "",
-            sortOrder: category.sortOrder
-        }));
+            sortOrder: category.sortOrder,
+            productLineId: line?._id?.toString() || "",
+            productLineName: line?.name || "",
+            categoryId: group?._id?.toString() || line?._id?.toString() || "",
+            categoryName: group?.name || line?.name || "",
+            pathLabel: [group?.name, line?.name, category.name].filter(Boolean).join("／")
+        }; });
     }),
 
     getProductCatalog: roleProcedure(["admin", "manager"]).query(async () => {

@@ -3,6 +3,7 @@ import mongoose, { Document, Schema } from "mongoose";
 export interface IOpportunityDepartmentParticipation extends Document {
     opportunityId: mongoose.Types.ObjectId;
     department: string;
+    departmentId?: string;
     ownerId?: mongoose.Types.ObjectId;
     stage: string;
     amount?: number;
@@ -17,6 +18,7 @@ export interface IOpportunityDepartmentParticipation extends Document {
 const OpportunityDepartmentParticipationSchema = new Schema<IOpportunityDepartmentParticipation>({
     opportunityId: { type: Schema.Types.ObjectId, ref: "Opportunity", required: true },
     department: { type: String, trim: true, required: true },
+    departmentId: { type: String, trim: true },
     ownerId: { type: Schema.Types.ObjectId, ref: "User" },
     stage: { type: String, trim: true, default: "new", required: true },
     amount: { type: Number, min: 0 },

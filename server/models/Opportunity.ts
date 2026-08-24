@@ -30,6 +30,10 @@ export interface IOpportunity extends Document {
     amountAdjustmentReason?: string;
     probability: OpportunityProbability;
     probabilityNote?: string;
+    probabilityOverridden?: boolean;
+    probabilityAdjustmentReason?: string;
+    probabilityUpdatedAt?: Date;
+    probabilityUpdatedById?: mongoose.Types.ObjectId;
     presalesHourlyRate?: number;
     opportunityType: OpportunityType;
     status: OpportunityStatus;
@@ -80,6 +84,10 @@ const OpportunitySchema = new Schema<IOpportunity>({
     amountAdjustmentReason: { type: String, trim: true },
     probability: { type: Number, enum: opportunityProbabilities, default: 20, required: true },
     probabilityNote: { type: String, trim: true, maxlength: 2000 },
+    probabilityOverridden: { type: Boolean, default: false },
+    probabilityAdjustmentReason: { type: String, trim: true, maxlength: 2000 },
+    probabilityUpdatedAt: { type: Date },
+    probabilityUpdatedById: { type: Schema.Types.ObjectId, ref: "User" },
     presalesHourlyRate: { type: Number, min: 0 },
     opportunityType: { type: String, enum: opportunityTypes, default: "revenue", required: true },
     status: { type: String, enum: opportunityStatuses, default: "new", required: true },

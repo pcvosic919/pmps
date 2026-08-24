@@ -154,6 +154,7 @@ const HISTORY_STATUS_LABELS: Record<string, string> = {
 
 const formatHistoryValue = (field: string, value: unknown) => {
     if (value === undefined || value === null || value === "") return "未設定";
+    if (value === "[權限不足]") return "權限不足（已遮罩）";
     if (field === "status") return HISTORY_STATUS_LABELS[String(value)] || String(value);
     if (field === "probability") return `${Number(value)}%`;
     if (field === "hours" || field === "estimatedHours" || field === "totalHours") return `${Number(value).toLocaleString()} 小時`;
@@ -259,9 +260,15 @@ export function OpportunityDetailPage() {
     const [quoteTaxIncluded, setQuoteTaxIncluded] = useState(false);
     const [quoteError, setQuoteError] = useState("");
     const [relationProjectId, setRelationProjectId] = useState("");
+    const [relationType, setRelationType] = useState<"source" | "primary" | "related" | "merged">("related");
+    const [relationAmount, setRelationAmount] = useState("");
+    const [relationPrimary, setRelationPrimary] = useState(false);
     const [participationDepartment, setParticipationDepartment] = useState("");
     const [participationStage, setParticipationStage] = useState("new");
     const [participationAmount, setParticipationAmount] = useState("");
+    const [participationOwnerId, setParticipationOwnerId] = useState("");
+    const [participationNotes, setParticipationNotes] = useState("");
+    const [editingProductIds, setEditingProductIds] = useState<string[]>([]);
 
     // ------ Queries ------
     const { data: opp, isLoading: isOppLoading, refetch: refetchOpp } = trpc.opportunities.getById.useQuery({ id }, { enabled: !!id });
@@ -286,6 +293,7 @@ export function OpportunityDetailPage() {
     const { data: relatedProjects, refetch: refetchRelatedProjects } = trpc.opportunityRelations.listForOpportunity.useQuery({ opportunityId: id }, { enabled: !!id });
     const { data: participations, refetch: refetchParticipations } = trpc.opportunityRelations.listParticipations.useQuery({ opportunityId: id }, { enabled: !!id });
     const { data: availableProjects } = trpc.projects.srList.useQuery({ limit: 200 });
+    const { data: productCatalog } = trpc.system.getProductCategories.useQuery();
 
     const oppFields = customFieldDefs?.filter((f: any) => f.entityType === "opportunity") || [];
 
@@ -335,12 +343,28 @@ export function OpportunityDetailPage() {
         onError: error => toast.error(error.message || "商機重開失敗")
     });
     const linkProjectMutation = trpc.opportunityRelations.linkProject.useMutation({
-        onSuccess: async () => { setRelationProjectId(""); await refetchRelatedProjects(); await refetchHistory(); toast.success("已建立商機與專案關聯"); },
+        onSuccess: async () => { setRelationProjectId(""); setRelationAmount(""); await refetchRelatedProjects(); await refetchHistory(); toast.success("已建立商機與專案關聯"); },
         onError: error => toast.error(error.message || "建立關聯失敗")
     });
+    const updateProjectLinkMutation = trpc.opportunityRelations.updateProjectLink.useMutation({
+        onSuccess: async () => { await refetchRelatedProjects(); await refetchHistory(); toast.success("專案關聯已更新"); },
+        onError: error => toast.error(error.message || "更新關聯失敗")
+    });
+    const unlinkProjectMutation = trpc.opportunityRelations.unlinkProject.useMutation({
+        onSuccess: async () => { await refetchRelatedProjects(); await refetchHistory(); toast.success("專案關聯已移除"); },
+        onError: error => toast.error(error.message || "移除關聯失敗")
+    });
     const upsertParticipationMutation = trpc.opportunityRelations.upsertParticipation.useMutation({
-        onSuccess: async () => { setParticipationAmount(""); await refetchParticipations(); await refetchHistory(); toast.success("部門參與資料已更新"); },
+        onSuccess: async () => { setParticipationAmount(""); setParticipationNotes(""); await refetchParticipations(); await refetchHistory(); toast.success("部門參與資料已更新"); },
         onError: error => toast.error(error.message || "更新部門參與失敗")
+    });
+    const removeParticipationMutation = trpc.opportunityRelations.removeParticipation.useMutation({
+        onSuccess: async () => { await refetchParticipations(); await refetchHistory(); toast.success("部門參與已停用"); },
+        onError: error => toast.error(error.message || "移除部門參與失敗")
+    });
+    const updateProductsMutation = trpc.opportunities.updateProducts.useMutation({
+        onSuccess: async () => { await refetchOpp(); await refetchHistory(); toast.success("產品分類已更新"); },
+        onError: error => toast.error(error.message || "更新產品分類失敗")
     });
 
     const updateCustomFieldsMutation = trpc.opportunities.updateCustomFields.useMutation({
@@ -508,6 +532,10 @@ export function OpportunityDetailPage() {
     };
 
     const handleUpdateProbability = () => {
+        if (editedProbabilityNote.trim().length < 3) {
+            setProbabilityError("人工調整成功率時，請輸入至少 3 個字的原因");
+            return;
+        }
         if (editedProbabilityNote.length > 2000) {
             setProbabilityError("成功率備註不可超過 2,000 字");
             return;
@@ -515,7 +543,7 @@ export function OpportunityDetailPage() {
         updateProbabilityMutation.mutate({
             id,
             probability: editedProbability,
-            probabilityNote: editedProbabilityNote.trim() || undefined
+            probabilityNote: editedProbabilityNote.trim()
         });
     };
 
@@ -770,8 +798,12 @@ export function OpportunityDetailPage() {
                             type="button"
                             disabled={reopenOpportunityMutation.isPending}
                             onClick={() => {
+                                const choices = OPP_STATUSES.filter(item => ["new", "qualified", "presales_active", "quoting"].includes(item.value));
+                                const raw = window.prompt(`請選擇重開階段：\n${choices.map((item, index) => `${index + 1}. ${item.label}`).join("\n")}`, "2")?.trim();
+                                const targetStatus = choices[Math.max(0, Number(raw || 2) - 1)]?.value as "new" | "qualified" | "presales_active" | "quoting" | undefined;
+                                if (!targetStatus) return toast.error("請輸入有效的階段編號");
                                 const reason = window.prompt("請輸入重新開啟商機的原因（至少 3 個字）")?.trim();
-                                if (reason && reason.length >= 3) reopenOpportunityMutation.mutate({ id, reason });
+                                if (reason && reason.length >= 3) reopenOpportunityMutation.mutate({ id, reason, targetStatus });
                             }}
                             className="rounded-lg border border-amber-300 bg-white px-3 py-1.5 text-xs font-semibold hover:bg-amber-100 disabled:opacity-50"
                         >重新開啟</button>
@@ -784,26 +816,30 @@ export function OpportunityDetailPage() {
                     <div className="mb-3 flex items-center justify-between"><h3 className="font-bold">關聯專案（多對多）</h3><span className="text-xs text-muted-foreground">{relatedProjects?.length || 0} 筆</span></div>
                     <div className="space-y-2">
                         {(relatedProjects || []).map((link: any) => (
-                            <a key={link.id} href={`/service-requests/${link.projectId}`} className="flex items-center justify-between rounded-lg border p-2 text-sm hover:bg-muted">
-                                <span><b>{link.projectCode || "專案"}</b>　{link.projectTitle}</span><span className="text-xs text-muted-foreground">{link.relationType}</span>
-                            </a>
+                            <div key={link.id} className="rounded-lg border p-2 text-sm">
+                                <div className="flex items-center justify-between gap-2"><a href={`/service-requests/${link.projectId}`} className="hover:underline"><b>{link.projectCode || "專案"}</b> {link.projectTitle}</a><span className="text-xs text-muted-foreground">{link.relationType}{link.isPrimary ? "・主要" : ""}</span></div>
+                                <div className="mt-1 flex items-center justify-between text-xs text-muted-foreground"><span>分攤：{link.allocationAmount == null ? "未確認" : `${link.currency} ${Number(link.allocationAmount).toLocaleString()}`}</span><span className="flex gap-2"><button type="button" className="text-primary" onClick={() => { const amount = window.prompt("分攤金額", String(link.allocationAmount ?? "")); const reason = window.prompt("變更原因（至少 3 個字）")?.trim(); if (amount != null && reason && reason.length >= 3) updateProjectLinkMutation.mutate({ id: link.id, relationType: link.relationType, allocationAmount: amount === "" ? undefined : Number(amount), currency: link.currency || "TWD", isPrimary: !!link.isPrimary, reason }); }}>編輯</button><button type="button" className="text-red-600" onClick={() => { const reason = window.prompt("移除關聯原因（至少 3 個字）")?.trim(); if (reason && reason.length >= 3) unlinkProjectMutation.mutate({ id: link.id, reason }); }}>移除</button></span></div>
+                            </div>
                         ))}
                         {!relatedProjects?.length && <p className="text-sm text-muted-foreground">尚無關聯專案。</p>}
                     </div>
                     {(hasRole("admin") || hasRole("manager") || isOpportunityOwner || isAssignedPresales) && (
-                        <div className="mt-3 flex gap-2">
+                        <div className="mt-3 grid gap-2 sm:grid-cols-2">
                             <select value={relationProjectId} onChange={e => setRelationProjectId(e.target.value)} className="min-w-0 flex-1 rounded-md border bg-background px-2 py-2 text-sm">
                                 <option value="">選擇要關聯的專案…</option>
                                 {(availableProjects || []).filter((project: any) => !(relatedProjects || []).some((link: any) => link.projectId === project.id)).map((project: any) => <option key={project.id} value={project.id}>{project.projectCode}｜{project.title}</option>)}
                             </select>
-                            <button type="button" disabled={!relationProjectId || linkProjectMutation.isPending} onClick={() => linkProjectMutation.mutate({ opportunityId: id, projectId: relationProjectId, relationType: "related", currency: "TWD", isPrimary: false })} className="rounded-md bg-primary px-3 py-2 text-sm font-semibold text-primary-foreground disabled:opacity-50">建立關聯</button>
+                            <select value={relationType} onChange={e => setRelationType(e.target.value as typeof relationType)} className="rounded-md border bg-background px-2 py-2 text-sm"><option value="source">來源</option><option value="primary">主要</option><option value="related">相關</option><option value="merged">合併</option></select>
+                            <input type="number" min="0" value={relationAmount} onChange={e => setRelationAmount(e.target.value)} placeholder="分攤金額（選填）" className="rounded-md border bg-background px-2 py-2 text-sm" />
+                            <label className="flex items-center gap-2 rounded-md border px-2 text-sm"><input type="checkbox" checked={relationPrimary} onChange={e => setRelationPrimary(e.target.checked)} />設為主要來源</label>
+                            <button type="button" disabled={!relationProjectId || linkProjectMutation.isPending} onClick={() => linkProjectMutation.mutate({ opportunityId: id, projectId: relationProjectId, relationType, allocationAmount: relationAmount === "" ? undefined : Number(relationAmount), currency: "TWD", isPrimary: relationPrimary })} className="rounded-md bg-primary px-3 py-2 text-sm font-semibold text-primary-foreground disabled:opacity-50 sm:col-span-2">建立關聯</button>
                         </div>
                     )}
                 </div>
                 <div className="rounded-xl border border-border/50 bg-card p-5 shadow-sm">
                     <div className="mb-3 flex items-center justify-between"><h3 className="font-bold">跨部門參與</h3><span className="text-xs text-muted-foreground">{participations?.length || 0} 個部門</span></div>
                     <div className="space-y-2">
-                        {(participations || []).map((row: any) => <div key={row.id} className="grid grid-cols-[1fr_auto_auto] gap-2 rounded-lg border p-2 text-sm"><span>{row.department}</span><span>{row.stage}</span><span>{row.amount == null ? "—" : Number(row.amount).toLocaleString()}</span></div>)}
+                        {(participations || []).map((row: any) => <div key={row.id} className={`rounded-lg border p-2 text-sm ${row.isActive === false ? "opacity-50" : ""}`}><div className="flex justify-between gap-2"><span><b>{row.department}</b>・{row.ownerName || "未指定負責人"}</span><span>{row.stage}・{row.amount == null ? "—" : Number(row.amount).toLocaleString()}</span></div>{row.notes && <p className="mt-1 text-xs text-muted-foreground">{row.notes}</p>}{row.isActive !== false && <button type="button" className="mt-1 text-xs text-red-600" onClick={() => { const reason = window.prompt("停用部門參與原因（至少 3 個字）")?.trim(); if (reason && reason.length >= 3) removeParticipationMutation.mutate({ id: row.id, reason }); }}>停用</button>}</div>)}
                         {!participations?.length && <p className="text-sm text-muted-foreground">尚無部門參與資料。</p>}
                     </div>
                     <div className="mt-3 grid grid-cols-3 gap-2">
@@ -811,7 +847,8 @@ export function OpportunityDetailPage() {
                         <input value={participationStage} onChange={e => setParticipationStage(e.target.value)} placeholder="階段" className="rounded-md border bg-background px-2 py-2 text-sm" />
                         <input type="number" min="0" value={participationAmount} onChange={e => setParticipationAmount(e.target.value)} placeholder="分攤金額" className="rounded-md border bg-background px-2 py-2 text-sm" />
                     </div>
-                    <button type="button" disabled={!participationDepartment.trim() || !participationStage.trim() || upsertParticipationMutation.isPending} onClick={() => upsertParticipationMutation.mutate({ opportunityId: id, department: participationDepartment.trim(), stage: participationStage.trim(), amount: participationAmount === "" ? undefined : Number(participationAmount), probability: opp.probability, productIds: [], isActive: true })} className="mt-2 w-full rounded-md border px-3 py-2 text-sm font-semibold hover:bg-muted disabled:opacity-50">新增／更新部門參與</button>
+                    <div className="mt-2 grid gap-2 sm:grid-cols-2"><select value={participationOwnerId} onChange={e => setParticipationOwnerId(e.target.value)} className="rounded-md border bg-background px-2 py-2 text-sm"><option value="">未指定負責人</option>{(allUsers?.items || []).map((entry: any) => <option key={entry.id} value={entry.id}>{entry.name}｜{entry.department || "未分部門"}</option>)}</select><input value={participationNotes} onChange={e => setParticipationNotes(e.target.value)} placeholder="參與說明" className="rounded-md border bg-background px-2 py-2 text-sm" /></div>
+                    <button type="button" disabled={!participationDepartment.trim() || !participationStage.trim() || upsertParticipationMutation.isPending} onClick={() => upsertParticipationMutation.mutate({ opportunityId: id, department: participationDepartment.trim(), stage: participationStage.trim(), ownerId: participationOwnerId || undefined, amount: participationAmount === "" ? undefined : Number(participationAmount), probability: opp.probability, productIds: [], notes: participationNotes.trim() || undefined, isActive: true })} className="mt-2 w-full rounded-md border px-3 py-2 text-sm font-semibold hover:bg-muted disabled:opacity-50">新增／更新部門參與</button>
                 </div>
             </div>
 
@@ -849,7 +886,10 @@ export function OpportunityDetailPage() {
                                                                 )?.trim()
                                                                 : undefined;
                                                             if ((s.value === "cancelled" || isPlatformOwnerOverride) && !reason) return;
-                                                            updateStatusMutation.mutate({ id, status: s.value, reason });
+                                                            const probabilityMode = (opp as any).probabilityOverridden
+                                                                ? (window.confirm("此成功率為人工覆寫。按「確定」保留目前成功率；按「取消」依新狀態重設。") ? "preserve" : "reset")
+                                                                : undefined;
+                                                            updateStatusMutation.mutate({ id, status: s.value, reason, probabilityMode });
                                                         }}
                                                         className={`w-full text-left px-3 py-1.5 text-xs font-medium hover:bg-muted transition-colors ${s.color.replace('border-', '')} rounded-none first:rounded-t-md last:rounded-b-md`}
                                                     >
@@ -997,7 +1037,7 @@ export function OpportunityDetailPage() {
                                 >編輯</button>
                             )}
                         </div>
-                        <p className="font-semibold text-primary">{(opp as any).probability ?? 0}%</p>
+                        <p className="font-semibold text-primary">{(opp as any).probability ?? 0}% {(opp as any).probabilityOverridden && <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[10px] text-amber-800">人工覆寫</span>}</p>
                         <p className="text-xs text-muted-foreground">
                             {OPPORTUNITY_PROBABILITY_OPTIONS.find((item) => item.value === ((opp as any).probability ?? 0))?.label || "未定義"}
                         </p>
@@ -1032,18 +1072,19 @@ export function OpportunityDetailPage() {
                     </div>
                 </div>
 
-                {(opp.productNames?.length > 0 || opp.description || isBusinessOwner) && (
+                {(opp.productNames?.length > 0 || opp.description || isBusinessOwner || canEditSalesOwner) && (
                     <div className="mt-6 pt-6 border-t border-border/50 grid grid-cols-1 md:grid-cols-2 gap-6">
-                        {opp.productNames?.length > 0 && (
-                            <div className="space-y-2">
+                        <div className="space-y-2">
                                 <span className="text-sm font-medium text-muted-foreground">產品名稱</span>
                                 <div className="flex flex-wrap gap-2">
-                                    {opp.productNames.map((p: string) => (
+                                    {(opp.productNames || []).map((p: string) => (
                                         <span key={p} className="px-2 py-1 bg-primary/10 text-primary text-xs font-bold rounded-md border border-primary/20">
                                             {p}
                                         </span>
                                     ))}
+                                    {!opp.productNames?.length && <span className="text-sm text-muted-foreground">尚未選擇產品</span>}
                                 </div>
+                                {canEditSalesOwner && !isTerminal && <details className="rounded-lg border p-2"><summary className="cursor-pointer text-xs font-semibold" onClick={() => setEditingProductIds((opp as any).productIds || [])}>依產品 ID 編輯分類</summary><div className="mt-2 max-h-48 space-y-1 overflow-auto">{(productCatalog || []).map((product: any) => <label key={product.id} className="flex items-center gap-2 text-xs"><input type="checkbox" checked={editingProductIds.includes(product.id)} onChange={event => setEditingProductIds(current => event.target.checked ? [...new Set([...current, product.id])] : current.filter(value => value !== product.id))} /><span>{product.pathLabel || product.name}</span><code className="ml-auto text-[10px] text-muted-foreground">{product.id}</code></label>)}</div><button type="button" disabled={updateProductsMutation.isPending} onClick={() => updateProductsMutation.mutate({ opportunityId: id, productIds: editingProductIds, productNames: (productCatalog || []).filter((product: any) => editingProductIds.includes(product.id)).map((product: any) => product.name) })} className="mt-2 w-full rounded border px-2 py-1 text-xs font-semibold hover:bg-muted">儲存產品分類</button></details>}
                                 <div className="mt-3 space-y-2">
                                     {(productApprovals || []).map((approval: any) => (
                                         <div key={approval.id} className="flex flex-wrap items-center justify-between gap-2 rounded-lg border bg-background p-2">
@@ -1065,7 +1106,6 @@ export function OpportunityDetailPage() {
                                     ))}
                                 </div>
                             </div>
-                        )}
                         <div className="space-y-2 md:col-span-2">
                             <div className="flex items-center justify-between gap-3">
                                 <span className="text-sm font-medium text-muted-foreground">商機描述</span>

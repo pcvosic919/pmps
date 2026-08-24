@@ -52,6 +52,14 @@ const toCompanyDto = (company: any) => ({
 });
 
 export const companiesRouter = router({
+    capabilities: protectedProcedure.query(({ ctx }) => ({
+        canCreate: ctx.user.isPlatformOwner === true || ["admin", "manager", "business"].includes(ctx.user.role),
+        canEdit: ctx.user.isPlatformOwner === true || ["admin", "manager"].includes(ctx.user.role),
+        canDeactivate: ctx.user.isPlatformOwner === true || ["admin", "manager"].includes(ctx.user.role),
+        canDelete: ctx.user.isPlatformOwner === true,
+        canImport: ctx.user.isPlatformOwner === true || ["admin", "manager"].includes(ctx.user.role),
+        canExport: ctx.user.isPlatformOwner === true || ["admin", "manager"].includes(ctx.user.role)
+    })),
     list: protectedProcedure
         .input(z.object({
             search: z.string().trim().optional(),
@@ -123,7 +131,8 @@ export const companiesRouter = router({
 
     bulkUpsert: roleProcedure(["admin", "manager"])
         .input(z.object({
-            companies: z.array(companyPayloadSchema).min(1).max(1000)
+            companies: z.array(companyPayloadSchema).min(1).max(1000),
+            dryRun: z.boolean().default(false)
         }))
         .mutation(async ({ input, ctx }) => {
             const seen = new Set<string>();
@@ -143,6 +152,16 @@ export const companiesRouter = router({
                 .select("normalizedName")
                 .lean();
             const existingSet = new Set(existing.map((item: any) => item.normalizedName));
+
+            if (input.dryRun) {
+                return {
+                    success: true,
+                    dryRun: true,
+                    inserted: rows.filter((row) => !existingSet.has(row.normalizedName)).length,
+                    updated: rows.filter((row) => existingSet.has(row.normalizedName)).length,
+                    skipped: input.companies.length - rows.length
+                };
+            }
 
             await CompanyModel.bulkWrite(rows.map((row) => ({
                 updateOne: {
@@ -171,6 +190,7 @@ export const companiesRouter = router({
 
             return {
                 success: true,
+                dryRun: false,
                 inserted: rows.filter((row) => !existingSet.has(row.normalizedName)).length,
                 updated: rows.filter((row) => existingSet.has(row.normalizedName)).length,
                 skipped: input.companies.length - rows.length

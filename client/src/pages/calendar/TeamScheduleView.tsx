@@ -9,7 +9,7 @@ const roleLabels: Record<string, string> = {
     admin: "Admin", manager: "Manager", pm: "PM", presales: "Presales", tech: "Tech", business: "Business"
 };
 
-type MatrixMode = "busy" | "allocation" | "gap";
+type MatrixMode = "busy" | "allocation" | "gap" | "actual" | "variance";
 
 const getCellTone = (value: number, overloaded: boolean, weekend: boolean) => {
     if (overloaded) return "border-rose-400 bg-rose-100 text-rose-800 dark:bg-rose-950/50 dark:text-rose-100";
@@ -26,7 +26,7 @@ export function TeamScheduleView() {
     const initialDate = params.get("date") && /^\d{4}-\d{2}-\d{2}$/.test(params.get("date")!) ? parseISO(params.get("date")!) : new Date();
     const [anchor, setAnchor] = useState(initialDate);
     const [range, setRange] = useState<"week" | "four_weeks">(params.get("range") === "four_weeks" ? "four_weeks" : "week");
-    const [mode, setMode] = useState<MatrixMode>((["allocation", "gap"].includes(params.get("mode") || "") ? params.get("mode") : "busy") as MatrixMode);
+    const [mode, setMode] = useState<MatrixMode>((["allocation", "gap", "actual", "variance"].includes(params.get("mode") || "") ? params.get("mode") : "busy") as MatrixMode);
     const [department, setDepartment] = useState("");
     const [userId, setUserId] = useState("");
     const [role, setRole] = useState("");
@@ -48,6 +48,14 @@ export function TeamScheduleView() {
     };
     const { data, isLoading, isFetching } = trpc.schedule.getCapacityMatrix.useQuery(input);
     const { data: sources } = trpc.schedule.listSources.useQuery(bounds);
+    const { data: staleBlocks } = trpc.schedule.listStaleWbsBlocks.useQuery();
+    const resolveStaleMutation = trpc.schedule.resolveStaleWbsBlock.useMutation({
+        onSuccess: async () => {
+            await Promise.all([utils.schedule.listStaleWbsBlocks.invalidate(), utils.schedule.getCapacityMatrix.invalidate(), utils.schedule.listMine.invalidate()]);
+            toast.success("失效排程已處理");
+        },
+        onError: error => toast.error(error.message)
+    });
     const noteMutation = trpc.schedule.createManagerNote.useMutation({
         onSuccess: async () => {
             setNoteContent("");
@@ -70,6 +78,11 @@ export function TeamScheduleView() {
     const updateMode = (next: MatrixMode) => {
         setMode(next);
         setCalendarQuery({ mode: next, range, date: dateKey(anchor) });
+    };
+    const resolveStale = (id: string, action: "cancel" | "convert_to_manual") => {
+        const reason = window.prompt(action === "cancel" ? "請輸入移除失效排程的原因" : "請輸入轉為手動排程的原因")?.trim();
+        if (!reason || reason.length < 3) return toast.error("原因至少 3 個字");
+        resolveStaleMutation.mutate({ id, action, reason });
     };
 
     const cellMap = new Map((data?.cells || []).map((cell: any) => [`${cell.userId}:${cell.date}`, cell]));
@@ -99,10 +112,12 @@ export function TeamScheduleView() {
                     <button type="button" onClick={() => updateRange("four_weeks")} className={`rounded-md px-3 py-1.5 ${range === "four_weeks" ? "bg-background font-semibold shadow-sm" : "text-muted-foreground"}`}>四週</button>
                 </div>
                 <div className="flex rounded-lg border bg-muted/30 p-1 text-sm">
-                    {(["busy", "allocation", "gap"] as MatrixMode[]).map(value => <button key={value} type="button" onClick={() => updateMode(value)} className={`rounded-md px-3 py-1.5 ${mode === value ? "bg-background font-semibold shadow-sm" : "text-muted-foreground"}`}>{value === "busy" ? "已排忙碌" : value === "allocation" ? "核定配置" : "配置缺口"}</button>)}
+                    {(["busy", "allocation", "gap", "actual", "variance"] as MatrixMode[]).map(value => <button key={value} type="button" onClick={() => updateMode(value)} className={`rounded-md px-3 py-1.5 ${mode === value ? "bg-background font-semibold shadow-sm" : "text-muted-foreground"}`}>{value === "busy" ? "已排忙碌" : value === "allocation" ? "核定配置" : value === "gap" ? "配置缺口" : value === "actual" ? "實際工時" : "排程差異"}</button>)}
                 </div>
                 {isFetching && <span className="text-xs text-muted-foreground">更新中…</span>}
             </div>
+
+            {!!staleBlocks?.length && <section className="rounded-xl border border-amber-300 bg-amber-50 p-4 text-amber-950 dark:bg-amber-950/30 dark:text-amber-100"><div className="mb-3 flex items-center justify-between"><div><h3 className="font-bold">待處理的失效 WBS 排程</h3><p className="text-xs opacity-80">WBS 已不在最新核准版本，請移除或轉為獨立手動排程。</p></div><span className="rounded-full bg-amber-200 px-2 py-0.5 text-xs font-bold text-amber-900">{staleBlocks.length}</span></div><div className="space-y-2">{staleBlocks.map((block: any) => <div key={block.id} className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-amber-200 bg-white/70 p-3 text-sm dark:bg-background/50"><div><b>{block.projectCode ? `${block.projectCode} · ` : ""}{block.projectTitle || block.title}</b><div className="text-xs opacity-70">{block.assigneeName} · {block.date} · {block.staleReason || "WBS 已失效"}</div></div><div className="flex gap-2"><button type="button" onClick={() => resolveStale(block.id, "convert_to_manual")} className="rounded border px-2 py-1 text-xs">轉為手動</button><button type="button" onClick={() => resolveStale(block.id, "cancel")} className="rounded border border-rose-300 px-2 py-1 text-xs text-rose-700">移除</button></div></div>)}</div></section>}
 
             <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
                 {[
@@ -137,10 +152,10 @@ export function TeamScheduleView() {
                                 <th className="sticky left-0 z-10 border-r bg-card px-3 py-2 text-left"><div className="font-semibold">{user.name}</div><div className="text-xs font-normal text-muted-foreground">{user.department || "未指定"} · {roleLabels[user.role] || user.role}</div></th>
                                 {(data?.dates || []).map((date: string) => {
                                     const cell: any = cellMap.get(`${user.id}:${date}`) || { scheduledPercent: 0, allocationPercent: 0, gapPercent: 0, amCount: 0, pmCount: 0 };
-                                    const value = mode === "busy" ? cell.scheduledPercent : mode === "allocation" ? cell.allocationPercent : cell.gapPercent;
+                                    const value = mode === "busy" ? cell.scheduledPercent : mode === "allocation" ? cell.allocationPercent : mode === "gap" ? cell.gapPercent : mode === "actual" ? cell.actualHours : cell.varianceHours;
                                     const overloaded = mode === "busy" && cell.isOverloaded;
-                                    return <td key={date} className="border-r p-1 text-center"><button type="button" onClick={() => { setSelectedDate(date); setSelectedCell(cell); }} className={`min-h-12 w-full rounded-md border px-1.5 py-1 text-xs font-semibold transition hover:brightness-95 ${getCellTone(value, overloaded, cell.isWeekend)}`}>
-                                        {range === "week" && mode === "busy" ? <><div>AM {cell.amCount}</div><div>PM {cell.pmCount}</div></> : <div>{value}%</div>}
+                                    return <td key={date} className="border-r p-1 text-center"><button type="button" onClick={() => { setSelectedDate(date); setSelectedCell(cell); }} className={`min-h-12 w-full rounded-md border px-1.5 py-1 text-xs font-semibold transition hover:brightness-95 ${getCellTone(mode === "variance" ? Math.abs(value) : value, overloaded, cell.isWeekend)}`}>
+                                        {range === "week" && mode === "busy" ? <><div>AM {cell.amCount}</div><div>PM {cell.pmCount}</div></> : <div>{mode === "actual" || mode === "variance" ? `${mode === "variance" && value > 0 ? "+" : ""}${Number(value || 0).toFixed(1)}h` : `${value}%`}</div>}
                                         {cell.notes?.length > 0 && <span className="mt-1 inline-block h-1.5 w-1.5 rounded-full bg-violet-600" />}
                                     </button></td>;
                                 })}
@@ -155,7 +170,7 @@ export function TeamScheduleView() {
                 <div className="fixed inset-0 z-[70] flex justify-end bg-black/25" onClick={() => setSelectedCell(null)}>
                     <aside className="h-full w-full max-w-lg overflow-y-auto border-l bg-card shadow-2xl" onClick={event => event.stopPropagation()}>
                         <div className="sticky top-0 z-10 flex items-center justify-between border-b bg-card p-4"><div><p className="text-xs text-muted-foreground">團隊排程詳情</p><h2 className="font-bold">{selectedUser.name} · {selectedCell.date}</h2><p className="text-xs text-muted-foreground">{selectedUser.department || "未指定部門"} · {roleLabels[selectedUser.role] || selectedUser.role}</p></div><button type="button" onClick={() => setSelectedCell(null)} className="rounded p-2 hover:bg-muted"><X className="h-5 w-5" /></button></div>
-                        <div className="grid grid-cols-3 gap-2 border-b p-4"><div className="rounded-lg bg-muted/30 p-3"><div className="text-xs text-muted-foreground">已排</div><strong>{selectedCell.scheduledPercent}%</strong></div><div className="rounded-lg bg-muted/30 p-3"><div className="text-xs text-muted-foreground">核定</div><strong>{selectedCell.allocationPercent}%</strong></div><div className="rounded-lg bg-muted/30 p-3"><div className="text-xs text-muted-foreground">缺口</div><strong>{selectedCell.gapPercent}%</strong></div></div>
+                        <div className="grid grid-cols-5 gap-2 border-b p-4"><div className="rounded-lg bg-muted/30 p-3"><div className="text-xs text-muted-foreground">已排</div><strong>{selectedCell.scheduledPercent}%</strong></div><div className="rounded-lg bg-muted/30 p-3"><div className="text-xs text-muted-foreground">核定</div><strong>{selectedCell.allocationPercent}%</strong></div><div className="rounded-lg bg-muted/30 p-3"><div className="text-xs text-muted-foreground">缺口</div><strong>{selectedCell.gapPercent}%</strong></div><div className="rounded-lg bg-muted/30 p-3"><div className="text-xs text-muted-foreground">實際</div><strong>{Number(selectedCell.actualHours || 0).toFixed(1)}h</strong></div><div className="rounded-lg bg-muted/30 p-3"><div className="text-xs text-muted-foreground">差異</div><strong>{Number(selectedCell.varianceHours || 0) > 0 ? "+" : ""}{Number(selectedCell.varianceHours || 0).toFixed(1)}h</strong></div></div>
                         {selectedCell.isOverloaded && <div className="m-4 flex items-start gap-2 rounded-lg border border-rose-300 bg-rose-50 p-3 text-sm text-rose-800"><AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />此日為週末或存在時段衝突／超載。</div>}
                         <div className="space-y-2 p-4">
                             <h3 className="font-semibold">排程內容</h3>

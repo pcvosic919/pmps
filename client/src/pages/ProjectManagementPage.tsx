@@ -50,10 +50,27 @@ export function ProjectManagementPage() {
     const { data: pendingWbs } = trpc.projects.getWbsPendingReview.useQuery(undefined, { enabled: canReviewProjects });
     const updateStatus = trpc.projects.updateSRStatus.useMutation({ onSuccess: () => refetch(), onError: error => alert(error.message) });
     const updateFinalPrice = trpc.projects.updateFinalPrice.useMutation({ onSuccess: () => refetch() });
+    const utils = trpc.useUtils();
     const deleteSr = trpc.projects.delete.useMutation({ 
         onSuccess: () => refetch(),
         onError: (err) => alert(err.message || "刪除失敗")
     });
+    const handlePermanentDelete = async (sr: any) => {
+        try {
+            const preview = await utils.projects.getDeletePreview.fetch({ id: sr.id });
+            const relations = Object.entries(preview.relations).filter(([, count]) => Number(count) > 0);
+            if (preview.blocked) {
+                alert(`無法永久刪除，請先處理關聯資料：\n${relations.map(([name, count]) => `${name}: ${count}`).join("\n")}`);
+                return;
+            }
+            if (!window.confirm(`永久刪除專案「${sr.title}」？此動作無法復原。`)) return;
+            const reason = window.prompt("請輸入永久刪除原因（至少 3 個字）")?.trim();
+            if (!reason || reason.length < 3) { alert("永久刪除原因至少 3 個字"); return; }
+            deleteSr.mutate({ id: sr.id, reason });
+        } catch (error: any) {
+            alert(error?.message || "無法取得刪除影響預覽");
+        }
+    };
     const archiveProject = trpc.projects.archiveProject.useMutation({ onSuccess: () => refetch(), onError: error => alert(error.message) });
     const restoreProject = trpc.projects.restoreProject.useMutation({ onSuccess: () => refetch(), onError: error => alert(error.message) });
 
@@ -161,7 +178,7 @@ export function ProjectManagementPage() {
                     <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
                     <input
                         type="text" value={search} onChange={e => setSearch(e.target.value)}
-                        placeholder="搜尋專案名稱..."
+                        placeholder="搜尋專案編號、名稱、客戶、業務或部門..."
                         className="w-full pl-9 pr-4 py-2 border border-border rounded-lg bg-background text-sm focus:outline-none focus:ring-2 focus:ring-primary/50"
                     />
                 </div>
@@ -279,6 +296,7 @@ export function ProjectManagementPage() {
                                         )}
                                     </div>
                                     <h3 className="text-base font-bold text-foreground mb-2">{sr.title}</h3>
+	                                    {!!sr.matchedFields?.length && <div className="mb-2 flex flex-wrap gap-1">{sr.matchedFields.map((field: string) => <span key={field} className="rounded bg-primary/10 px-2 py-0.5 text-[10px] font-medium text-primary">命中：{field}</span>)}</div>}
 	                                    <div className="flex items-center gap-6 text-sm text-muted-foreground flex-wrap">
                                         {sr.customerName && <span>客戶: <span className="font-semibold text-foreground">{sr.customerName}</span></span>}
                                         {sr.externalServiceType && <span>服務類型: <span className="font-semibold text-foreground">{sr.externalServiceType}</span></span>}
@@ -360,7 +378,7 @@ export function ProjectManagementPage() {
                                             type="button"
                                             onClick={event => {
                                                 event.stopPropagation();
-                                                if (window.confirm(`永久刪除專案「${sr.title}」？僅無關聯資料時可刪除。`)) deleteSr.mutate({ id: sr.id });
+                                                void handlePermanentDelete(sr);
                                             }}
                                             className="rounded-lg border border-red-200 p-2 text-red-600 hover:bg-red-50"
                                             title="永久刪除"
@@ -430,9 +448,8 @@ export function ProjectManagementPage() {
 	                                    {canDelete && (
                                         <button
                                             onClick={() => {
-                                                if (confirm("確定要刪除此專案與 SR 嗎？此操作無法復原。")) {
-                                                    deleteSr.mutate({ id: sr.id });
-                                                }
+                                                const reason = prompt("請輸入永久刪除原因（至少 3 個字）");
+                                                if (reason?.trim() && confirm("確定要永久刪除此專案與 SR 嗎？此操作無法復原。")) deleteSr.mutate({ id: sr.id, reason: reason.trim() });
                                             }}
                                             className="px-3 py-1.5 text-xs bg-red-50 text-red-600 border border-red-200 rounded-lg hover:bg-red-100 transition-colors whitespace-nowrap"
                                         >

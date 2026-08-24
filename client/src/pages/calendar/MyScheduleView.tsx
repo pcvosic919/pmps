@@ -242,6 +242,7 @@ export function MyScheduleView() {
     const initialDate = params.get("date") && /^\d{4}-\d{2}-\d{2}$/.test(params.get("date")!) ? parseISO(params.get("date")!) : new Date();
     const [anchor, setAnchor] = useState(initialDate);
     const [view, setView] = useState<"week" | "month">(params.get("view") === "month" ? "month" : "week");
+    const [comparisonMode, setComparisonMode] = useState<"schedule" | "actual" | "variance">("schedule");
     const [showBacklog, setShowBacklog] = useState(true);
     const [projectFilter, setProjectFilter] = useState("");
     const [sourceFilter, setSourceFilter] = useState("");
@@ -277,6 +278,23 @@ export function MyScheduleView() {
         (!sourceFilter || block.sourceType === sourceFilter) &&
         (!projectFilter || block.projectId === projectFilter || block.opportunityId === projectFilter)
     );
+    const actualByDate = useMemo(() => {
+        const result = new Map<string, number>();
+        for (const row of data?.actuals || []) result.set(row.date, (result.get(row.date) || 0) + Number(row.hours || 0));
+        return result;
+    }, [data?.actuals]);
+    const dayMetrics = (date: string) => {
+        const blocks = visibleBlocks.filter(block => block.date === date);
+        const scheduled = blocks.reduce((sum, block) => sum + (block.slot === "full_day" ? 8 : 4), 0);
+        const actual = actualByDate.get(date) || 0;
+        return { scheduled, actual, variance: actual - scheduled };
+    };
+    const metricLabel = (date: string) => {
+        const metrics = dayMetrics(date);
+        if (comparisonMode === "actual") return `實際 ${metrics.actual.toFixed(1)}h`;
+        if (comparisonMode === "variance") return `差異 ${metrics.variance >= 0 ? "+" : ""}${metrics.variance.toFixed(1)}h`;
+        return `排程 ${metrics.scheduled.toFixed(1)}h`;
+    };
 
     useEffect(() => {
         const warn = (event: BeforeUnloadEvent) => {
@@ -398,6 +416,9 @@ export function MyScheduleView() {
                     <button type="button" onClick={() => navigate(anchor, "week")} className={`rounded-md px-3 py-1.5 ${view === "week" ? "bg-background font-semibold shadow-sm" : "text-muted-foreground"}`}>週</button>
                     <button type="button" onClick={() => navigate(anchor, "month")} className={`rounded-md px-3 py-1.5 ${view === "month" ? "bg-background font-semibold shadow-sm" : "text-muted-foreground"}`}>月</button>
                 </div>
+                <div className="flex rounded-lg border bg-muted/30 p-1 text-sm">
+                    {(["schedule", "actual", "variance"] as const).map(mode => <button key={mode} type="button" onClick={() => setComparisonMode(mode)} className={`rounded-md px-3 py-1.5 ${comparisonMode === mode ? "bg-background font-semibold shadow-sm" : "text-muted-foreground"}`}>{mode === "schedule" ? "資源排程" : mode === "actual" ? "實際工時" : "排程差異"}</button>)}
+                </div>
                 <select value={projectFilter} onChange={event => setProjectFilter(event.target.value)} className="min-w-44 rounded-lg border bg-background px-3 py-2 text-sm">
                     <option value="">全部專案／商機</option>
                     {projects.map(project => <option key={project.id} value={project.id}>{project.title}</option>)}
@@ -429,7 +450,7 @@ export function MyScheduleView() {
                     <section className="min-w-0 overflow-hidden rounded-xl border bg-card shadow-sm">
                         <div className="grid grid-cols-[64px_repeat(7,minmax(110px,1fr))] overflow-x-auto">
                             <div className="border-r bg-muted/30" />
-                            {weekDays.map(day => <div key={day.toString()} className={`border-r px-2 py-3 text-center ${[0, 6].includes(day.getDay()) ? "bg-amber-50/70 dark:bg-amber-950/20" : "bg-muted/30"}`}><div className="text-xs text-muted-foreground">{format(day, "EEE")}</div><div className="font-bold">{format(day, "MM/dd")}</div></div>)}
+                            {weekDays.map(day => { const key = dateKey(day); return <div key={day.toString()} className={`border-r px-2 py-3 text-center ${[0, 6].includes(day.getDay()) ? "bg-amber-50/70 dark:bg-amber-950/20" : "bg-muted/30"}`}><div className="text-xs text-muted-foreground">{format(day, "EEE")}</div><div className="font-bold">{format(day, "MM/dd")}</div><div className={`mt-1 text-[10px] ${comparisonMode === "variance" && dayMetrics(key).variance < 0 ? "text-rose-600" : "text-primary"}`}>{metricLabel(key)}</div></div>; })}
                             <div className="flex min-h-48 flex-col border-r bg-muted/20 text-xs font-semibold text-muted-foreground"><div className="flex flex-1 items-center justify-center border-t">AM</div><div className="flex flex-1 items-center justify-center border-t">PM</div></div>
                             {weekDays.map(day => {
                                 const key = dateKey(day);
@@ -459,7 +480,7 @@ export function MyScheduleView() {
                                 return <button type="button" key={key} onClick={() => setDayDetail(key)} className={`min-h-24 border-b border-r p-2 text-left hover:bg-muted/30 ${!isSameMonth(day, anchor) ? "bg-muted/10 text-muted-foreground" : ""} ${[0, 6].includes(day.getDay()) ? "bg-amber-50/30 dark:bg-amber-950/10" : ""}`}>
                                     <div className="flex items-center justify-between"><span className="text-sm font-semibold">{format(day, "d")}</span>{overloaded && <AlertTriangle className="h-3.5 w-3.5 text-rose-600" />}</div>
                                     <div className="mt-3 flex gap-1 text-[10px]"><span className={`rounded px-1.5 py-0.5 ${am ? "bg-primary text-primary-foreground" : "bg-muted text-muted-foreground"}`}>AM</span><span className={`rounded px-1.5 py-0.5 ${pm ? "bg-primary text-primary-foreground" : "bg-muted text-muted-foreground"}`}>PM</span></div>
-                                    <div className="mt-2 text-xs text-muted-foreground">{blocks.length} 項</div>
+                                    <div className="mt-2 text-xs text-muted-foreground">{blocks.length} 項 · {metricLabel(key)}</div>
                                 </button>;
                             })}
                         </div>
@@ -487,6 +508,7 @@ export function MyScheduleView() {
                 <div className="fixed inset-0 z-[65] flex justify-end bg-black/25" onClick={() => setDayDetail(null)}>
                     <aside className="h-full w-full max-w-md overflow-y-auto border-l bg-card shadow-2xl" onClick={event => event.stopPropagation()}>
                         <div className="flex items-center justify-between border-b p-4"><div><p className="text-xs text-muted-foreground">排程詳情</p><h2 className="font-bold">{format(parseISO(dayDetail), "yyyy/MM/dd")}</h2></div><button type="button" onClick={() => setDayDetail(null)} className="rounded p-2 hover:bg-muted"><X className="h-5 w-5" /></button></div>
+                        <div className="grid grid-cols-3 gap-2 border-b p-4 text-sm"><div className="rounded bg-muted/30 p-2"><div className="text-xs text-muted-foreground">資源排程</div><b>{dayMetrics(dayDetail).scheduled.toFixed(1)}h</b></div><div className="rounded bg-muted/30 p-2"><div className="text-xs text-muted-foreground">實際工時</div><b>{dayMetrics(dayDetail).actual.toFixed(1)}h</b></div><div className="rounded bg-muted/30 p-2"><div className="text-xs text-muted-foreground">差異</div><b>{dayMetrics(dayDetail).variance >= 0 ? "+" : ""}{dayMetrics(dayDetail).variance.toFixed(1)}h</b></div></div>
                         <div className="space-y-2 p-4">{dayDetailBlocks.map(block => <ScheduleCard key={block.id} block={block} name={`${slotLabels[block.slot as ScheduleSlot]} · ${displayBlockName(block, projects, opportunities)}`} onClick={() => openEdit(block)} onDragStart={() => setDragged({ block })} />)}{dayDetailBlocks.length === 0 && <p className="py-10 text-center text-sm text-muted-foreground">此日尚無排程</p>}</div>
                         <div className="grid grid-cols-3 gap-2 border-t p-4">{(["am", "pm", "full_day"] as ScheduleSlot[]).map(slot => <button key={slot} type="button" onClick={() => openNew(dayDetail, slot)} className="rounded-lg border px-3 py-2 text-sm">新增{slotLabels[slot]}</button>)}</div>
                     </aside>

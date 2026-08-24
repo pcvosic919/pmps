@@ -10,6 +10,7 @@ import { exportRowsToXlsx, exportWbsCostWorkbook, exportWbsQuoteWorkbook, format
 import { BusinessUserPicker } from "../components/BusinessUserPicker";
 import { UserSearchPicker } from "../components/UserSearchPicker";
 import { fileToBase64 } from "../lib/files";
+import { useCurrentUser } from "../lib/useCurrentUser";
 
 type WbsDraftItem = {
     title: string;
@@ -47,6 +48,7 @@ export function WbsManagementPage() {
     const [, params] = useRoute("/service-requests/:id");
     const srId = params?.id || "";
     const utils = trpc.useContext();
+    const { user } = useCurrentUser();
 
     const [isBuildingVersion, setIsBuildingVersion] = useState(false);
     const [draftItems, setDraftItems] = useState<WbsDraftItem[]>([]);
@@ -115,7 +117,7 @@ export function WbsManagementPage() {
         { projectId: srId, limit: 100 },
         { enabled: !!srId }
     );
-    const { data: relatedOpportunities } = trpc.opportunityRelations.listForProject.useQuery({ projectId: srId }, { enabled: !!srId });
+    const { data: relatedOpportunities, refetch: refetchRelatedOpportunities } = trpc.opportunityRelations.listForProject.useQuery({ projectId: srId }, { enabled: !!srId });
 
     // Review state...
 
@@ -261,6 +263,10 @@ export function WbsManagementPage() {
             toast.error(error.message || "專案議題更新失敗，已還原顯示");
         }
     });
+    const confirmFinancialAllocationMutation = trpc.opportunityRelations.confirmProjectFinancialAllocation.useMutation({
+        onSuccess: async result => { await Promise.all([refetchRelatedOpportunities(), utils.projects.srById.invalidate({ id: srId }), refetchProjectHistory()]); toast.success(`已確認來源金額：${result.currency} ${result.total.toLocaleString()}`); },
+        onError: error => toast.error(error.message || "確認來源金額失敗")
+    });
     const archiveProjectMutation = trpc.projects.archiveProject.useMutation({
         onSuccess: async () => { await utils.projects.srById.invalidate({ id: srId }); toast.success("專案已封存"); },
         onError: error => toast.error(error.message || "專案封存失敗")
@@ -269,6 +275,26 @@ export function WbsManagementPage() {
         onSuccess: async () => { await utils.projects.srById.invalidate({ id: srId }); toast.success("專案已還原"); },
         onError: error => toast.error(error.message || "專案還原失敗")
     });
+    const deleteProjectMutation = trpc.projects.delete.useMutation({
+        onSuccess: () => { toast.success("專案已永久刪除"); window.location.assign("/projects"); },
+        onError: error => toast.error(error.message || "永久刪除失敗")
+    });
+    const handlePermanentDelete = async () => {
+        try {
+            const preview = await utils.projects.getDeletePreview.fetch({ id: srId });
+            const relations = Object.entries(preview.relations).filter(([, count]) => Number(count) > 0);
+            if (preview.blocked) {
+                toast.error(`尚有關聯資料：${relations.map(([name, count]) => `${name} ${count}`).join("、")}`);
+                return;
+            }
+            if (!window.confirm(`永久刪除專案「${sr?.title || srId}」？此動作無法復原。`)) return;
+            const reason = window.prompt("請輸入永久刪除原因（至少 3 個字）")?.trim();
+            if (!reason || reason.length < 3) { toast.error("永久刪除原因至少 3 個字"); return; }
+            deleteProjectMutation.mutate({ id: srId, reason });
+        } catch (error: any) {
+            toast.error(error?.message || "無法取得刪除影響預覽");
+        }
+    };
     const reopenProjectMutation = trpc.projects.reopenProject.useMutation({
         onSuccess: async () => { await utils.projects.srById.invalidate({ id: srId }); await refetchProjectHistory(); toast.success("專案已重啟"); },
         onError: error => toast.error(error.message || "專案重啟失敗")
@@ -371,10 +397,12 @@ export function WbsManagementPage() {
                 warnings.push(`略過跨欄合併儲存格 ${XLSX.utils.encode_range(merge)}，請拆開後再確認語意。`);
                 continue;
             }
+            let filled = 0;
             for (let row = merge.s.r + 1; row <= merge.e.r; row++) {
                 const address = XLSX.utils.encode_cell({ r: row, c: merge.s.c });
-                if (!worksheet[address]) worksheet[address] = { ...source };
+                if (!worksheet[address]) { worksheet[address] = { ...source }; filled++; }
             }
+            if (filled > 0) warnings.push(`合併儲存格 ${XLSX.utils.encode_range(merge)} 已由 ${sourceAddress} 向下補值 ${filled} 格，請在預覽確認。`);
         }
         return warnings;
     };
@@ -873,6 +901,8 @@ export function WbsManagementPage() {
             "說明": issue.description,
             "建立時間": issue.createdAt ? new Date(issue.createdAt).toLocaleString() : "",
             "更新時間": issue.updatedAt ? new Date(issue.updatedAt).toLocaleString() : ""
+            ,"外部連結": issue.externalUrl || ""
+            ,"連結標籤": issue.externalLabel || ""
         }));
         exportRowsToXlsx(rows, makeXlsxFileName("議題追蹤", sr?.title, formatExportDate()), "Issues");
         toast.success("議題追蹤已匯出 Excel");
@@ -1063,7 +1093,7 @@ export function WbsManagementPage() {
     };
 
     // File upload (Mock implementation)
-    const handleFileUpload = async (files: FileList | null, category: "general" | "business_approval_email" | "service_content_email" = "general") => {
+    const handleFileUpload = async (files: FileList | null, category: "general" | "business_approval_email" | "service_content_email" = "general", replacesAttachmentId?: string) => {
         if (!files || files.length === 0) return;
 
         setIsUploading(true);
@@ -1077,7 +1107,8 @@ export function WbsManagementPage() {
                     fileSize: file.size,
                     mimeType: file.type || "application/octet-stream",
                     category,
-                    fileDataBase64
+                    fileDataBase64,
+                    replacesAttachmentId
                 });
             }
         } catch (error) {
@@ -1199,6 +1230,9 @@ export function WbsManagementPage() {
                         }} disabled={archiveProjectMutation.isPending} className="rounded-lg border px-3 py-2 text-sm font-semibold hover:bg-muted disabled:opacity-50">封存專案</button>
                     )
                 )}
+                {!sr.isQuoteWorkspace && sr.archivedAt && user?.isPlatformOwner === true && (
+                    <button type="button" onClick={() => void handlePermanentDelete()} disabled={deleteProjectMutation.isPending} className="rounded-lg border border-red-200 px-3 py-2 text-sm font-semibold text-red-600 hover:bg-red-50 disabled:opacity-50">永久刪除</button>
+                )}
                 {sr.isQuoteWorkspace && sr.opportunityId && (
                     <Link href={`/opportunities/${sr.opportunityId}#quote-section`}>
                         <a className="inline-flex items-center gap-2 rounded-lg border border-primary/30 bg-primary/5 px-3 py-2 text-sm font-semibold text-primary hover:bg-primary/10">
@@ -1233,10 +1267,19 @@ export function WbsManagementPage() {
                     <div className="flex flex-wrap gap-2">
                         {relatedOpportunities.map((link: any) => (
                             <a key={link.id} href={`/opportunities/${link.opportunityId}`} className="rounded-lg border px-3 py-2 text-sm hover:bg-muted">
-                                <b>{link.opportunityCode || "商機"}</b>　{link.opportunityTitle}<span className="ml-2 text-xs text-muted-foreground">{link.relationType}</span>
+                                <b>{link.opportunityCode || "商機"}</b> {link.opportunityTitle}<span className="ml-2 text-xs text-muted-foreground">{link.relationType}</span>
                             </a>
                         ))}
                     </div>
+                    {sr.permissions?.canEditFinancials && <button type="button" disabled={confirmFinancialAllocationMutation.isPending} onClick={() => {
+                        const allocations = relatedOpportunities.map((link: any) => {
+                            const value = window.prompt(`${link.opportunityCode || link.opportunityTitle} 分攤金額`, String(link.allocationAmount ?? link.recommendedAmount ?? 0));
+                            return value == null ? null : { linkId: link.id, amount: Number(value), currency: link.currency || link.opportunityCurrency || "TWD" };
+                        });
+                        if (allocations.some(item => item == null || !Number.isFinite(item.amount))) return toast.error("請逐筆輸入有效金額");
+                        const reason = window.prompt("確認多來源金額的原因（至少 3 個字）")?.trim();
+                        if (reason && reason.length >= 3) confirmFinancialAllocationMutation.mutate({ projectId: srId, allocations: allocations as Array<{ linkId: string; amount: number; currency: string }>, reason });
+                    }} className="mt-3 rounded-lg bg-primary px-3 py-2 text-xs font-semibold text-primary-foreground disabled:opacity-50">逐筆確認來源金額並回寫專案</button>}
                 </div>
             )}
 
@@ -1460,7 +1503,7 @@ export function WbsManagementPage() {
                         {attachments && attachments.length > 0 && (
                             <div className="mt-3 space-y-2">
                                 {attachments.map((a: any) => (
-                                    <div key={a.id} className="flex items-center gap-2 p-2 bg-muted/40 rounded-lg text-xs group">
+                                    <div key={a.id} className={`flex items-center gap-2 p-2 rounded-lg text-xs group ${a.versionStatus === "superseded" ? "bg-muted/20 opacity-60" : "bg-muted/40"}`}>
                                         <FileText className="w-3.5 h-3.5 text-primary flex-shrink-0" />
 	                                        <button
                                                 type="button"
@@ -1470,6 +1513,7 @@ export function WbsManagementPage() {
                                             >
 	                                            {a.fileName}
 	                                        </button>
+                                            <span className="rounded-full border bg-background px-2 py-0.5 text-[10px]">v{a.versionNumber || 1}・{a.versionStatus === "superseded" ? "歷史版本" : "最新版"}</span>
                                             {a.category && a.category !== "general" && (
                                                 <span className="rounded-full border border-border bg-background px-2 py-0.5 text-[10px] text-muted-foreground whitespace-nowrap">
                                                     {a.category === "business_approval_email" ? "業務同意" : "服務內容"}
@@ -1484,6 +1528,7 @@ export function WbsManagementPage() {
                                             >
                                                 <Download className="h-3.5 w-3.5" />
                                             </button>
+                                            {canEditWbs && a.versionStatus !== "superseded" && <><input id={`attachment-version-${a.id}`} type="file" className="hidden" onChange={event => { void handleFileUpload(event.target.files, a.category || "general", a.id); event.currentTarget.value = ""; }} /><button type="button" onClick={() => document.getElementById(`attachment-version-${a.id}`)?.click()} className="rounded border px-2 py-1 text-[10px] hover:bg-background">上傳新版本</button></>}
                                             {canEditWbs && <button
                                                 type="button"
                                                 onClick={() => {

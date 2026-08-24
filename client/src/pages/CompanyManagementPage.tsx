@@ -3,7 +3,6 @@ import toast from "react-hot-toast";
 import * as XLSX from "xlsx";
 import { Building2, Download, Edit, FileSpreadsheet, Plus, Search, Trash2, Upload } from "lucide-react";
 import { trpc } from "../lib/trpc";
-import { useCurrentUser } from "../lib/useCurrentUser";
 import { exportRowsToXlsx, formatExportDate, makeXlsxFileName } from "../lib/exportXlsx";
 import { useDebounce } from "../lib/useDebounce";
 
@@ -59,10 +58,10 @@ export function CompanyManagementPage() {
     const [form, setForm] = useState<CompanyForm>(emptyForm);
     const [isImporting, setIsImporting] = useState(false);
     const fileInputRef = useRef<HTMLInputElement>(null);
-    const { user } = useCurrentUser();
-    const canDelete = user?.isPlatformOwner === true;
-    const canManage = user?.role === "admin" || user?.role === "manager";
-    const canExport = canManage;
+    const { data: capabilities } = trpc.companies.capabilities.useQuery();
+    const canDelete = capabilities?.canDelete === true;
+    const canManage = capabilities?.canEdit === true;
+    const canExport = capabilities?.canExport === true;
     useEffect(() => globalThis.localStorage?.setItem("pmps.companyPageSize", String(pageSize)), [pageSize]);
     const utils = trpc.useUtils();
     const debouncedSearch = useDebounce(search, 300);
@@ -165,10 +164,12 @@ export function CompanyManagementPage() {
                 return;
             }
 
+            const preview = await bulkUpsert.mutateAsync({ companies: companies.slice(0, 1000), dryRun: true });
+            if (!confirm(`匯入預覽：預計新增 ${preview.inserted} 筆、更新 ${preview.updated} 筆、略過 ${preview.skipped} 筆。確定執行？`)) return;
             const chunkSize = 200;
             const total = { inserted: 0, updated: 0, skipped: 0 };
             for (let index = 0; index < companies.length; index += chunkSize) {
-                const result = await bulkUpsert.mutateAsync({ companies: companies.slice(index, index + chunkSize) });
+                const result = await bulkUpsert.mutateAsync({ companies: companies.slice(index, index + chunkSize), dryRun: false });
                 total.inserted += result.inserted;
                 total.updated += result.updated;
                 total.skipped += result.skipped;
@@ -235,7 +236,7 @@ export function CompanyManagementPage() {
 	                    <button
 	                        type="button"
 	                        onClick={() => fileInputRef.current?.click()}
-	                        disabled={isImporting}
+	                        disabled={isImporting || capabilities?.canImport !== true}
 	                        className="inline-flex items-center rounded-lg border border-border px-4 py-2 text-sm font-medium hover:bg-muted disabled:cursor-not-allowed disabled:opacity-50"
 	                    >
 	                        <Upload className="mr-2 h-4 w-4" />
@@ -244,6 +245,7 @@ export function CompanyManagementPage() {
                     <button
                         type="button"
                         onClick={() => setForm(emptyForm)}
+                        disabled={capabilities?.canCreate !== true}
                         className="inline-flex items-center rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90"
                     >
                         <Plus className="mr-2 h-4 w-4" />
@@ -293,7 +295,7 @@ export function CompanyManagementPage() {
                         <div className="flex gap-2">
                             <button
                                 type="button"
-                                disabled={!canSave}
+                                disabled={!canSave || (form.id ? !canManage : capabilities?.canCreate !== true)}
                                 onClick={handleSave}
                                 className="flex-1 rounded-lg bg-primary px-3 py-2 text-sm font-semibold text-primary-foreground disabled:opacity-50"
                             >

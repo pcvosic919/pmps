@@ -535,6 +535,38 @@ const getProjectWbsSummary = (sr: any) => {
 
 const getReviewerDepartments = (user: any): string[] | null => getManagedDepartments(user);
 
+const getMatchedProjectFields = (item: any, search?: string) => {
+    const keyword = search?.trim().toLocaleLowerCase("zh-TW");
+    if (!keyword) return [];
+    const fields: Array<[string, unknown]> = [
+        ["專案編號", item.projectCode],
+        ["外部專案編號", item.externalProjectCode],
+        ["專案名稱", item.title],
+        ["客戶", item.customerName],
+        ["業務", item.salesRep],
+        ["業務部門", item.salesDepartment]
+    ];
+    return fields.filter(([, value]) => String(value || "").toLocaleLowerCase("zh-TW").includes(keyword)).map(([label]) => label);
+};
+
+const getProjectDeleteRelations = async (sr: any) => {
+    const [timesheetCount, calendarTaskCount, issueCount, opportunityLinkCount] = await Promise.all([
+        TimesheetModel.countDocuments({ srId: sr._id }),
+        CalendarTaskModel.countDocuments({ srId: sr._id }),
+        IssueModel.countDocuments({ srId: sr._id }),
+        OpportunityProjectLinkModel.countDocuments({ projectId: sr._id })
+    ]);
+    return {
+        wbsVersions: (sr.wbsVersions || []).length,
+        timesheets: timesheetCount,
+        changeRequests: (sr.changeRequests || []).length,
+        attachments: (sr.attachments || []).length,
+        calendarTasks: calendarTaskCount,
+        issues: issueCount,
+        opportunityLinks: opportunityLinkCount
+    };
+};
+
 export const projectsRouter = router({
     srList: permissionProcedure("module.projects.view", ["admin", "manager", "pm", "tech", "presales"]).input(z.object({
         search: z.string().trim().optional(),
@@ -599,13 +631,14 @@ export const projectsRouter = router({
 
 	        return Promise.all(items.map(async item => {
                 const permissions = await getProjectCapabilities(ctx.user, item, undefined, { knownVisible: true });
-                return {
+	                return {
 	                ...item,
 	                id: item._id.toString(),
 	                opportunityId: item.opportunityId?.toString(),
 	                salesUserId: item.salesUserId?.toString() || "",
 	                pmId: item.pmId?.toString() || "",
 	                projectSummary: getProjectWbsSummary(item),
+                    matchedFields: getMatchedProjectFields(item, input?.search),
                     contractAmount: permissions.canViewFinancials ? item.contractAmount : undefined,
                     finalPrice: permissions.canViewFinancials ? item.finalPrice : undefined,
                     totalPoints: permissions.canViewFinancials ? item.totalPoints : undefined,
@@ -1444,6 +1477,12 @@ export const projectsRouter = router({
                 isUploader || await canOperateProject(ctx.user, sr, opportunity),
                 "您沒有權限刪除附件"
             );
+            const sameDocumentVersions = (sr.attachments || []).filter((item: any) =>
+                item.logicalDocumentId && item.logicalDocumentId === attachment.logicalDocumentId
+            );
+            if (sameDocumentVersions.length > 1 && !canDeleteRecord(ctx.user)) {
+                throw new TRPCError({ code: "FORBIDDEN", message: "版本鏈附件只能由平台擁有者永久刪除；一般使用者請上傳新版本保留稽核軌跡" });
+            }
 
             if (attachment.fileKey && sr.localFolderPath) {
                 const allowedRoot = path.resolve(sr.localFolderPath);
@@ -3006,27 +3045,31 @@ export const projectsRouter = router({
             return { success: true };
         }),
 
-    delete: protectedProcedure
+    getDeletePreview: protectedProcedure
         .input(z.object({ id: z.string() }))
+        .query(async ({ input, ctx }) => {
+            const sr = assertFound(await ServiceRequestModel.findById(input.id).lean(), "找不到該專案");
+            assertAuthorized(canDeleteRecord(ctx.user), "只有平台擁有者可以檢視永久刪除影響");
+            assertAuthorized(await canOperateProject(ctx.user, sr), "您沒有權限永久刪除此專案");
+            const relations = await getProjectDeleteRelations(sr);
+            return {
+                id: sr._id.toString(),
+                title: sr.title,
+                projectCode: sr.projectCode || "",
+                relations,
+                blocked: Object.values(relations).some(count => count > 0)
+            };
+        }),
+
+	    delete: protectedProcedure
+        .input(z.object({ id: z.string(), reason: z.string().trim().min(3, "永久刪除原因至少 3 個字").max(1000) }))
         .mutation(async ({ input, ctx }) => {
             const sr = await ServiceRequestModel.findById(input.id);
             assertFound(sr, "找不到該專案");
             assertAuthorized(canDeleteRecord(ctx.user), "只有平台擁有者可以永久刪除專案");
             assertAuthorized(await canOperateProject(ctx.user, sr), "您沒有權限永久刪除此專案");
 
-            const [timesheetCount, calendarTaskCount, issueCount] = await Promise.all([
-                TimesheetModel.countDocuments({ srId: sr._id }),
-                CalendarTaskModel.countDocuments({ srId: sr._id }),
-                IssueModel.countDocuments({ srId: sr._id })
-            ]);
-            const relationSummary = {
-                wbs: (sr.wbsVersions || []).length,
-                timesheets: timesheetCount,
-                changeRequests: (sr.changeRequests || []).length,
-                attachments: (sr.attachments || []).length,
-                calendarTasks: calendarTaskCount,
-                issues: issueCount
-            };
+            const relationSummary = await getProjectDeleteRelations(sr);
             if (Object.values(relationSummary).some(count => count > 0)) {
                 throw new TRPCError({
                     code: "CONFLICT",
@@ -3036,6 +3079,16 @@ export const projectsRouter = router({
                         .join("、")}`
                 });
             }
+            await recordBusinessHistory({
+                entityType: "project",
+                entityId: sr._id,
+                action: "project_permanently_deleted",
+                before: { projectCode: sr.projectCode, title: sr.title, status: sr.status },
+                actorId: ctx.user.id,
+                actorRole: ctx.user.role,
+                reason: input.reason,
+                source: "api"
+            });
             await ServiceRequestModel.findByIdAndDelete(input.id);
             return { success: true };
         })

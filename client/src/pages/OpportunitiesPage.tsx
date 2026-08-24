@@ -38,6 +38,7 @@ const oppSchema = z.object({
     probabilityNote: z.string().max(2000, "成交率備註不可超過 2,000 字").optional(),
     opportunityType: z.enum(["revenue", "presales"]),
     productNames: z.array(z.string()).optional(),
+    productIds: z.array(z.string()).optional(),
     description: z.string().optional(),
     approvedM365: z.boolean().default(false),
     approvedAzure: z.boolean().default(false),
@@ -87,7 +88,7 @@ export function OpportunitiesPage() {
     const { data: productCategories } = trpc.system.getProductCategories.useQuery();
     const { data: usersData } = trpc.users.list.useQuery({ limit: 500 });
     const { data: companiesData } = trpc.companies.list.useQuery({ search: debouncedCompanySearch, limit: 20 });
-    const availableProducts = (productCategories || []).map((product: any) => product.name);
+    const availableProducts = productCategories || [];
     const businessUsers = usersData?.items || [];
     const companies = companiesData?.items || [];
     const oppFields = customFieldDefs?.filter((f: any) => f.entityType === "opportunity") || [];
@@ -124,6 +125,7 @@ export function OpportunitiesPage() {
             probabilityNote: "",
             opportunityType: "revenue",
             productNames: [],
+            productIds: [],
             description: "",
             approvedM365: false,
             approvedAzure: false,
@@ -132,7 +134,8 @@ export function OpportunitiesPage() {
     });
     const watchedOppType = useWatch({ control: form.control, name: "opportunityType" });
     const watchedEstimatedValue = Number(useWatch({ control: form.control, name: "estimatedValue" }) || 0);
-    const watchedProducts = useWatch({ control: form.control, name: "productNames" }) || [];
+    const watchedProductIds = useWatch({ control: form.control, name: "productIds" }) || [];
+    const watchedProducts = availableProducts.filter((product: any) => watchedProductIds.includes(product.id)).map((product: any) => product.pathLabel || product.name);
     const selectedSalesRep = useWatch({ control: form.control, name: "salesRep" });
     const selectedSalesDepartment = useWatch({ control: form.control, name: "salesDepartment" });
     const selectedCustomerName = useWatch({ control: form.control, name: "customerName" });
@@ -178,6 +181,8 @@ export function OpportunitiesPage() {
             probabilityNote: values.probabilityNote,
             opportunityType: values.opportunityType,
             productNames: values.productNames,
+            productIds: values.productIds,
+            productCategoryIds: Array.from(new Set(availableProducts.filter((product: any) => values.productIds?.includes(product.id)).map((product: any) => product.categoryId).filter(Boolean))),
             description: values.description,
             approvedM365: values.approvedM365,
             approvedAzure: values.approvedAzure,
@@ -598,26 +603,26 @@ export function OpportunitiesPage() {
                                     <FormSection title="產品與核准項目" description="勾選相關產品與核准範圍，作為協銷與後續分析依據。">
                                         <FormField
                                             control={form.control}
-                                            name="productNames"
+                                            name="productIds"
                                             render={({ field }: any) => (
                                                 <FormItem className="md:col-span-2">
                                                     <FormLabel>產品名稱</FormLabel>
                                                     <div className="grid grid-cols-2 gap-2 rounded-lg border bg-muted/20 p-3 sm:grid-cols-3">
-                                                        {availableProducts.map((p: string) => (
-                                                            <label key={p} className="flex cursor-pointer items-center space-x-2 rounded p-1 text-sm transition-colors hover:bg-muted/50">
+                                                        {availableProducts.map((product: any) => (
+                                                            <label key={product.id} className="flex cursor-pointer items-center space-x-2 rounded p-1 text-sm transition-colors hover:bg-muted/50">
                                                                 <input
                                                                     type="checkbox"
-                                                                    value={p}
-                                                                    checked={field.value?.includes(p)}
+                                                                    value={product.id}
+                                                                    checked={field.value?.includes(product.id)}
                                                                     onChange={(e) => {
                                                                         const val = e.target.checked
-                                                                            ? [...(field.value || []), p]
-                                                                            : field.value?.filter((v: string) => v !== p);
+                                                                            ? [...(field.value || []), product.id]
+                                                                            : field.value?.filter((v: string) => v !== product.id);
                                                                         field.onChange(val);
                                                                     }}
                                                                     className="h-4 w-4 rounded border-gray-300 text-primary focus:ring-primary"
                                                                 />
-                                                                <span>{p}</span>
+                                                                <span>{product.pathLabel || product.name}</span>
                                                             </label>
                                                         ))}
                                                         {availableProducts.length === 0 && (

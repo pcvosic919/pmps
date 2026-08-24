@@ -259,9 +259,8 @@ export function ServiceRequestsPage() {
                                             {canDelete && (
                                                 <button
                                                     onClick={() => {
-                                                        if (confirm("確定要刪除此專案與 SR 嗎？此操作無法復原。")) {
-                                                            deleteSr.mutate({ id: sr.id });
-                                                        }
+                                                        const reason = prompt("請輸入永久刪除原因（至少 3 個字）");
+                                                        if (reason?.trim() && confirm("確定要永久刪除此專案與 SR 嗎？此操作無法復原。")) deleteSr.mutate({ id: sr.id, reason: reason.trim() });
                                                     }}
                                                     className="p-1.5 text-muted-foreground hover:text-red-500 hover:bg-red-50 rounded-md transition-colors"
                                                     title="刪除專案"
