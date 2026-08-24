@@ -1,5 +1,5 @@
 import mongoose, { Schema, Document } from "mongoose";
-import { attachmentCategories, changeRequestStatuses, memberRoles, projectConversionModes, resourcePlanningModes, srStatuses, srTypes, wbsItemStatuses, wbsVersionStatuses, type ChangeRequestInput, type ChangeRequestStatus, type CustomFieldValue, type DepartmentApproval, type MemberRole, type ProjectConversionMode, type ResourcePlanningMode, type ServiceRequestAttachment, type SrStatus, type SrType, type WbsItemInput, type WbsVersionInput, type WbsVersionStatus } from "../../shared/types";
+import { attachmentCategories, changeRequestStatuses, memberRoles, projectConversionModes, resourcePlanningModes, srStatuses, srTypes, wbsItemStatuses, wbsItemTypes, wbsVersionStatuses, type ChangeRequestInput, type ChangeRequestStatus, type CustomFieldValue, type DepartmentApproval, type MemberRole, type ProjectConversionMode, type ResourcePlanningMode, type ServiceRequestAttachment, type SrStatus, type SrType, type WbsItemInput, type WbsVersionInput, type WbsVersionStatus } from "../../shared/types";
 import { generateBusinessCode } from "../services/BusinessCodeService";
 
 export interface IWbsItem extends Omit<WbsItemInput, "assigneeId" | "assigneeIds" | "assigneeSnapshots"> {
@@ -153,6 +153,7 @@ export interface IServiceRequest extends Document {
 
 const WbsItemSchema = new Schema<IWbsItem>({
     title: { type: String, required: true },
+    itemType: { type: String, enum: wbsItemTypes, default: "task", required: true },
     estimatedHours: { type: Number, required: true, default: 0 },
     actualHours: { type: Number, default: 0 },
     startDate: { type: Date },
@@ -206,6 +207,7 @@ const WbsVersionSchema = new Schema<IWbsVersion>({
 
 const WbsDraftItemSchema = new Schema({
     title: { type: String, default: "" },
+    itemType: { type: String, enum: wbsItemTypes, default: "task" },
     estimatedHours: { type: Number, default: 0 },
     actualHours: { type: Number, default: 0 },
     startDate: { type: Date },
@@ -338,6 +340,10 @@ const ServiceRequestSchema = new Schema<IServiceRequest>({
         category: { type: String, enum: attachmentCategories, default: "general" },
         sharePointDriveId: { type: String },
         sharePointItemId: { type: String },
+        logicalDocumentId: { type: String, trim: true },
+        versionNumber: { type: Number, min: 1, default: 1 },
+        replacesAttachmentId: { type: String, trim: true },
+        versionStatus: { type: String, enum: ["active", "superseded"], default: "active" },
         uploadedById: { type: Schema.Types.ObjectId, ref: "User", required: true },
         createdAt: { type: Date, default: Date.now }
     }],
@@ -372,13 +378,7 @@ ServiceRequestSchema.pre("validate", async function () {
 
 ServiceRequestSchema.index({ projectCode: 1 }, { unique: true, sparse: true });
 ServiceRequestSchema.index({ pmId: 1, status: 1, createdAt: -1 });
-ServiceRequestSchema.index(
-    { opportunityId: 1 },
-    {
-        unique: true,
-        partialFilterExpression: { opportunityId: { $type: "objectId" } }
-    }
-);
+ServiceRequestSchema.index({ opportunityId: 1 }, { sparse: true });
 ServiceRequestSchema.index({ sourceQuoteId: 1 }, { sparse: true });
 ServiceRequestSchema.index({ isQuoteWorkspace: 1, createdAt: -1 });
 ServiceRequestSchema.index({ resourcePlanningMode: 1, createdAt: -1 });
@@ -390,6 +390,7 @@ ServiceRequestSchema.index({ "wbsVersions.items.assigneeIds": 1, createdAt: -1 }
 ServiceRequestSchema.index({ "externalAssignments.userId": 1, createdAt: -1 });
 ServiceRequestSchema.index({ "externalAssignments.department": 1, createdAt: -1 });
 ServiceRequestSchema.index({ "externalAssignments.teamDepartment": 1, createdAt: -1 });
+ServiceRequestSchema.index({ "attachments.logicalDocumentId": 1, "attachments.versionNumber": -1 });
 ServiceRequestSchema.index({ externalProjectCode: 1 }, { sparse: true });
 ServiceRequestSchema.index({ externalServiceType: 1, status: 1 });
 ServiceRequestSchema.index({ recognitionMonth: 1 });

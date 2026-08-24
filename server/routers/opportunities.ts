@@ -1350,6 +1350,53 @@ export const opportunitiesRouter = router({
             return { id: result._id.toString() };
         }),
 
+    reopenOpportunity: protectedProcedure
+        .input(z.object({
+            id: z.string(),
+            reason: z.string().trim().min(3, "請輸入至少 3 個字的重開原因").max(1000),
+            targetStatus: z.enum(["new", "qualified", "presales_active", "quoting"]).optional()
+        }))
+        .mutation(async ({ input, ctx }) => {
+            const opportunity: any = assertFound(
+                await OpportunityModel.findById(input.id)
+                    .select("ownerId members presalesAssignments salesUserId status probability lastNonTerminalStatus closedAt cancelledAt cancellationReason")
+                    .lean(),
+                "找不到該商機"
+            );
+            assertAuthorized(await canManageOpportunityInScope(ctx.user, opportunity), "您沒有權限重新開啟此商機");
+            if (!isTerminalOpportunityStatus(opportunity.status)) {
+                throw new TRPCError({ code: "BAD_REQUEST", message: "只有已終止的商機可以重新開啟" });
+            }
+            const fallback = ["new", "qualified", "presales_active", "quoting"].includes(opportunity.lastNonTerminalStatus)
+                ? opportunity.lastNonTerminalStatus
+                : "qualified";
+            const targetStatus = input.targetStatus || fallback;
+            const probability = getProbabilityForOpportunityStatus(targetStatus);
+            const reopenedAt = new Date();
+            await OpportunityModel.updateOne({ _id: input.id }, {
+                $set: {
+                    status: targetStatus,
+                    probability,
+                    reopenedAt,
+                    reopenedById: toObjectId(ctx.user.id),
+                    reopenReason: input.reason
+                },
+                $unset: { closedAt: 1, cancelledAt: 1, cancellationReason: 1 }
+            });
+            await recordBusinessHistory({
+                entityType: "opportunity",
+                entityId: input.id,
+                action: "opportunity_reopened",
+                before: { status: opportunity.status, probability: opportunity.probability },
+                after: { status: targetStatus, probability, reopenedAt },
+                actorId: ctx.user.id,
+                actorRole: ctx.user.role,
+                reason: input.reason,
+                source: "api"
+            });
+            return { success: true, status: targetStatus };
+        }),
+
     updateStatus: protectedProcedure
         .input(z.object({
             id: z.string(),
@@ -1395,6 +1442,9 @@ export const opportunitiesRouter = router({
             const set: Record<string, unknown> = {
                 status: input.status,
                 probability,
+                ...(!isTerminalOpportunityStatus(opportunity.status) && isTerminalOpportunityStatus(input.status)
+                    ? { lastNonTerminalStatus: opportunity.status }
+                    : {}),
                 ...(input.status === "quoting" ? { estimatedValue: input.estimatedValue } : {})
             };
             if (input.status === "won") {

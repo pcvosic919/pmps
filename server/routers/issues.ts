@@ -6,7 +6,7 @@ import mongoose from "mongoose";
 import { issueStatuses, issuePriorities } from "../../shared/types";
 import { TRPCError } from "@trpc/server";
 import { assertAuthorized, assertFound, canDeleteRecord } from "../_core/authorization";
-import { canEditProjectWbs, canOperateProject, canViewProject } from "../_core/projectAuthorization";
+import { canOperateProject, canViewProject } from "../_core/projectAuthorization";
 import { OpportunityModel } from "../models/Opportunity";
 
 const getProjectAccessContext = async (srId: string) => {
@@ -23,6 +23,11 @@ const getProjectAccessContext = async (srId: string) => {
         : null;
     return { serviceRequest, opportunity };
 };
+
+const optionalHttpsUrl = z.preprocess(
+    value => value === "" || value === null ? undefined : value,
+    z.string().url("外部連結格式不正確").max(2048).refine(value => /^https:\/\//i.test(value), "外部連結只允許 https").optional()
+);
 
 const syncIssueAssigneeToWbs = async (issue: any) => {
     if (!issue?.assigneeId) return;
@@ -77,11 +82,13 @@ export const issuesRouter = router({
             description: z.string().min(1),
             status: z.enum(issueStatuses).default("open"),
             priority: z.enum(issuePriorities).default("medium"),
-            assigneeId: z.string().optional().nullable()
+            assigneeId: z.string().optional().nullable(),
+            externalUrl: optionalHttpsUrl,
+            externalLabel: z.string().trim().max(100).optional()
         }))
         .mutation(async ({ input, ctx }) => {
             const { serviceRequest, opportunity } = await getProjectAccessContext(input.srId);
-            assertAuthorized(await canEditProjectWbs(ctx.user, serviceRequest, opportunity), "您沒有權限建立此專案議題");
+            assertAuthorized(await canOperateProject(ctx.user, serviceRequest, opportunity), "您沒有權限建立此專案議題");
             const issue = new IssueModel({
                 ...input,
                 reporterId: ctx.user.id
@@ -98,18 +105,24 @@ export const issuesRouter = router({
             description: z.string().optional(),
             status: z.enum(issueStatuses).optional(),
             priority: z.enum(issuePriorities).optional(),
-            assigneeId: z.string().optional().nullable()
+            assigneeId: z.string().optional().nullable(),
+            externalUrl: optionalHttpsUrl.nullable(),
+            externalLabel: z.string().trim().max(100).optional().nullable()
         }))
         .mutation(async ({ input, ctx }) => {
             const { id, ...updates } = input;
             const existingIssue: any = assertFound(await IssueModel.findById(id).lean(), "找不到該專案議題");
             const { serviceRequest, opportunity } = await getProjectAccessContext(existingIssue.srId.toString());
-            assertAuthorized(await canEditProjectWbs(ctx.user, serviceRequest, opportunity), "您沒有權限更新此專案議題");
-            const updatePayload: any = { ...updates };
-            if (updates.assigneeId === null) {
-                updatePayload.$unset = { assigneeId: 1 };
-                delete updatePayload.assigneeId;
+            assertAuthorized(await canOperateProject(ctx.user, serviceRequest, opportunity), "您沒有權限更新此專案議題");
+            const setValues: Record<string, unknown> = {};
+            const unsetValues: Record<string, 1> = {};
+            for (const [key, value] of Object.entries(updates)) {
+                if (value === null) unsetValues[key] = 1;
+                else if (value !== undefined) setValues[key] = value;
             }
+            const updatePayload: any = {};
+            if (Object.keys(setValues).length) updatePayload.$set = setValues;
+            if (Object.keys(unsetValues).length) updatePayload.$unset = unsetValues;
             const issue = await IssueModel.findByIdAndUpdate(id, updatePayload, { new: true })
                 .populate("assigneeId", "name email role")
                 .populate("reporterId", "name email role");

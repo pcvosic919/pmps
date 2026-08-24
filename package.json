@@ -26,6 +26,9 @@
     "migrate:resource-planning": "tsx scripts/migrate-resource-planning-mode.ts",
     "migrate:product-catalog": "tsx scripts/migrate-product-catalog-hierarchy.ts",
     "migrate:schedule-blocks": "tsx scripts/migrate-schedule-blocks.ts",
+    "migrate:pmps-confirmed-items": "tsx server/scripts/migrate-pmps-confirmed-items.ts",
+    "migrate:opportunity-project-links": "tsx server/scripts/migrate-opportunity-project-links.ts",
+    "migrate:opportunity-products": "tsx server/scripts/migrate-opportunity-products.ts",
     "cosmos:shared-throughput": "bash scripts/prepare-cosmos-shared-throughput.sh"
   },
   "devDependencies": {

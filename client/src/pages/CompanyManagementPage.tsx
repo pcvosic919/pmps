@@ -1,4 +1,5 @@
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import toast from "react-hot-toast";
 import * as XLSX from "xlsx";
 import { Building2, Download, Edit, FileSpreadsheet, Plus, Search, Trash2, Upload } from "lucide-react";
 import { trpc } from "../lib/trpc";
@@ -6,7 +7,7 @@ import { useCurrentUser } from "../lib/useCurrentUser";
 import { exportRowsToXlsx, formatExportDate, makeXlsxFileName } from "../lib/exportXlsx";
 import { useDebounce } from "../lib/useDebounce";
 
-const PAGE_SIZE = 100;
+const PAGE_SIZE_OPTIONS = [20, 50, 100] as const;
 
 type CompanyForm = {
     id?: string;
@@ -51,17 +52,24 @@ const formatDateTime = (value?: string | Date) => {
 export function CompanyManagementPage() {
     const [search, setSearch] = useState("");
     const [page, setPage] = useState(1);
+    const [pageSize, setPageSize] = useState<number>(() => {
+        const saved = Number(globalThis.localStorage?.getItem("pmps.companyPageSize"));
+        return PAGE_SIZE_OPTIONS.includes(saved as any) ? saved : 50;
+    });
     const [form, setForm] = useState<CompanyForm>(emptyForm);
     const [isImporting, setIsImporting] = useState(false);
     const fileInputRef = useRef<HTMLInputElement>(null);
     const { user } = useCurrentUser();
     const canDelete = user?.isPlatformOwner === true;
+    const canManage = user?.role === "admin" || user?.role === "manager";
+    const canExport = canManage;
+    useEffect(() => globalThis.localStorage?.setItem("pmps.companyPageSize", String(pageSize)), [pageSize]);
     const utils = trpc.useUtils();
     const debouncedSearch = useDebounce(search, 300);
     const { data, isLoading, refetch } = trpc.companies.list.useQuery({
         search: debouncedSearch,
         page,
-        limit: PAGE_SIZE,
+        limit: pageSize,
         includeInactive: true
     });
     const exportQuery = trpc.companies.exportList.useQuery(
@@ -73,18 +81,24 @@ export function CompanyManagementPage() {
         onSuccess: async () => {
             setForm(emptyForm);
             await utils.companies.list.invalidate();
-        }
+            toast.success("公司已建立");
+        },
+        onError: error => toast.error(error.message || "公司建立失敗")
     });
     const updateCompany = trpc.companies.update.useMutation({
         onSuccess: async () => {
             setForm(emptyForm);
             await utils.companies.list.invalidate();
-        }
+            toast.success("公司已更新");
+        },
+        onError: error => toast.error(error.message || "公司更新失敗")
     });
     const deleteCompany = trpc.companies.delete.useMutation({
         onSuccess: async () => {
             await utils.companies.list.invalidate();
-        }
+            toast.success("公司已刪除");
+        },
+        onError: error => toast.error(error.message || "公司刪除失敗")
     });
     const bulkUpsert = trpc.companies.bulkUpsert.useMutation({
         onSuccess: async () => {
@@ -182,6 +196,8 @@ export function CompanyManagementPage() {
             地址: company.address || "",
             狀態: company.isActive ? "啟用" : "停用",
             備註: company.notes || "",
+            資料來源: company.sourceSystem || "manual",
+            來源識別碼: company.sourceId || "",
             建立時間: formatDateTime(company.createdAt),
             更新時間: formatDateTime(company.updatedAt)
         }));
@@ -209,7 +225,8 @@ export function CompanyManagementPage() {
                     <button
                         type="button"
                         onClick={() => void handleExport()}
-                        disabled={total === 0 || exportQuery.isFetching}
+                        disabled={!canExport || total === 0 || exportQuery.isFetching}
+                        title={canExport ? "匯出目前篩選結果" : "只有管理者可以匯出"}
                         className="inline-flex items-center rounded-lg border border-border px-4 py-2 text-sm font-medium hover:bg-muted disabled:cursor-not-allowed disabled:opacity-50"
                     >
                         <Download className="mr-2 h-4 w-4" />
@@ -353,14 +370,14 @@ export function CompanyManagementPage() {
                                             </span>
                                         </td>
                                         <td className="px-4 py-3 text-right">
-                                            <button
+                                            {canManage && <button
                                                 type="button"
                                                 onClick={() => setForm({ ...company, notes: company.notes || "" })}
                                                 className="mr-2 rounded-md p-1.5 text-primary hover:bg-primary/10"
                                                 title="編輯公司"
                                             >
                                                 <Edit className="h-4 w-4" />
-                                            </button>
+                                            </button>}
                                             {canDelete && (
                                                 <button
                                                     type="button"
@@ -384,6 +401,20 @@ export function CompanyManagementPage() {
                     <div className="flex flex-col gap-2 border-t px-4 py-3 text-sm sm:flex-row sm:items-center sm:justify-between">
                         <span className="text-muted-foreground">搜尋會涵蓋全部公司資料，不受單頁筆數限制。</span>
                         <div className="flex items-center gap-2">
+                            <label className="flex items-center gap-2 text-muted-foreground">
+                                每頁
+                                <select
+                                    value={pageSize}
+                                    onChange={(event) => {
+                                        setPageSize(Number(event.target.value));
+                                        setPage(1);
+                                    }}
+                                    className="rounded-md border border-border bg-background px-2 py-1.5 text-foreground"
+                                >
+                                    {PAGE_SIZE_OPTIONS.map((size) => <option key={size} value={size}>{size}</option>)}
+                                </select>
+                                筆
+                            </label>
                             <button
                                 type="button"
                                 disabled={page <= 1 || isLoading}

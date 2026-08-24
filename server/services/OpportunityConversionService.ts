@@ -54,10 +54,13 @@ export const buildOpportunityProjectMembers = (
 
 export const createProjectForOpportunityOnce = async (
     opportunityId: string,
-    attributes: Record<string, unknown>
+    attributes: Record<string, unknown>,
+    options: { allowMultiple?: boolean } = {}
 ) => {
-    const existing = await findProjectOrQuoteWorkspaceByOpportunityId(opportunityId);
-    if (existing) return { project: existing, created: false };
+    if (!options.allowMultiple) {
+        const existing = await findProjectOrQuoteWorkspaceByOpportunityId(opportunityId);
+        if (existing) return { project: existing, created: false };
+    }
 
     try {
         const project = await ServiceRequestModel.create({
@@ -67,7 +70,7 @@ export const createProjectForOpportunityOnce = async (
         });
         return { project, created: true };
     } catch (error) {
-        if (!isDuplicateKeyError(error)) throw error;
+        if (!isDuplicateKeyError(error) || options.allowMultiple) throw error;
         const concurrentProject = await findProjectOrQuoteWorkspaceByOpportunityId(opportunityId);
         if (!concurrentProject) throw error;
         return { project: concurrentProject, created: false };

@@ -6,6 +6,7 @@ import { ImportBatchModel } from "../models/ImportBatch";
 import { ServiceRequestModel } from "../models/ServiceRequest";
 import { UserModel } from "../models/User";
 import type { Role, SrStatus, SrType } from "../../shared/types";
+import { ensureCompanyByName } from "../_core/companies";
 
 type RawRow = Record<string, unknown>;
 
@@ -160,6 +161,11 @@ async function importFile(filePath: string) {
                 const externalStatus = clean(first["全案狀態"]);
                 const personalStatus = clean(first["個人案件狀態"]);
                 const serviceType = clean(first["服務類型"]);
+                const customerName = clean(first["公司名稱"]);
+                await ensureCompanyByName(customerName, pmId?.toString(), {
+                    sourceSystem: "open_dispatch",
+                    sourceId: customerName.trim().replace(/\s+/g, " ").toLowerCase()
+                });
                 const update = {
                     externalProjectCode: projectCode,
                     externalServiceType: serviceType,
@@ -168,7 +174,7 @@ async function importFile(filePath: string) {
                     externalWarrantyProjectCode: clean(first["案件編號(保固 / 維護專案)"]),
                     externalPresalesCaseCode: clean(first["案件編號(協銷)"]),
                     title: clean(first["案件名稱"]) || projectCode,
-                    customerName: clean(first["公司名稱"]),
+                    customerName,
                     srType: mapSrType(serviceType),
                     status: mapStatus(externalStatus, personalStatus),
                     salesDepartment: clean(first["業務部門"]),

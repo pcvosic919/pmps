@@ -48,13 +48,13 @@ import { getAccessibleOpportunityQuery, getDirectAccessibleOpportunityQuery } fr
 import { canConfirmOpportunityQuote, canCreateOpportunityConversionException } from "./opportunity-workflow";
 import { toObjectId } from "../_core/cursor";
 import { ensureCompanyByName } from "../_core/companies";
+import { OpportunityProjectLinkModel } from "../models/OpportunityProjectLink";
 import { writeLocalAttachment } from "../_core/attachments";
 import {
     buildOpportunityProjectMembers,
     confirmQuoteAndCreateDraftProject,
     createProjectForOpportunityOnce,
-    finalizeOpportunityConversion,
-    findProjectByOpportunityId
+    finalizeOpportunityConversion
 } from "../services/OpportunityConversionService";
 import { listBusinessHistory, recordBusinessHistory } from "../services/BusinessHistoryService";
 import {
@@ -90,6 +90,7 @@ const optionalDateInput = z.preprocess(
 );
 const wbsDraftItemInput = z.object({
     title: z.coerce.string(),
+    itemType: z.enum(["heading", "task", "milestone"]).optional(),
     estimatedHours: z.number(),
     assigneeId: z.string().optional(),
     assigneeIds: z.array(z.string()).optional(),
@@ -289,10 +290,17 @@ const buildServiceRequestSearchQuery = (search?: string) => {
         return {};
     }
 
+    const escaped = keyword.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const pattern = new RegExp(escaped, "i");
     return {
-        $text: {
-            $search: keyword
-        }
+        $or: [
+            { projectCode: pattern },
+            { externalProjectCode: pattern },
+            { title: pattern },
+            { customerName: pattern },
+            { salesRep: pattern },
+            { salesDepartment: pattern }
+        ]
     };
 };
 
@@ -643,9 +651,6 @@ export const projectsRouter = router({
             conversionExceptionReason: z.string().trim().max(2000).optional()
         }))
         .mutation(async ({ input, ctx }) => {
-            const existingOpportunityProject = input.opportunityId
-                ? await findProjectByOpportunityId(input.opportunityId)
-                : null;
             let oppCustomerName = "";
             let oppSalesUserId: any = undefined;
             let oppSalesDepartment = "";
@@ -683,10 +688,6 @@ export const projectsRouter = router({
                         : isInOpportunityScope && canAccessOpportunity(ctx.user, opportunity),
                     "您只能將自己擁有或有權限的商機轉為專案"
                 );
-                if (existingOpportunityProject) {
-                    await finalizeOpportunityConversion(input.opportunityId, { id: ctx.user.id, role: ctx.user.role });
-                    return { id: existingOpportunityProject._id.toString(), reused: true };
-                }
                 if (opportunity.status === "lost") {
                     throw new TRPCError({ code: "BAD_REQUEST", message: "已失敗的商機不可建立 SR" });
                 }
@@ -774,9 +775,16 @@ export const projectsRouter = router({
                     : buildSrMembers(ctx.user.id, input.pmId, input.joinPmAsMember)
             };
             const conversionResult = input.opportunityId
-                ? await createProjectForOpportunityOnce(input.opportunityId, projectAttributes)
+                ? await createProjectForOpportunityOnce(input.opportunityId, projectAttributes, { allowMultiple: true })
                 : { project: await ServiceRequestModel.create(projectAttributes), created: true };
             const sr = conversionResult.project;
+            if (input.opportunityId && conversionResult.created) {
+                await OpportunityProjectLinkModel.updateOne(
+                    { opportunityId: toObjectId(input.opportunityId), projectId: sr._id },
+                    { $setOnInsert: { relationType: "source", currency: "TWD", isPrimary: false, createdById: toObjectId(ctx.user.id) } },
+                    { upsert: true }
+                );
+            }
 
             if (conversionResult.created) {
                 await recordBusinessHistory({
@@ -1299,12 +1307,14 @@ export const projectsRouter = router({
             mimeType: z.string(),
             category: z.enum(attachmentCategories).default("general"),
             fileUrl: z.string().optional(),
-            fileDataBase64: z.string().optional()
+            fileDataBase64: z.string().optional(),
+            logicalDocumentId: z.string().trim().optional(),
+            replacesAttachmentId: z.string().optional()
         }))
         .mutation(async ({ ctx, input }) => {
             const sr: any = assertFound(
                 await ServiceRequestModel.findById(input.srId)
-                    .select("isQuoteWorkspace status conversionMode createdById pmId members wbsVersions.items.assigneeId changeRequests opportunityId localFolderPath")
+                    .select("isQuoteWorkspace status conversionMode createdById pmId members wbsVersions.items.assigneeId changeRequests opportunityId localFolderPath attachments")
                     .lean(),
                 "找不到該服務請求"
             );
@@ -1329,24 +1339,35 @@ export const projectsRouter = router({
                 );
 
             const fileKey = localAttachment?.fileKey || `uploads/${input.srId}/${Date.now()}-${input.fileName}`;
+            const previous = input.replacesAttachmentId
+                ? (sr.attachments || []).find((item: any) => idString(item._id) === input.replacesAttachmentId)
+                : undefined;
+            if (input.replacesAttachmentId && !previous) {
+                throw new TRPCError({ code: "NOT_FOUND", message: "找不到要取代的附件版本" });
+            }
+            const logicalDocumentId = previous?.logicalDocumentId || input.logicalDocumentId || new mongoose.Types.ObjectId().toString();
+            const versionNumber = previous ? Number(previous.versionNumber || 1) + 1 : 1;
+            const newAttachment = {
+                fileName: localAttachment?.fileName || input.fileName,
+                fileSize: input.fileSize,
+                mimeType: input.mimeType,
+                category: input.category,
+                fileUrl: localAttachment?.fileUrl || spResult?.fileUrl || input.fileUrl || "",
+                sharePointDriveId: spResult?.driveId,
+                sharePointItemId: spResult?.itemId,
+                fileKey,
+                logicalDocumentId,
+                versionNumber,
+                replacesAttachmentId: input.replacesAttachmentId,
+                versionStatus: "active",
+                uploadedById: toObjectId(ctx.user.id)
+            };
 
+            const update: any = { $push: { attachments: newAttachment } };
+            if (previous) update.$set = { "attachments.$[previous].versionStatus": "superseded" };
             await ServiceRequestModel.updateOne(
-                { _id: input.srId },
-                {
-                    $push: {
-                        attachments: {
-                            fileName: localAttachment?.fileName || input.fileName,
-                            fileSize: input.fileSize,
-                            mimeType: input.mimeType,
-                            category: input.category,
-                            fileUrl: localAttachment?.fileUrl || spResult?.fileUrl || input.fileUrl || "",
-                            sharePointDriveId: spResult?.driveId,
-                            sharePointItemId: spResult?.itemId,
-                            fileKey: fileKey,
-                            uploadedById: toObjectId(ctx.user.id)
-                        }
-                    }
-                }
+                { _id: input.srId }, update,
+                previous ? { arrayFilters: [{ "previous._id": previous._id }] } : undefined
             );
             await recordBusinessHistory({
                 entityType: "project",
@@ -1356,7 +1377,10 @@ export const projectsRouter = router({
                     fileName: localAttachment?.fileName || input.fileName,
                     fileSize: input.fileSize,
                     mimeType: input.mimeType,
-                    category: input.category
+                    category: input.category,
+                    logicalDocumentId,
+                    versionNumber,
+                    replacesAttachmentId: input.replacesAttachmentId
                 },
                 actorId: ctx.user.id,
                 actorRole: ctx.user.role,
@@ -2027,11 +2051,13 @@ export const projectsRouter = router({
 
             for (let index = 0; index < input.items.length; index++) {
                 const item = input.items[index];
-                const rowLabel = `第 ${index + 1} 筆`;
+                const identity = [item.code?.trim(), item.title?.trim()].filter(Boolean).join("／");
+                const rowLabel = `第 ${index + 1} 筆${identity ? `（${identity}）` : ""}`;
                 if (!item.title.trim()) {
                     throw new TRPCError({ code: "BAD_REQUEST", message: `${rowLabel}工作項目名稱不可空白` });
                 }
-                if ((item.level || 0) > 0) {
+                const itemType = item.itemType || ((item.level || 0) === 0 ? "heading" : "task");
+                if (itemType === "task") {
                     if (item.estimatedHours <= 0) {
                         throw new TRPCError({ code: "BAD_REQUEST", message: `${rowLabel}工作天數必須大於 0` });
                     }
@@ -2053,7 +2079,8 @@ export const projectsRouter = router({
                 submittedBy: toObjectId(ctx.user.id),
 	                items: itemsWithSnapshots.map(item => ({
 	                    title: item.title,
-	                    estimatedHours: (item.level || 0) === 0 ? 0 : item.estimatedHours,
+	                    itemType: item.itemType || ((item.level || 0) === 0 ? "heading" : "task"),
+	                    estimatedHours: (item.itemType || ((item.level || 0) === 0 ? "heading" : "task")) === "task" ? item.estimatedHours : 0,
                     assigneeId: item.assigneeId ? new mongoose.Types.ObjectId(item.assigneeId) : undefined,
                     assigneeIds: item.assigneeIds?.length ? item.assigneeIds.map(id => new mongoose.Types.ObjectId(id)) : undefined,
                     assigneeSnapshots: item.assigneeSnapshots,

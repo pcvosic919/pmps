@@ -14,6 +14,7 @@ import { reportsRouter } from "./routers/reports";
 import { platformRouter } from "./routers/platform";
 import { resourcesRouter } from "./routers/resources";
 import { scheduleRouter } from "./routers/schedule";
+import { opportunityRelationsRouter } from "./routers/opportunityRelations";
 
 export const appRouter = router({
     auth: authRouter,
@@ -30,7 +31,8 @@ export const appRouter = router({
     reports: reportsRouter,
     platform: platformRouter,
     resources: resourcesRouter,
-    schedule: scheduleRouter
+    schedule: scheduleRouter,
+    opportunityRelations: opportunityRelationsRouter
 });
 
 export type AppRouter = typeof appRouter;

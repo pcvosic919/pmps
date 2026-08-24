@@ -189,6 +189,8 @@ export type WbsVersionStatus = typeof wbsVersionStatuses[number];
 
 export const wbsItemStatuses = ["not_started", "in_progress", "completed"] as const;
 export type WbsItemStatus = typeof wbsItemStatuses[number];
+export const wbsItemTypes = ["heading", "task", "milestone"] as const;
+export type WbsItemType = typeof wbsItemTypes[number];
 
 export const issueStatuses = ["open", "in_progress", "resolved", "closed"] as const;
 export type IssueStatus = typeof issueStatuses[number];
@@ -251,6 +253,8 @@ export interface OpportunityInput {
     status: OpportunityStatus;
     expectedCloseDate?: Date;
     productNames?: string[];
+    productCategoryIds?: string[];
+    productIds?: string[];
     description?: string;
     customFields?: CustomFieldValue[];
 }
@@ -270,6 +274,10 @@ export interface ServiceRequestAttachment {
     category?: AttachmentCategory;
     sharePointDriveId?: string;
     sharePointItemId?: string;
+    logicalDocumentId?: string;
+    versionNumber?: number;
+    replacesAttachmentId?: string;
+    versionStatus?: "active" | "superseded";
     uploadedById: string;
     createdAt: Date;
 }
@@ -291,6 +299,7 @@ export interface ServiceRequestExternalAssignment {
 
 export interface WbsItemInput {
     title: string;
+    itemType?: WbsItemType;
     estimatedHours: number;
     actualHours: number;
     startDate?: Date;
@@ -358,6 +367,8 @@ export interface IssueInput {
     status: IssueStatus;
     priority: IssuePriority;
     assigneeId?: string;
+    externalUrl?: string;
+    externalLabel?: string;
     reporterId: string;
     attachments?: IssueAttachment[];
     createdAt?: Date;

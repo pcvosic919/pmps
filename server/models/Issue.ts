@@ -22,6 +22,8 @@ const IssueSchema = new Schema<IIssue>({
     description: { type: String, required: true },
     status: { type: String, enum: issueStatuses, default: "open", required: true },
     priority: { type: String, enum: issuePriorities, default: "medium", required: true },
+    externalUrl: { type: String, trim: true, maxlength: 2048 },
+    externalLabel: { type: String, trim: true, maxlength: 100 },
     assigneeId: { type: Schema.Types.ObjectId, ref: "User" },
     reporterId: { type: Schema.Types.ObjectId, ref: "User", required: true },
     attachments: [IssueAttachmentSchema]

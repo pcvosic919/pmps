@@ -45,6 +45,8 @@ const toCompanyDto = (company: any) => ({
     address: company.address || "",
     notes: company.notes || "",
     isActive: company.isActive !== false,
+    sourceSystem: company.sourceSystem || "manual",
+    sourceId: company.sourceId || "",
     createdAt: company.createdAt,
     updatedAt: company.updatedAt
 });

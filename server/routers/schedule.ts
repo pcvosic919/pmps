@@ -81,6 +81,22 @@ const getEffectiveWbs = (project: any) => {
     return approved.sort((left: any, right: any) => Number(right.versionNumber || 0) - Number(left.versionNumber || 0))[0];
 };
 
+const filterEffectiveWbsBlocks = async (blocks: any[]) => {
+    const projectIds = Array.from(new Set(blocks
+        .filter(block => block.sourceType === "wbs" && block.projectId)
+        .map(block => idString(block.projectId))
+        .filter(Boolean)));
+    if (!projectIds.length) return blocks;
+    const projects = await ServiceRequestModel.find({ _id: { $in: projectIds.map(toObjectId) } })
+        .select("wbsVersions").lean();
+    const effectiveItemsByProject = new Map(projects.map((project: any) => [
+        project._id.toString(),
+        new Set((getEffectiveWbs(project)?.items || []).map((item: any) => item._id.toString()))
+    ]));
+    return blocks.filter(block => block.sourceType !== "wbs"
+        || !!block.projectId && effectiveItemsByProject.get(idString(block.projectId))?.has(idString(block.wbsItemId)));
+};
+
 const getVisibleProjectQuery = async (user: UserSession) => {
     if (hasAnyRole(user, ["admin"])) return {};
     if (hasAnyRole(user, ["manager"])) return buildManagerProjectScopeQuery(user);
@@ -288,7 +304,7 @@ const getTeamScheduleData = async (user: UserSession, input: z.infer<typeof team
         ScheduleManagerNoteModel.find({ assigneeId: { $in: userIds }, date: { $gte: start, $lte: end } })
             .populate("managerId", "name").sort({ createdAt: -1 }).lean()
     ]);
-    const blockRows = blocks.map(mapBlock);
+    const blockRows = (await filterEffectiveWbsBlocks(blocks)).map(mapBlock);
     const dates: string[] = [];
     for (const cursor = new Date(start); cursor <= end; cursor.setUTCDate(cursor.getUTCDate() + 1)) dates.push(scheduleDateKey(cursor));
     const cells = users.flatMap(item => {
@@ -339,7 +355,8 @@ export const scheduleRouter = router({
                     .populate("managerId", "name").sort({ createdAt: -1 }).lean(),
                 ScheduleRevisionModel.findOne({ assigneeId: toObjectId(ctx.user.id) }).lean()
             ]);
-            return { revision: revision?.revision || 0, blocks: blocks.map(mapBlock), notes: notes.map(mapNote) };
+            const effectiveBlocks = await filterEffectiveWbsBlocks(blocks);
+            return { revision: revision?.revision || 0, blocks: effectiveBlocks.map(mapBlock), notes: notes.map(mapNote) };
         }),
 
     listSources: permissionProcedure("module.calendar.view", [...calendarRoles])

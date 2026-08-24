@@ -35,4 +35,11 @@ describe("OpportunityConversionService", () => {
         expect(ServiceRequestModel.schema.path("isQuoteWorkspace")).toBeDefined();
         expect((ServiceRequestModel.schema.path("isQuoteWorkspace") as any).defaultValue).toBe(false);
     });
+
+    it("allows more than one project to reference the same opportunity", () => {
+        const indexes = ServiceRequestModel.schema.indexes() as Array<[Record<string, number>, Record<string, unknown>]>;
+        const opportunityIndex = indexes.find(([fields]) => fields.opportunityId === 1 && Object.keys(fields).length === 1);
+        expect(opportunityIndex).toBeDefined();
+        expect(opportunityIndex?.[1]).not.toHaveProperty("unique", true);
+    });
 });

@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { trpc } from "../lib/trpc";
 import { useRoute } from "wouter";
-import { ArrowLeft, Plus, FileText, Clock, Trash2, Save, X, CheckCircle2, XCircle, Upload, Paperclip, AlertCircle, Receipt, Download, ChevronDown, ChevronRight, Users, UserPlus, Pencil, MapPin } from "lucide-react";
+import { ArrowLeft, Plus, FileText, Clock, Trash2, Save, X, CheckCircle2, XCircle, Upload, Paperclip, AlertCircle, Receipt, Download, ChevronDown, ChevronRight, Users, UserPlus, Pencil, MapPin, ExternalLink } from "lucide-react";
 import { Link } from "wouter";
 import toast from "react-hot-toast";
 import * as XLSX from "xlsx";
@@ -13,6 +13,7 @@ import { fileToBase64 } from "../lib/files";
 
 type WbsDraftItem = {
     title: string;
+    itemType?: "heading" | "task" | "milestone";
     estimatedHours: number;
     actualHours?: number;
     assigneeId: string | undefined;
@@ -79,7 +80,7 @@ export function WbsManagementPage() {
 
     // Issue Management state
     const [isCreatingIssue, setIsCreatingIssue] = useState(false);
-    const [newIssueData, setNewIssueData] = useState({ title: "", description: "", priority: "medium", assigneeId: "" });
+    const [newIssueData, setNewIssueData] = useState({ title: "", description: "", priority: "medium", assigneeId: "", externalUrl: "", externalLabel: "" });
     const [showEditSalesModal, setShowEditSalesModal] = useState(false);
     const [showFinancialModal, setShowFinancialModal] = useState(false);
     const [showProjectMemberModal, setShowProjectMemberModal] = useState(false);
@@ -114,6 +115,7 @@ export function WbsManagementPage() {
         { projectId: srId, limit: 100 },
         { enabled: !!srId }
     );
+    const { data: relatedOpportunities } = trpc.opportunityRelations.listForProject.useQuery({ projectId: srId }, { enabled: !!srId });
 
     // Review state...
 
@@ -243,16 +245,33 @@ export function WbsManagementPage() {
         onSuccess: () => {
             refetchIssues();
             setIsCreatingIssue(false);
-            setNewIssueData({ title: "", description: "", priority: "medium", assigneeId: "" });
+            setNewIssueData({ title: "", description: "", priority: "medium", assigneeId: "", externalUrl: "", externalLabel: "" });
             toast.success("專案議題已建立");
-        }
+        },
+        onError: error => toast.error(error.message || "建立專案議題失敗")
     });
 
     const updateIssueMutation = trpc.issues.update.useMutation({
         onSuccess: () => {
             refetchIssues();
             toast.success("專案議題狀態已更新");
+        },
+        onError: error => {
+            void refetchIssues();
+            toast.error(error.message || "專案議題更新失敗，已還原顯示");
         }
+    });
+    const archiveProjectMutation = trpc.projects.archiveProject.useMutation({
+        onSuccess: async () => { await utils.projects.srById.invalidate({ id: srId }); toast.success("專案已封存"); },
+        onError: error => toast.error(error.message || "專案封存失敗")
+    });
+    const restoreProjectMutation = trpc.projects.restoreProject.useMutation({
+        onSuccess: async () => { await utils.projects.srById.invalidate({ id: srId }); toast.success("專案已還原"); },
+        onError: error => toast.error(error.message || "專案還原失敗")
+    });
+    const reopenProjectMutation = trpc.projects.reopenProject.useMutation({
+        onSuccess: async () => { await utils.projects.srById.invalidate({ id: srId }); await refetchProjectHistory(); toast.success("專案已重啟"); },
+        onError: error => toast.error(error.message || "專案重啟失敗")
     });
 
     const updateSalesOwnerMutation = trpc.projects.updateProjectBasics.useMutation({
@@ -324,7 +343,9 @@ export function WbsManagementPage() {
     const itemImportKey = (item: WbsDraftItem) => String(item.code || item.title || "").trim().toLowerCase();
 
     const normalizeImportDate = (value?: Date) => value ? value.toISOString().slice(0, 10) : "";
-    const isHeadingItem = (item: Pick<WbsDraftItem, "level">) => (item.level || 0) === 0;
+    const resolvedItemType = (item: Pick<WbsDraftItem, "level" | "itemType">) => item.itemType || ((item.level || 0) === 0 ? "heading" : "task");
+    const isHeadingItem = (item: Pick<WbsDraftItem, "level" | "itemType">) => resolvedItemType(item) === "heading";
+    const requiresEffort = (item: Pick<WbsDraftItem, "level" | "itemType">) => resolvedItemType(item) === "task";
     const getImportText = (value: any, fallback = "") => value == null || value === "" ? fallback : String(value).trim();
     const splitAssigneeTextList = (value?: string) => Array.from(new Set(String(value || "")
         .split(/[,，;；\n]/)
@@ -340,6 +361,23 @@ export function WbsManagementPage() {
         }
         return "";
     };
+    const expandSafeMergedCells = (worksheet: XLSX.WorkSheet) => {
+        const warnings: string[] = [];
+        for (const merge of worksheet["!merges"] || []) {
+            const sourceAddress = XLSX.utils.encode_cell(merge.s);
+            const source = worksheet[sourceAddress];
+            if (!source || source.v == null || source.v === "") continue;
+            if (merge.s.c !== merge.e.c) {
+                warnings.push(`略過跨欄合併儲存格 ${XLSX.utils.encode_range(merge)}，請拆開後再確認語意。`);
+                continue;
+            }
+            for (let row = merge.s.r + 1; row <= merge.e.r; row++) {
+                const address = XLSX.utils.encode_cell({ r: row, c: merge.s.c });
+                if (!worksheet[address]) worksheet[address] = { ...source };
+            }
+        }
+        return warnings;
+    };
 
     const handleExcelImport = (e: React.ChangeEvent<HTMLInputElement>) => {
         const file = e.target.files?.[0];
@@ -352,6 +390,7 @@ export function WbsManagementPage() {
                 const workbook = XLSX.read(data, { type: 'array' });
                 const sheetName = workbook.SheetNames[0];
                 const worksheet = workbook.Sheets[sheetName];
+                const mergeWarnings = expandSafeMergedCells(worksheet);
                 const json = XLSX.utils.sheet_to_json(worksheet);
                 const assigneeInputs = Array.from(new Set(json.flatMap((row: any) => splitAssigneeTextList(getExcelAssigneeText(row)))));
                 const resolution = assigneeInputs.length > 0
@@ -389,10 +428,17 @@ export function WbsManagementPage() {
                     }
 
                     const rawEstimatedHours = Number(row['工作天數(小計)'] || row['工作天數'] || row['工時(天)'] || row['預估工時'] || row['Hours'] || row['工時'] || 0);
+                    const rawItemType = String(row['工作類型'] || row['Item Type'] || "").trim().toLowerCase();
+                    const itemType: WbsDraftItem["itemType"] = rawItemType === "milestone" || rawItemType === "里程碑"
+                        ? "milestone"
+                        : rawItemType === "heading" || rawItemType === "標題" || rawItemType === "章節" || (level === 0 && rawEstimatedHours <= 0)
+                            ? "heading"
+                            : "task";
 
                     return {
                         title: getImportText(row['工作項目'] || row['項目名稱'] || row['Title'] || row['項目'] || row['專案階段'], '未命名項目'),
-                        estimatedHours: level === 0 ? 0 : rawEstimatedHours,
+                        itemType,
+                        estimatedHours: itemType === "task" ? rawEstimatedHours : 0,
                         actualHours: 0,
                         assigneeId: multiAssigneeIds[0],
                         assigneeIds: multiAssigneeIds,
@@ -440,9 +486,12 @@ export function WbsManagementPage() {
                     return key && !importedKeys.has(key);
                 }).length;
                 const importedVersions = Array.from(new Set(json.map((row: any) => String(row['WBS 版本'] || "").trim()).filter(Boolean)));
-                const warnings = importedVersions.length > 0 && latestVersion?.version && !importedVersions.includes(String(latestVersion.version))
-                    ? [`匯入檔版本 ${importedVersions.join(", ")} 與目前最新版 v${latestVersion.version} 不一致，請確認後再套用。`]
-                    : [];
+                const warnings = [
+                    ...mergeWarnings,
+                    ...(importedVersions.length > 0 && latestVersion?.version && !importedVersions.includes(String(latestVersion.version))
+                        ? [`匯入檔版本 ${importedVersions.join(", ")} 與目前最新版 v${latestVersion.version} 不一致，請確認後再套用。`]
+                        : [])
+                ];
 
                 setPendingImport({
                     items: importedItems,
@@ -501,6 +550,7 @@ export function WbsManagementPage() {
 	    const canViewFinancials = sr.permissions?.canViewFinancials === true;
 	    const canEditFinancials = sr.permissions?.canEditFinancials === true && !projectLocked;
 	    const canEditWbs = sr.permissions?.canEditWbs === true && !projectLocked;
+	    const canManageIssues = sr.permissions?.canOperate === true && !projectLocked;
 	    const canReviewSubmittedWbs = sr.permissions?.canReview === true && !projectLocked;
         const projectMemberRoleLabels: Record<string, string> = {
             owner: "負責人（Owner）",
@@ -566,16 +616,17 @@ export function WbsManagementPage() {
         });
     };
 
-    const handleAddDraftItem = () => setDraftItems([...draftItems, { title: "", estimatedHours: 0, actualHours: 0, assigneeId: undefined, assigneeIds: [], level: 0, code: "", remarks: "", status: "not_started", completionPercentage: 0 }]);
+    const handleAddDraftItem = () => setDraftItems([...draftItems, { title: "", itemType: "heading", estimatedHours: 0, actualHours: 0, assigneeId: undefined, assigneeIds: [], level: 0, code: "", remarks: "", status: "not_started", completionPercentage: 0 }]);
     const handleAddSubTask = (parentIndex: number) => {
         const parentLevel = draftItems[parentIndex].level || 0;
         const newItems = [...draftItems];
-        newItems.splice(parentIndex + 1, 0, { title: "", estimatedHours: 4, actualHours: 0, assigneeId: undefined, assigneeIds: [], level: parentLevel + 1, code: "", remarks: "", status: "not_started", completionPercentage: 0 });
+        newItems.splice(parentIndex + 1, 0, { title: "", itemType: "task", estimatedHours: 4, actualHours: 0, assigneeId: undefined, assigneeIds: [], level: parentLevel + 1, code: "", remarks: "", status: "not_started", completionPercentage: 0 });
         setDraftItems(newItems);
     };
     const handleApplySingleRowTemplate = (title: "教育訓練" | "內部專案") => {
         setDraftItems([{
             title,
+            itemType: "task",
             estimatedHours: 0,
             actualHours: 0,
             assigneeId: undefined,
@@ -649,6 +700,7 @@ export function WbsManagementPage() {
         newItems[index] = {
             ...newItems[index],
             level: nextLevel,
+            itemType: nextLevel === 0 ? "heading" : newItems[index].itemType === "heading" ? "task" : resolvedItemType(newItems[index]),
             estimatedHours: nextLevel === 0 ? 0 : Number(newItems[index].estimatedHours || 0) > 0 ? newItems[index].estimatedHours : 4
         };
         setDraftItems(newItems);
@@ -724,7 +776,7 @@ export function WbsManagementPage() {
         }
         const invalidIndex = draftItems.findIndex(item =>
             !item.title.trim() ||
-            (!isHeadingItem(item) && (
+            (requiresEffort(item) && (
                 item.estimatedHours <= 0 ||
                 !item.startDate ||
                 !item.endDate ||
@@ -732,7 +784,9 @@ export function WbsManagementPage() {
             ))
         );
         if (invalidIndex >= 0) {
-            const message = `第 ${invalidIndex + 1} 筆工作請填寫名稱、工作天數及正確的起訖日期`;
+            const item = draftItems[invalidIndex];
+            const identity = [item.code?.trim(), item.title?.trim()].filter(Boolean).join("／");
+            const message = `第 ${invalidIndex + 1} 筆${identity ? `（${identity}）` : ""}請填寫名稱；工作類型為「工作」時須填工作天數及正確起訖日期`;
             setWbsSubmitFailure({ message, rowIndex: invalidIndex });
             toast.error(`${message}；可使用定位按鈕快速檢查`);
             focusWbsFailure(invalidIndex);
@@ -741,7 +795,8 @@ export function WbsManagementPage() {
         setWbsSubmitFailure(null);
         const normalizedItems = draftItems.map(item => ({
             ...item,
-            estimatedHours: isHeadingItem(item) ? 0 : item.estimatedHours,
+            itemType: resolvedItemType(item),
+            estimatedHours: requiresEffort(item) ? item.estimatedHours : 0,
             startDate: item.startDate || undefined,
             endDate: item.endDate || undefined,
             assigneeIds: Array.from(new Set([item.assigneeId, ...(item.assigneeIds || [])].filter(Boolean))) as string[]
@@ -1134,6 +1189,16 @@ export function WbsManagementPage() {
                 <button onClick={handleExportQuote} className="ml-auto inline-flex items-center gap-2 px-3 py-2 rounded-lg bg-emerald-600 text-white text-sm font-semibold hover:bg-emerald-700 transition-colors">
                     <Receipt className="w-4 h-4" /> WBS 轉報價單
                 </button>
+                {!sr.isQuoteWorkspace && sr.permissions?.canArchive && (
+                    sr.archivedAt ? (
+                        <button type="button" onClick={() => restoreProjectMutation.mutate({ id: sr.id })} disabled={restoreProjectMutation.isPending} className="rounded-lg border px-3 py-2 text-sm font-semibold hover:bg-muted disabled:opacity-50">還原專案</button>
+                    ) : (
+                        <button type="button" onClick={() => {
+                            const reason = window.prompt("請輸入封存原因（可留白）") ?? undefined;
+                            if (reason !== undefined) archiveProjectMutation.mutate({ id: sr.id, reason: reason.trim() || undefined });
+                        }} disabled={archiveProjectMutation.isPending} className="rounded-lg border px-3 py-2 text-sm font-semibold hover:bg-muted disabled:opacity-50">封存專案</button>
+                    )
+                )}
                 {sr.isQuoteWorkspace && sr.opportunityId && (
                     <Link href={`/opportunities/${sr.opportunityId}#quote-section`}>
                         <a className="inline-flex items-center gap-2 rounded-lg border border-primary/30 bg-primary/5 px-3 py-2 text-sm font-semibold text-primary hover:bg-primary/10">
@@ -1151,8 +1216,27 @@ export function WbsManagementPage() {
             )}
 
             {projectLocked && (
-                <div className={`rounded-xl border p-4 text-sm font-medium ${sr.status === "cancelled" ? "border-red-300 bg-red-50 text-red-700" : "border-amber-300 bg-amber-50 text-amber-800"}`}>
-                    此專案目前為「{sr.status === "cancelled" ? "已取消" : "已結案"}」，基本資料、金額、WBS、工時與 CR 已鎖定；需透過授權重啟流程後才能修改。
+                <div className={`flex flex-wrap items-center justify-between gap-3 rounded-xl border p-4 text-sm font-medium ${sr.status === "cancelled" ? "border-red-300 bg-red-50 text-red-700" : "border-amber-300 bg-amber-50 text-amber-800"}`}>
+                    <span>此專案目前為「{sr.status === "cancelled" ? "已取消" : "已結案"}」，基本資料、金額、WBS、工時與 CR 已鎖定。</span>
+                    {sr.status !== "cancelled" && sr.permissions?.canOperate && (
+                        <button type="button" disabled={reopenProjectMutation.isPending} onClick={() => {
+                            const reason = window.prompt("請輸入重啟原因")?.trim();
+                            if (reason) reopenProjectMutation.mutate({ id: sr.id, reason, status: "in_progress" });
+                        }} className="rounded-lg border border-amber-300 bg-white px-3 py-1.5 text-xs font-semibold hover:bg-amber-100 disabled:opacity-50">重啟專案</button>
+                    )}
+                </div>
+            )}
+
+            {!!relatedOpportunities?.length && (
+                <div className="rounded-xl border border-border bg-card p-4 shadow-sm">
+                    <h3 className="mb-2 font-semibold">來源／關聯商機</h3>
+                    <div className="flex flex-wrap gap-2">
+                        {relatedOpportunities.map((link: any) => (
+                            <a key={link.id} href={`/opportunities/${link.opportunityId}`} className="rounded-lg border px-3 py-2 text-sm hover:bg-muted">
+                                <b>{link.opportunityCode || "商機"}</b>　{link.opportunityTitle}<span className="ml-2 text-xs text-muted-foreground">{link.relationType}</span>
+                            </a>
+                        ))}
+                    </div>
                 </div>
             )}
 
@@ -1430,7 +1514,7 @@ export function WbsManagementPage() {
 	                                >
 	                                    匯出
 	                                </button>
-	                                {canEditWbs && <button onClick={() => setIsCreatingIssue(true)} className="p-1.5 hover:bg-muted bg-primary/10 rounded-lg text-primary transition-colors"><Plus className="w-4 h-4" /></button>}
+	                                {canManageIssues && <button onClick={() => setIsCreatingIssue(true)} className="p-1.5 hover:bg-muted bg-primary/10 rounded-lg text-primary transition-colors"><Plus className="w-4 h-4" /></button>}
 	                            </div>
 	                        </div>
                         {issues && issues.length > 0 ? (
@@ -1442,7 +1526,7 @@ export function WbsManagementPage() {
                                             <select
                                                 value={i.status}
                                                 onChange={e => updateIssueMutation.mutate({ id: i.id, status: e.target.value as any })}
-                                                disabled={!canEditWbs}
+                                                disabled={!canManageIssues || updateIssueMutation.isPending}
                                                 className={`text-[10px] px-1.5 py-0.5 rounded border font-semibold outline-none focus:ring-2 focus:ring-primary/30 ${i.status === 'resolved' || i.status === 'closed' ? 'bg-green-100 text-green-700 border-green-200' : 'bg-amber-100 text-amber-700 border-amber-200'}`}
                                             >
                                                 <option value="open">待處理 (Open)</option>
@@ -1452,6 +1536,11 @@ export function WbsManagementPage() {
                                             </select>
                                         </div>
                                         <p className="text-xs text-muted-foreground line-clamp-2 leading-relaxed">{i.description}</p>
+                                        {i.externalUrl && (
+                                            <a href={i.externalUrl} target="_blank" rel="noopener noreferrer" className="mt-2 inline-flex items-center gap-1 text-xs font-medium text-primary hover:underline">
+                                                <ExternalLink className="h-3.5 w-3.5" />{i.externalLabel || "開啟外部連結"}
+                                            </a>
+                                        )}
                                         <div className="flex justify-between items-center mt-3 text-[10px] text-muted-foreground border-t border-border/50 pt-2">
                                             <div className="flex items-center gap-2">
                                                 <span className={`px-1 rounded font-medium ${i.priority === 'critical' ? 'bg-red-100 text-red-600' : i.priority === 'high' ? 'bg-orange-100 text-orange-600' : 'bg-muted'}`}>
@@ -1876,6 +1965,7 @@ export function WbsManagementPage() {
                                         {draftItems.map((item, idx) => {
                                             const isExpanded = !!expandedDraftItems[idx];
                                             const isHeading = isHeadingItem(item);
+                                            const isEffortItem = requiresEffort(item);
                                             const startDateValue = item.startDate ? typeof item.startDate === "string" ? item.startDate : new Date(item.startDate).toISOString().slice(0, 10) : "";
                                             const endDateValue = item.endDate ? typeof item.endDate === "string" ? item.endDate : new Date(item.endDate).toISOString().slice(0, 10) : "";
 
@@ -1909,6 +1999,21 @@ export function WbsManagementPage() {
                                                             </div>
 
                                                             <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+                                                                <div className="flex flex-col gap-1 text-xs text-muted-foreground">
+                                                                    <label>工作類型</label>
+                                                                    <select
+                                                                        value={resolvedItemType(item)}
+                                                                        onChange={(e) => handleUpdateDraftItemFields(idx, {
+                                                                            itemType: e.target.value as WbsDraftItem["itemType"],
+                                                                            estimatedHours: e.target.value === "task" ? (Number(item.estimatedHours || 0) || 4) : 0
+                                                                        })}
+                                                                        className="rounded border border-transparent bg-muted px-2 py-2 outline-none focus:border-primary focus:bg-background"
+                                                                    >
+                                                                        <option value="heading">章節／標題</option>
+                                                                        <option value="task">工作</option>
+                                                                        <option value="milestone">里程碑</option>
+                                                                    </select>
+                                                                </div>
                                                                 <div className="flex flex-col gap-1 text-xs text-muted-foreground">
                                                                     <label>工作編號</label>
                                                                     <input
@@ -1974,10 +2079,10 @@ export function WbsManagementPage() {
                                                                         type="number"
                                                                         min="0.5"
                                                                         step="0.5"
-                                                                        value={isHeading ? "" : item.estimatedHours}
+                                                                        value={isEffortItem ? item.estimatedHours : ""}
                                                                         onChange={(e) => handleUpdateDraftItem(idx, "estimatedHours", Number(e.target.value))}
-                                                                        disabled={isHeading}
-                                                                        placeholder={isHeading ? "標題列不需填" : "0"}
+                                                                        disabled={!isEffortItem}
+                                                                        placeholder={isEffortItem ? "0" : "章節／里程碑不需填"}
                                                                         className="rounded border border-transparent bg-muted px-2 py-2 outline-none focus:border-primary focus:bg-background disabled:cursor-not-allowed disabled:opacity-70"
                                                                     />
                                                                 </div>
@@ -2366,6 +2471,16 @@ export function WbsManagementPage() {
                             </div>
                             <div className="grid grid-cols-2 gap-4">
                                 <div>
+                                    <label className="block text-sm font-semibold mb-1.5 text-foreground/90">外部連結（https，可選）</label>
+                                    <input type="url" value={newIssueData.externalUrl} onChange={e => setNewIssueData({...newIssueData, externalUrl: e.target.value})} placeholder="https://..." className="w-full border border-input rounded-lg px-3 py-2.5 bg-background text-sm" />
+                                </div>
+                                <div>
+                                    <label className="block text-sm font-semibold mb-1.5 text-foreground/90">連結標籤</label>
+                                    <input value={newIssueData.externalLabel} onChange={e => setNewIssueData({...newIssueData, externalLabel: e.target.value})} placeholder="例如 Azure DevOps" className="w-full border border-input rounded-lg px-3 py-2.5 bg-background text-sm" />
+                                </div>
+                            </div>
+                            <div className="grid grid-cols-2 gap-4">
+                                <div>
                                     <label className="block text-sm font-semibold mb-1.5 text-foreground/90">優先等級</label>
                                     <select value={newIssueData.priority} onChange={e => setNewIssueData({...newIssueData, priority: e.target.value})} className="w-full border border-input rounded-lg px-3 py-2.5 bg-background text-sm focus:outline-none focus:ring-2 focus:ring-primary/50 transition-shadow">
                                         <option value="low">低優先 (Low)</option>
@@ -2392,7 +2507,7 @@ export function WbsManagementPage() {
                             <button
                                 onClick={() => {
                                     if (!newIssueData.title || !newIssueData.description) { toast.error("為確保追蹤品質，標題與說明為必填項目"); return; }
-                                    createIssueMutation.mutate({ srId, ...newIssueData, priority: newIssueData.priority as any, assigneeId: newIssueData.assigneeId || undefined });
+                                    createIssueMutation.mutate({ srId, ...newIssueData, priority: newIssueData.priority as any, assigneeId: newIssueData.assigneeId || undefined, externalUrl: newIssueData.externalUrl || undefined, externalLabel: newIssueData.externalLabel || undefined });
                                 }}
                                 disabled={createIssueMutation.isPending}
                                 className="px-5 py-2 text-sm font-medium bg-primary text-primary-foreground rounded-lg hover:bg-primary/90 transition-all active:scale-95 disabled:opacity-50 shadow-sm"

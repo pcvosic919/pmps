@@ -11,6 +11,8 @@ export interface ICompany extends Document {
     address?: string;
     notes?: string;
     isActive: boolean;
+    sourceSystem?: string;
+    sourceId?: string;
     createdById?: mongoose.Types.ObjectId;
     updatedById?: mongoose.Types.ObjectId;
     createdAt: Date;
@@ -28,12 +30,15 @@ const CompanySchema = new Schema<ICompany>({
     address: { type: String, trim: true },
     notes: { type: String, trim: true },
     isActive: { type: Boolean, default: true, required: true },
+    sourceSystem: { type: String, trim: true },
+    sourceId: { type: String, trim: true },
     createdById: { type: Schema.Types.ObjectId, ref: "User" },
     updatedById: { type: Schema.Types.ObjectId, ref: "User" }
 }, { timestamps: true });
 
 CompanySchema.index({ normalizedName: 1 }, { unique: true });
 CompanySchema.index({ taxId: 1 }, { sparse: true });
+CompanySchema.index({ sourceSystem: 1, sourceId: 1 }, { unique: true, sparse: true });
 CompanySchema.index({ name: "text", taxId: "text", industry: "text", contactName: "text" });
 
 export const normalizeCompanyName = (name: string) => name.trim().replace(/\s+/g, " ").toLowerCase();

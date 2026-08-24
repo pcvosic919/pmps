@@ -33,8 +33,14 @@ export interface IOpportunity extends Document {
     presalesHourlyRate?: number;
     opportunityType: OpportunityType;
     status: OpportunityStatus;
+    lastNonTerminalStatus?: OpportunityStatus;
+    reopenedAt?: Date;
+    reopenedById?: mongoose.Types.ObjectId;
+    reopenReason?: string;
     expectedCloseDate?: Date;
     productNames?: string[];
+    productCategoryIds?: mongoose.Types.ObjectId[];
+    productIds?: mongoose.Types.ObjectId[];
     description?: string;
     ownerId: mongoose.Types.ObjectId;
     ownerNameSnapshot?: string;
@@ -77,8 +83,14 @@ const OpportunitySchema = new Schema<IOpportunity>({
     presalesHourlyRate: { type: Number, min: 0 },
     opportunityType: { type: String, enum: opportunityTypes, default: "revenue", required: true },
     status: { type: String, enum: opportunityStatuses, default: "new", required: true },
+    lastNonTerminalStatus: { type: String, enum: opportunityStatuses },
+    reopenedAt: { type: Date },
+    reopenedById: { type: Schema.Types.ObjectId, ref: "User" },
+    reopenReason: { type: String, trim: true },
     expectedCloseDate: { type: Date },
     productNames: [{ type: String }],
+    productCategoryIds: [{ type: Schema.Types.ObjectId, ref: "ProductCategory" }],
+    productIds: [{ type: Schema.Types.ObjectId, ref: "ProductCategory" }],
     description: { type: String },
     approvedM365: { type: Boolean, default: false },
     approvedAzure: { type: Boolean, default: false },
@@ -133,6 +145,8 @@ OpportunitySchema.index({ salesUserId: 1, createdAt: -1 });
 OpportunitySchema.index({ salesDepartment: 1, createdAt: -1 });
 OpportunitySchema.index({ "members.userId": 1, createdAt: -1 });
 OpportunitySchema.index({ "presalesAssignments.techId": 1, createdAt: -1 });
+OpportunitySchema.index({ productCategoryIds: 1, createdAt: -1 });
+OpportunitySchema.index({ productIds: 1, createdAt: -1 });
 OpportunitySchema.index({ opportunityCode: "text", title: "text", customerName: "text", salesRep: "text", salesDepartment: "text" });
 
 export const OpportunityModel = mongoose.models.Opportunity || mongoose.model<IOpportunity>("Opportunity", OpportunitySchema);

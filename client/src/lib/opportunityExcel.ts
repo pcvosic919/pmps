@@ -79,11 +79,11 @@ const importHeaders = [
     "成功率備註",
     "商機類型",
     "預計成交日",
-    "產品名稱",
+    "產品分類",
+    "產品線",
+    "產品",
     "說明",
-    "M365 核准",
-    "Azure 核准",
-    "Security 核准"
+    "產品審核狀態"
 ];
 
 const getCell = (row: Record<string, unknown>, keys: string[]) => {
@@ -172,7 +172,7 @@ export const downloadOpportunityTemplate = () => {
     const workbook = XLSX.utils.book_new();
     appendSheet(workbook, "商機資料", [
         importHeaders,
-        ["", "M365 導入專案", "範例科技股份有限公司", "sales@example.com", "王小明", "業務一部", 500000, 40, "需求已確認，待客戶確認預算", "營收型商機", "2026-12-31", "M365；Azure", "Excel 範例列，正式匯入前可刪除", "Y", "N", "N"]
+        ["", "M365 導入專案", "範例科技股份有限公司", "sales@example.com", "王小明", "業務一部", 500000, 40, "需求已確認，待客戶確認預算", "營收型商機", "2026-12-31", "雲端服務", "生產力平台", "M365；Azure", "Excel 範例列，正式匯入前可刪除", "待審核"]
     ], [26, 32, 28, 30, 18, 18, 16, 18, 42, 18, 16, 32, 48, 14, 14, 16]);
     appendSheet(workbook, "欄位說明", [
         ["欄位", "必要性", "格式／允許值", "說明"],
@@ -185,8 +185,8 @@ export const downloadOpportunityTemplate = () => {
         ["成功率備註", "選填", "最多 2,000 字", "說明成功率的判斷依據。"],
         ["商機類型", "選填", "營收型商機／協銷", "空白視為營收型商機。"],
         ["預計成交日", "選填", "YYYY-MM-DD", "例如 2026-12-31。"],
-        ["產品名稱", "選填", "以分號分隔", "例如 M365；Azure。"],
-        ["核准欄位", "選填", "Y／N", "空白視為 N。"],
+        ["產品分類／產品線／產品", "選填", "產品可用分號分隔", "例如：雲端服務／生產力平台／M365；Azure。"],
+        ["產品審核狀態", "選填", "待審核／已核准／已退回", "產品主檔審核狀態；不再以固定產品線作欄名。"],
         ["匯入限制", "—", "每次最多 1,000 筆", "錯誤列不會阻擋其他有效資料。"]
     ], [24, 18, 34, 68]);
     XLSX.writeFileXLSX(workbook, makeXlsxFileName("商機匯入範本"), { compression: true });
@@ -212,11 +212,11 @@ export const exportOpportunitiesToXlsx = (rows: OpportunityExportRow[]) => {
         row.probabilityNote || "",
         row.opportunityType === "presales" ? "協銷" : "營收型商機",
         formatDate(row.expectedCloseDate),
+        "",
+        "",
         row.productNames.join("；"),
         row.description,
-        row.approvedM365 ? "Y" : "N",
-        row.approvedAzure ? "Y" : "N",
-        row.approvedSecurity ? "Y" : "N",
+        [row.approvedM365 && "M365", row.approvedAzure && "Azure", row.approvedSecurity && "Security"].filter(Boolean).length ? "已核准（舊資料）" : "待審核",
         statusLabels[row.status] || row.status,
         row.ownerName,
         row.ownerEmail || "",
@@ -243,11 +243,11 @@ export const exportOpportunitiesToXlsx = (rows: OpportunityExportRow[]) => {
             "成功率備註",
             "商機類型",
             "預計成交日",
-            "產品名稱",
+            "產品分類",
+            "產品線",
+            "產品",
             "說明",
-            "M365 核准",
-            "Azure 核准",
-            "Security 核准",
+            "產品審核狀態",
             "商機狀態",
             "Owner 姓名",
             "Owner Email",
@@ -312,8 +312,9 @@ export const parseOpportunityWorkbook = (data: ArrayBuffer): OpportunityImportPr
             probabilityNote: probabilityNote || undefined,
             opportunityType: type.value,
             expectedCloseDate: date.value,
-            productNames: textCell(getCell(source, ["產品名稱", "產品", "productNames"]))
-                .split(/[;；,，\n]/).map((item) => item.trim()).filter(Boolean),
+            productNames: ["產品分類", "產品線", "產品", "產品名稱", "productNames"]
+                .flatMap((key) => textCell(getCell(source, [key])).split(/[;；,，\n]/))
+                .map((item) => item.trim()).filter(Boolean),
             description: textCell(getCell(source, ["說明", "描述", "description"])) || undefined,
             approvedM365: m365.value,
             approvedAzure: azure.value,

@@ -258,6 +258,10 @@ export function OpportunityDetailPage() {
     const [quoteExpectedCloseDate, setQuoteExpectedCloseDate] = useState("");
     const [quoteTaxIncluded, setQuoteTaxIncluded] = useState(false);
     const [quoteError, setQuoteError] = useState("");
+    const [relationProjectId, setRelationProjectId] = useState("");
+    const [participationDepartment, setParticipationDepartment] = useState("");
+    const [participationStage, setParticipationStage] = useState("new");
+    const [participationAmount, setParticipationAmount] = useState("");
 
     // ------ Queries ------
     const { data: opp, isLoading: isOppLoading, refetch: refetchOpp } = trpc.opportunities.getById.useQuery({ id }, { enabled: !!id });
@@ -279,6 +283,9 @@ export function OpportunityDetailPage() {
         { opportunityId: id, limit: 2000 },
         { enabled: !!id }
     );
+    const { data: relatedProjects, refetch: refetchRelatedProjects } = trpc.opportunityRelations.listForOpportunity.useQuery({ opportunityId: id }, { enabled: !!id });
+    const { data: participations, refetch: refetchParticipations } = trpc.opportunityRelations.listParticipations.useQuery({ opportunityId: id }, { enabled: !!id });
+    const { data: availableProjects } = trpc.projects.srList.useQuery({ limit: 200 });
 
     const oppFields = customFieldDefs?.filter((f: any) => f.entityType === "opportunity") || [];
 
@@ -320,7 +327,20 @@ export function OpportunityDetailPage() {
     });
 
     const updateStatusMutation = trpc.opportunities.updateStatus.useMutation({
-        onSuccess: () => { refetchOpp(); refetchHistory(); setShowStatusDropdown(false); }
+        onSuccess: () => { refetchOpp(); refetchHistory(); setShowStatusDropdown(false); },
+        onError: error => toast.error(error.message || "更新商機狀態失敗")
+    });
+    const reopenOpportunityMutation = trpc.opportunities.reopenOpportunity.useMutation({
+        onSuccess: () => { refetchOpp(); refetchHistory(); toast.success("商機已重新開啟"); },
+        onError: error => toast.error(error.message || "商機重開失敗")
+    });
+    const linkProjectMutation = trpc.opportunityRelations.linkProject.useMutation({
+        onSuccess: async () => { setRelationProjectId(""); await refetchRelatedProjects(); await refetchHistory(); toast.success("已建立商機與專案關聯"); },
+        onError: error => toast.error(error.message || "建立關聯失敗")
+    });
+    const upsertParticipationMutation = trpc.opportunityRelations.upsertParticipation.useMutation({
+        onSuccess: async () => { setParticipationAmount(""); await refetchParticipations(); await refetchHistory(); toast.success("部門參與資料已更新"); },
+        onError: error => toast.error(error.message || "更新部門參與失敗")
     });
 
     const updateCustomFieldsMutation = trpc.opportunities.updateCustomFields.useMutation({
@@ -743,12 +763,57 @@ export function OpportunityDetailPage() {
             </div>
 
             {isTerminal && (
-                <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm font-medium text-amber-900">
-                    此商機目前為「{currentStatus.label}」，基本資料已鎖定為唯讀。
-                    {user?.isPlatformOwner ? " Platform Owner 可先強制調整狀態後再修改，操作必須填寫原因並保留歷程。" : ""}
-                    {project?.status === "new" ? " 待建期間仍可建立並確認新版報價；專案啟用後請改走 CR。" : ""}
+                <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm font-medium text-amber-900">
+                    <span>此商機目前為「{currentStatus.label}」，基本資料已鎖定為唯讀。{project?.status === "new" ? " 待建期間仍可建立並確認新版報價；專案啟用後請改走 CR。" : ""}</span>
+                    {(hasRole("admin") || hasRole("manager") || isOpportunityOwner || isAssignedPresales) && (
+                        <button
+                            type="button"
+                            disabled={reopenOpportunityMutation.isPending}
+                            onClick={() => {
+                                const reason = window.prompt("請輸入重新開啟商機的原因（至少 3 個字）")?.trim();
+                                if (reason && reason.length >= 3) reopenOpportunityMutation.mutate({ id, reason });
+                            }}
+                            className="rounded-lg border border-amber-300 bg-white px-3 py-1.5 text-xs font-semibold hover:bg-amber-100 disabled:opacity-50"
+                        >重新開啟</button>
+                    )}
                 </div>
             )}
+
+            <div className="grid gap-4 lg:grid-cols-2">
+                <div className="rounded-xl border border-border/50 bg-card p-5 shadow-sm">
+                    <div className="mb-3 flex items-center justify-between"><h3 className="font-bold">關聯專案（多對多）</h3><span className="text-xs text-muted-foreground">{relatedProjects?.length || 0} 筆</span></div>
+                    <div className="space-y-2">
+                        {(relatedProjects || []).map((link: any) => (
+                            <a key={link.id} href={`/service-requests/${link.projectId}`} className="flex items-center justify-between rounded-lg border p-2 text-sm hover:bg-muted">
+                                <span><b>{link.projectCode || "專案"}</b>　{link.projectTitle}</span><span className="text-xs text-muted-foreground">{link.relationType}</span>
+                            </a>
+                        ))}
+                        {!relatedProjects?.length && <p className="text-sm text-muted-foreground">尚無關聯專案。</p>}
+                    </div>
+                    {(hasRole("admin") || hasRole("manager") || isOpportunityOwner || isAssignedPresales) && (
+                        <div className="mt-3 flex gap-2">
+                            <select value={relationProjectId} onChange={e => setRelationProjectId(e.target.value)} className="min-w-0 flex-1 rounded-md border bg-background px-2 py-2 text-sm">
+                                <option value="">選擇要關聯的專案…</option>
+                                {(availableProjects || []).filter((project: any) => !(relatedProjects || []).some((link: any) => link.projectId === project.id)).map((project: any) => <option key={project.id} value={project.id}>{project.projectCode}｜{project.title}</option>)}
+                            </select>
+                            <button type="button" disabled={!relationProjectId || linkProjectMutation.isPending} onClick={() => linkProjectMutation.mutate({ opportunityId: id, projectId: relationProjectId, relationType: "related", currency: "TWD", isPrimary: false })} className="rounded-md bg-primary px-3 py-2 text-sm font-semibold text-primary-foreground disabled:opacity-50">建立關聯</button>
+                        </div>
+                    )}
+                </div>
+                <div className="rounded-xl border border-border/50 bg-card p-5 shadow-sm">
+                    <div className="mb-3 flex items-center justify-between"><h3 className="font-bold">跨部門參與</h3><span className="text-xs text-muted-foreground">{participations?.length || 0} 個部門</span></div>
+                    <div className="space-y-2">
+                        {(participations || []).map((row: any) => <div key={row.id} className="grid grid-cols-[1fr_auto_auto] gap-2 rounded-lg border p-2 text-sm"><span>{row.department}</span><span>{row.stage}</span><span>{row.amount == null ? "—" : Number(row.amount).toLocaleString()}</span></div>)}
+                        {!participations?.length && <p className="text-sm text-muted-foreground">尚無部門參與資料。</p>}
+                    </div>
+                    <div className="mt-3 grid grid-cols-3 gap-2">
+                        <input value={participationDepartment} onChange={e => setParticipationDepartment(e.target.value)} placeholder="部門" className="rounded-md border bg-background px-2 py-2 text-sm" />
+                        <input value={participationStage} onChange={e => setParticipationStage(e.target.value)} placeholder="階段" className="rounded-md border bg-background px-2 py-2 text-sm" />
+                        <input type="number" min="0" value={participationAmount} onChange={e => setParticipationAmount(e.target.value)} placeholder="分攤金額" className="rounded-md border bg-background px-2 py-2 text-sm" />
+                    </div>
+                    <button type="button" disabled={!participationDepartment.trim() || !participationStage.trim() || upsertParticipationMutation.isPending} onClick={() => upsertParticipationMutation.mutate({ opportunityId: id, department: participationDepartment.trim(), stage: participationStage.trim(), amount: participationAmount === "" ? undefined : Number(participationAmount), probability: opp.probability, productIds: [], isActive: true })} className="mt-2 w-full rounded-md border px-3 py-2 text-sm font-semibold hover:bg-muted disabled:opacity-50">新增／更新部門參與</button>
+                </div>
+            </div>
 
             {/* Opp Info Card */}
             <div className="bg-card border border-border/50 rounded-xl shadow-sm p-6">
