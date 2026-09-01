@@ -51,7 +51,7 @@ export function WbsManagementPage() {
     const srId = params?.id || "";
     const utils = trpc.useContext();
     const { user } = useCurrentUser();
-    const [activeTab, setActiveTab] = useState<"overview" | "timesheets" | "history">("overview");
+    const [activeTab, setActiveTab] = useState<"overview" | "wbs" | "issues" | "timesheets" | "history">("overview");
 
     const [isBuildingVersion, setIsBuildingVersion] = useState(false);
     const [draftItems, setDraftItems] = useState<WbsDraftItem[]>([]);
@@ -1245,6 +1245,8 @@ export function WbsManagementPage() {
             <nav className="flex flex-wrap gap-2 rounded-xl border border-border/50 bg-card p-2 shadow-sm" role="tablist" aria-label="專案管理頁籤">
                 {[
                     { value: "overview" as const, label: "總覽", icon: LayoutDashboard },
+                    { value: "wbs" as const, label: "WBS 版本", icon: FileText },
+                    { value: "issues" as const, label: "專案議題", icon: AlertCircle },
                     { value: "timesheets" as const, label: "工時填寫", icon: Clock },
                     { value: "history" as const, label: "操作紀錄", icon: History }
                 ].map(tab => {
@@ -1254,8 +1256,9 @@ export function WbsManagementPage() {
                 })}
             </nav>
 
-            {activeTab === "overview" && <>
+            {(activeTab === "overview" || activeTab === "wbs" || activeTab === "issues") && <>
 
+            {activeTab === "overview" && <>
             {sr.isQuoteWorkspace && (
                 <div className="rounded-xl border border-blue-200 bg-blue-50 p-4 text-sm text-blue-900">
                     <div className="font-semibold">報價準備工作區（尚未成立正式專案）</div>
@@ -1296,11 +1299,13 @@ export function WbsManagementPage() {
                     }} className="mt-3 rounded-lg bg-primary px-3 py-2 text-xs font-semibold text-primary-foreground disabled:opacity-50">逐筆確認來源金額並回寫專案</button>}
                 </div>
             )}
+            </>}
 
-            <div className="grid md:grid-cols-3 gap-6">
+            <div className="grid gap-6">
                 {/* Left Column: Info + Attachments */}
-                <div className="space-y-6">
-                    <div className="bg-card border border-border rounded-xl p-6 shadow-sm">
+                {(activeTab === "overview" || activeTab === "issues") && <div className={activeTab === "overview" ? "grid gap-6 md:grid-cols-3" : "space-y-6"}>
+                    {activeTab === "overview" && <>
+                    <div className="order-4 bg-card border border-border rounded-xl p-6 shadow-sm md:col-span-3">
                         <h3 className="font-semibold text-lg mb-4 border-b pb-2">基本資訊</h3>
                         <div className="space-y-3 text-sm">
                             <div className="flex justify-between">
@@ -1394,7 +1399,7 @@ export function WbsManagementPage() {
                         </div>
                     </div>
 
-                    <div className="rounded-xl border border-sky-200 bg-sky-50/60 p-5 shadow-sm dark:border-sky-900 dark:bg-sky-950/20">
+                    <div className="order-1 rounded-xl border border-sky-200 bg-sky-50/60 p-5 shadow-sm dark:border-sky-900 dark:bg-sky-950/20">
                         <div className="flex items-start justify-between gap-3">
                             <div>
                                 <h3 className="flex items-center text-base font-semibold"><Users className="mr-2 h-4 w-4 text-sky-600" />專案人力規劃</h3>
@@ -1410,7 +1415,7 @@ export function WbsManagementPage() {
                         </div>
                     </div>
 
-                    <div className="bg-card border border-border rounded-xl p-5 shadow-sm">
+                    <div className="order-2 bg-card border border-border rounded-xl p-5 shadow-sm">
                         <div className="mb-3 flex items-center justify-between">
                             <h3 className="font-semibold text-base flex items-center"><Users className="w-4 h-4 mr-2 text-primary" />專案參與人員</h3>
                             {canManageProjectMembers && (
@@ -1452,7 +1457,7 @@ export function WbsManagementPage() {
                     </div>
 
                     {/* File Upload Area */}
-                    <div className="bg-card border border-border rounded-xl p-5 shadow-sm">
+                    <div className="order-3 bg-card border border-border rounded-xl p-5 shadow-sm">
                         <h3 className="font-semibold text-base mb-3 flex items-center"><Paperclip className="w-4 h-4 mr-2 text-primary" />專案附件</h3>
                         <div
                             onDragOver={e => { e.preventDefault(); if (canEditWbs) setIsDragging(true); }}
@@ -1537,8 +1542,10 @@ export function WbsManagementPage() {
                         )}
                     </div>
 
+                    </>}
+
                     {/* Issues Tracking Area */}
-	                    <div className="bg-card border border-border rounded-xl p-5 shadow-sm">
+	                    {activeTab === "issues" && <div className="bg-card border border-border rounded-xl p-5 shadow-sm">
 	                        <div className="flex justify-between items-center mb-3">
 	                            <h3 className="font-semibold text-base flex items-center"><AlertCircle className="w-4 h-4 mr-2 text-primary" />專案議題追蹤</h3>
 	                            <div className="flex items-center gap-2">
@@ -1591,11 +1598,11 @@ export function WbsManagementPage() {
                         ) : (
                             <div className="text-center p-6 border border-dashed rounded-lg bg-background text-xs text-muted-foreground">目前專案運作良好，尚無未結案之議題。</div>
                         )}
-                    </div>
-                </div>
+                    </div>}
+                </div>}
 
                 {/* Right Column: Versions */}
-                <div className="md:col-span-2 space-y-4">
+                {activeTab === "wbs" && <div className="space-y-4">
                     {!isBuildingVersion ? (
                         <>
 	                            <div className="flex justify-between items-center bg-card p-4 rounded-xl shadow-sm border border-border">
@@ -2245,7 +2252,7 @@ export function WbsManagementPage() {
                             </div>
                         </div>
                     )}
-                </div>
+                </div>}
             </div>
             </>}
 
