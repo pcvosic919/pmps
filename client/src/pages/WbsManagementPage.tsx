@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { trpc } from "../lib/trpc";
 import { useRoute } from "wouter";
-import { ArrowLeft, Plus, FileText, Clock, Trash2, Save, X, CheckCircle2, XCircle, Upload, Paperclip, AlertCircle, Receipt, Download, ChevronDown, ChevronRight, Users, UserPlus, Pencil, MapPin, ExternalLink } from "lucide-react";
+import { ArrowLeft, Plus, FileText, Clock, Trash2, Save, X, CheckCircle2, XCircle, Upload, Paperclip, AlertCircle, Receipt, Download, ChevronDown, ChevronRight, Users, UserPlus, Pencil, MapPin, ExternalLink, LayoutDashboard, History } from "lucide-react";
 import { Link } from "wouter";
 import toast from "react-hot-toast";
 import * as XLSX from "xlsx";
@@ -11,6 +11,8 @@ import { BusinessUserPicker } from "../components/BusinessUserPicker";
 import { UserSearchPicker } from "../components/UserSearchPicker";
 import { fileToBase64 } from "../lib/files";
 import { useCurrentUser } from "../lib/useCurrentUser";
+import { ProjectHistoryPanel } from "../components/ProjectHistoryPanel";
+import { ProjectTimesheetPanel } from "../components/ProjectTimesheetPanel";
 
 type WbsDraftItem = {
     title: string;
@@ -49,6 +51,7 @@ export function WbsManagementPage() {
     const srId = params?.id || "";
     const utils = trpc.useContext();
     const { user } = useCurrentUser();
+    const [activeTab, setActiveTab] = useState<"overview" | "timesheets" | "history">("overview");
 
     const [isBuildingVersion, setIsBuildingVersion] = useState(false);
     const [draftItems, setDraftItems] = useState<WbsDraftItem[]>([]);
@@ -113,10 +116,6 @@ export function WbsManagementPage() {
     const { data: projectMembers, refetch: refetchProjectMembers } = trpc.projects.getSrMembers.useQuery({ srId }, { enabled: !!srId });
     const { data: resourceAllocations } = trpc.resources.listAllocations.useQuery({ projectId: srId }, { enabled: !!srId });
     const { data: wbsQuote, refetch: refetchWbsQuote } = trpc.projects.generateWbsQuote.useQuery({ srId }, { enabled: false });
-    const { data: projectHistory, refetch: refetchProjectHistory, isFetching: isFetchingProjectHistory } = trpc.projects.getBusinessHistory.useQuery(
-        { projectId: srId, limit: 100 },
-        { enabled: !!srId }
-    );
     const { data: relatedOpportunities, refetch: refetchRelatedOpportunities } = trpc.opportunityRelations.listForProject.useQuery({ projectId: srId }, { enabled: !!srId });
 
     // Review state...
@@ -264,7 +263,7 @@ export function WbsManagementPage() {
         }
     });
     const confirmFinancialAllocationMutation = trpc.opportunityRelations.confirmProjectFinancialAllocation.useMutation({
-        onSuccess: async result => { await Promise.all([refetchRelatedOpportunities(), utils.projects.srById.invalidate({ id: srId }), refetchProjectHistory()]); toast.success(`已確認來源金額：${result.currency} ${result.total.toLocaleString()}`); },
+        onSuccess: async result => { await Promise.all([refetchRelatedOpportunities(), utils.projects.srById.invalidate({ id: srId }), utils.projects.getBusinessHistory.invalidate({ projectId: srId })]); toast.success(`已確認來源金額：${result.currency} ${result.total.toLocaleString()}`); },
         onError: error => toast.error(error.message || "確認來源金額失敗")
     });
     const archiveProjectMutation = trpc.projects.archiveProject.useMutation({
@@ -296,7 +295,7 @@ export function WbsManagementPage() {
         }
     };
     const reopenProjectMutation = trpc.projects.reopenProject.useMutation({
-        onSuccess: async () => { await utils.projects.srById.invalidate({ id: srId }); await refetchProjectHistory(); toast.success("專案已重啟"); },
+        onSuccess: async () => { await Promise.all([utils.projects.srById.invalidate({ id: srId }), utils.projects.getBusinessHistory.invalidate({ projectId: srId })]); toast.success("專案已重啟"); },
         onError: error => toast.error(error.message || "專案重啟失敗")
     });
 
@@ -580,6 +579,7 @@ export function WbsManagementPage() {
 	    const canEditWbs = sr.permissions?.canEditWbs === true && !projectLocked;
 	    const canManageIssues = sr.permissions?.canOperate === true && !projectLocked;
 	    const canReviewSubmittedWbs = sr.permissions?.canReview === true && !projectLocked;
+        const currentProjectMemberRole = (projectMembers || []).find((member: any) => member.userId === user?.id)?.memberRole;
         const projectMemberRoleLabels: Record<string, string> = {
             owner: "負責人（Owner）",
             assignee: "執行人員",
@@ -1242,6 +1242,20 @@ export function WbsManagementPage() {
                 )}
             </div>
 
+            <nav className="flex flex-wrap gap-2 rounded-xl border border-border/50 bg-card p-2 shadow-sm" role="tablist" aria-label="專案管理頁籤">
+                {[
+                    { value: "overview" as const, label: "總覽", icon: LayoutDashboard },
+                    { value: "timesheets" as const, label: "工時填寫", icon: Clock },
+                    { value: "history" as const, label: "操作紀錄", icon: History }
+                ].map(tab => {
+                    const Icon = tab.icon;
+                    const selected = activeTab === tab.value;
+                    return <button key={tab.value} type="button" role="tab" aria-selected={selected} onClick={() => setActiveTab(tab.value)} className={`inline-flex items-center gap-2 rounded-lg px-4 py-2.5 text-sm font-semibold transition-colors ${selected ? "bg-primary text-primary-foreground shadow-sm" : "text-muted-foreground hover:bg-muted hover:text-foreground"}`}><Icon className="h-4 w-4" />{tab.label}</button>;
+                })}
+            </nav>
+
+            {activeTab === "overview" && <>
+
             {sr.isQuoteWorkspace && (
                 <div className="rounded-xl border border-blue-200 bg-blue-50 p-4 text-sm text-blue-900">
                     <div className="font-semibold">報價準備工作區（尚未成立正式專案）</div>
@@ -1282,30 +1296,6 @@ export function WbsManagementPage() {
                     }} className="mt-3 rounded-lg bg-primary px-3 py-2 text-xs font-semibold text-primary-foreground disabled:opacity-50">逐筆確認來源金額並回寫專案</button>}
                 </div>
             )}
-
-            <details className="rounded-xl border border-border bg-card shadow-sm">
-                <summary className="cursor-pointer list-none p-4">
-                    <div className="flex items-center justify-between gap-3">
-                        <div>
-                            <h3 className="font-semibold">專案操作歷程</h3>
-                            <p className="mt-1 text-xs text-muted-foreground">包含狀態、Owner、成員、WBS、CR、工時與財務異動。</p>
-                        </div>
-                        <button type="button" onClick={(event) => { event.preventDefault(); void refetchProjectHistory(); }} className="rounded-lg border px-3 py-1.5 text-xs hover:bg-muted">
-                            {isFetchingProjectHistory ? "更新中..." : "重新整理"}
-                        </button>
-                    </div>
-                </summary>
-                <div className="max-h-96 divide-y divide-border/50 overflow-y-auto border-t border-border/50">
-                    {(projectHistory || []).map((event: any) => (
-                        <div key={event.id} className="grid gap-1 p-3 text-sm md:grid-cols-[180px_1fr_auto]">
-                            <span className="text-xs text-muted-foreground">{new Date(event.occurredAt).toLocaleString()}</span>
-                            <div><p className="font-medium">{event.action}</p>{event.reason && <p className="text-xs text-muted-foreground">原因：{event.reason}</p>}</div>
-                            <span className="text-xs text-muted-foreground">{event.actorRole || event.source}</span>
-                        </div>
-                    ))}
-                    {(!projectHistory || projectHistory.length === 0) && <div className="p-5 text-center text-sm text-muted-foreground">尚無操作歷程</div>}
-                </div>
-            </details>
 
             <div className="grid md:grid-cols-3 gap-6">
                 {/* Left Column: Info + Attachments */}
@@ -2257,6 +2247,21 @@ export function WbsManagementPage() {
                     )}
                 </div>
             </div>
+            </>}
+
+            {activeTab === "timesheets" && (
+                <ProjectTimesheetPanel
+                    projectId={srId}
+                    projectTitle={sr.title}
+                    srType={sr.srType}
+                    locked={projectLocked}
+                    canOperate={sr.permissions?.canOperate === true}
+                    memberRole={currentProjectMemberRole}
+                    wbsItems={latestVersion?.items || []}
+                />
+            )}
+
+            {activeTab === "history" && <ProjectHistoryPanel projectId={srId} />}
 
             {/* Edit Sales Owner Modal */}
             {showProjectMemberModal && (

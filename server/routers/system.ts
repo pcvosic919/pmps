@@ -271,7 +271,9 @@ export const systemRouter = router({
     getProductCategories: protectedProcedure.query(async () => {
         const allCategories = await ProductCategoryModel.find({ isActive: true }).sort({ level: 1, sortOrder: 1, name: 1 }).lean();
         const byId = new Map(allCategories.map((category: any) => [category._id.toString(), category]));
-        const categories = allCategories.filter((category: any) => Number(category.level || 3) === 3);
+        const parentIds = new Set(allCategories.map((category: any) => category.parentId?.toString()).filter(Boolean));
+        // 商機可選的是產品樹的末端節點。這同時支援完整三階產品，以及尚未建立下階的第一／二階產品。
+        const categories = allCategories.filter((category: any) => !parentIds.has(category._id.toString()));
         return categories.map((category: any) => {
             const line: any = category.parentId ? byId.get(category.parentId.toString()) : undefined;
             const group: any = line?.parentId ? byId.get(line.parentId.toString()) : undefined;

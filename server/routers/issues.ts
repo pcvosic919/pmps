@@ -8,6 +8,7 @@ import { TRPCError } from "@trpc/server";
 import { assertAuthorized, assertFound, canDeleteRecord } from "../_core/authorization";
 import { canOperateProject, canViewProject } from "../_core/projectAuthorization";
 import { OpportunityModel } from "../models/Opportunity";
+import { recordBusinessHistory } from "../services/BusinessHistoryService";
 
 const getProjectAccessContext = async (srId: string) => {
     const serviceRequest: any = assertFound(
@@ -95,6 +96,23 @@ export const issuesRouter = router({
             });
             await issue.save();
             await syncIssueAssigneeToWbs(issue);
+            await recordBusinessHistory({
+                entityType: "project",
+                entityId: input.srId,
+                action: "project_issue_created",
+                after: {
+                    issueId: issue._id.toString(),
+                    title: issue.title,
+                    status: issue.status,
+                    priority: issue.priority,
+                    assigneeId: issue.assigneeId?.toString(),
+                    externalUrl: issue.externalUrl,
+                    externalLabel: issue.externalLabel
+                },
+                actorId: ctx.user.id,
+                actorRole: ctx.user.role,
+                source: "api"
+            });
             return issue;
         }),
 
@@ -128,6 +146,34 @@ export const issuesRouter = router({
                 .populate("reporterId", "name email role");
             if (!issue) throw new TRPCError({ code: "NOT_FOUND" });
             await syncIssueAssigneeToWbs(issue);
+            await recordBusinessHistory({
+                entityType: "project",
+                entityId: existingIssue.srId,
+                action: "project_issue_updated",
+                before: {
+                    issueId: existingIssue._id.toString(),
+                    title: existingIssue.title,
+                    description: existingIssue.description,
+                    status: existingIssue.status,
+                    priority: existingIssue.priority,
+                    assigneeId: existingIssue.assigneeId?.toString(),
+                    externalUrl: existingIssue.externalUrl,
+                    externalLabel: existingIssue.externalLabel
+                },
+                after: {
+                    issueId: issue._id.toString(),
+                    title: issue.title,
+                    description: issue.description,
+                    status: issue.status,
+                    priority: issue.priority,
+                    assigneeId: (issue.assigneeId as any)?._id?.toString() || issue.assigneeId?.toString(),
+                    externalUrl: issue.externalUrl,
+                    externalLabel: issue.externalLabel
+                },
+                actorId: ctx.user.id,
+                actorRole: ctx.user.role,
+                source: "api"
+            });
             return issue;
         }),
 
@@ -141,6 +187,24 @@ export const issuesRouter = router({
             const { serviceRequest, opportunity } = await getProjectAccessContext(issue.srId.toString());
             assertAuthorized(await canOperateProject(ctx.user, serviceRequest, opportunity), "您沒有權限刪除此專案議題");
             await IssueModel.deleteOne({ _id: input.id });
+            await recordBusinessHistory({
+                entityType: "project",
+                entityId: issue.srId,
+                action: "project_issue_deleted",
+                before: {
+                    issueId: issue._id.toString(),
+                    title: issue.title,
+                    description: issue.description,
+                    status: issue.status,
+                    priority: issue.priority,
+                    assigneeId: issue.assigneeId?.toString(),
+                    externalUrl: issue.externalUrl,
+                    externalLabel: issue.externalLabel
+                },
+                actorId: ctx.user.id,
+                actorRole: ctx.user.role,
+                source: "api"
+            });
             return { success: true };
         })
 });

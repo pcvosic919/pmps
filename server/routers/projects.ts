@@ -1148,11 +1148,26 @@ export const projectsRouter = router({
                 : null;
             assertAuthorized(await canViewProject(ctx.user, sr, opportunity), "您沒有權限檢視專案歷程");
             const events = await listBusinessHistory("project", input.projectId, input.limit);
+            const actorIds = [...new Set(events.map(event => event.actorId?.toString()).filter((value): value is string => !!value))];
+            const actors = actorIds.length
+                ? await UserModel.find({ _id: { $in: actorIds.map(toObjectId) } }).select("name email").lean()
+                : [];
+            const actorMap = new Map(actors.map(actor => [actor._id.toString(), actor]));
+            const capabilities = await getProjectCapabilities(ctx.user, sr, opportunity, { knownVisible: true });
+            const moneyKeys = new Set(["contractAmount", "finalPrice", "pointValue", "amount", "total", "allocationAmount", "costAmount"]);
+            const maskFinancials = (value: any): any => {
+                if (capabilities.canViewFinancials || value == null || typeof value !== "object") return value;
+                if (Array.isArray(value)) return value.map(maskFinancials);
+                return Object.fromEntries(Object.entries(value).map(([key, item]) => [key, moneyKeys.has(key) ? "[權限不足]" : maskFinancials(item)]));
+            };
             return events.map((event) => ({
                 ...event,
+                before: maskFinancials(event.before),
+                after: maskFinancials(event.after),
                 id: event._id.toString(),
                 entityId: event.entityId.toString(),
-                actorId: event.actorId?.toString()
+                actorId: event.actorId?.toString(),
+                actorName: event.actorId ? actorMap.get(event.actorId.toString())?.name || actorMap.get(event.actorId.toString())?.email : undefined
             }));
         }),
 
@@ -2650,9 +2665,24 @@ export const projectsRouter = router({
             const startDate = new Date(input.startDate);
             const endDate = new Date(input.endDate);
             assertWithinProjectScheduleWindow(sr, startDate, endDate);
+            const beforeSchedule = {
+                startDate: item.startDate,
+                endDate: item.endDate
+            };
             item.startDate = startDate;
             item.endDate = endDate;
             await sr.save();
+
+            await recordBusinessHistory({
+                entityType: "project",
+                entityId: sr._id,
+                action: "project_wbs_schedule_updated",
+                before: { wbsItemTitle: item.title, ...beforeSchedule },
+                after: { wbsItemTitle: item.title, startDate, endDate },
+                actorId: ctx.user.id,
+                actorRole: ctx.user.role,
+                source: "api"
+            });
             
             return { success: true };
         }),
@@ -2714,6 +2744,22 @@ export const projectsRouter = router({
                 createdById: toObjectId(ctx.user.id)
             });
 
+            await recordBusinessHistory({
+                entityType: "project",
+                entityId: sr._id,
+                action: "project_wbs_schedule_created",
+                after: {
+                    wbsItemTitle: item.title,
+                    assigneeId,
+                    startDate,
+                    endDate,
+                    scheduledDays: newDays
+                },
+                actorId: ctx.user.id,
+                actorRole: ctx.user.role,
+                source: "api"
+            });
+
             return { id: task._id.toString() };
         }),
 
@@ -2745,14 +2791,20 @@ export const projectsRouter = router({
             if (!task) throw new TRPCError({ code: "NOT_FOUND", message: "找不到行事曆任務" });
             const startDate = new Date(input.startDate);
             const endDate = new Date(input.endDate);
+            const previousStartDate = task.startDate;
+            const previousEndDate = task.endDate;
             let canManageLinkedProject = false;
+            let linkedProject: any = null;
+            let linkedWbsItemTitle = task.title;
             if (task.sourceType === "wbs" && task.srId && task.wbsItemId) {
                 const sr = await ServiceRequestModel.findById(task.srId);
                 if (!sr) throw new TRPCError({ code: "NOT_FOUND", message: "找不到專案" });
+                linkedProject = sr;
                 canManageLinkedProject = await canOperateProject(ctx.user, sr);
                 const effectiveVersion = getEffectiveWbsVersion(sr);
                 const item = effectiveVersion?.items.find((i: any) => i._id.toString() === task.wbsItemId?.toString());
                 if (!item) throw new TRPCError({ code: "NOT_FOUND", message: "找不到任務項目" });
+                linkedWbsItemTitle = item.title;
                 assertWithinProjectScheduleWindow(sr, startDate, endDate);
 
                 const siblingTasks = await CalendarTaskModel.find({
@@ -2779,6 +2831,26 @@ export const projectsRouter = router({
             task.startDate = startDate;
             task.endDate = endDate;
             await task.save();
+            if (linkedProject) {
+                await recordBusinessHistory({
+                    entityType: "project",
+                    entityId: linkedProject._id,
+                    action: "project_wbs_calendar_schedule_updated",
+                    before: {
+                        wbsItemTitle: linkedWbsItemTitle,
+                        startDate: previousStartDate,
+                        endDate: previousEndDate
+                    },
+                    after: {
+                        wbsItemTitle: linkedWbsItemTitle,
+                        startDate,
+                        endDate
+                    },
+                    actorId: ctx.user.id,
+                    actorRole: ctx.user.role,
+                    source: "api"
+                });
+            }
             return { success: true };
         }),
 
@@ -3042,6 +3114,23 @@ export const projectsRouter = router({
             }
 
             await TimesheetModel.deleteOne({ _id: input.id });
+            await recordBusinessHistory({
+                entityType: "project",
+                entityId: ts.srId,
+                action: "project_timesheet_deleted",
+                before: {
+                    timesheetId: ts._id.toString(),
+                    workDate: ts.workDate,
+                    hours: ts.hours,
+                    description: ts.description,
+                    wbsItemId: ts.wbsItemId?.toString(),
+                    techId: ts.techId?.toString(),
+                    costAmount: ts.costAmount
+                },
+                actorId: ctx.user.id,
+                actorRole: ctx.user.role,
+                source: "api"
+            });
             return { success: true };
         }),
 

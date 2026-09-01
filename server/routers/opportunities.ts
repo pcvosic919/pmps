@@ -129,8 +129,15 @@ const opportunityIdString = (opportunity: any) =>
 const resolveProductSelection = async (productIds: string[] = [], fallbackNames: string[] = []) => {
     const uniqueIds = Array.from(new Set(productIds.filter(id => mongoose.isValidObjectId(id))));
     if (!uniqueIds.length) return { productIds: [], productCategoryIds: [], productNames: Array.from(new Set(fallbackNames.map(name => name.trim()).filter(Boolean))) };
-    const products: any[] = await ProductCategoryModel.find({ _id: { $in: uniqueIds.map(toObjectId) }, isActive: true, level: 3 }).lean();
-    if (products.length !== uniqueIds.length) throw new TRPCError({ code: "BAD_REQUEST", message: "部分產品不存在、已停用或不是產品層級" });
+    const products: any[] = await ProductCategoryModel.find({ _id: { $in: uniqueIds.map(toObjectId) }, isActive: true }).lean();
+    if (products.length !== uniqueIds.length) throw new TRPCError({ code: "BAD_REQUEST", message: "部分產品不存在或已停用" });
+    const productsWithActiveChildren = await ProductCategoryModel.find({
+        parentId: { $in: products.map(product => product._id) },
+        isActive: true
+    }).distinct("parentId");
+    if (productsWithActiveChildren.length > 0) {
+        throw new TRPCError({ code: "BAD_REQUEST", message: "請選擇沒有下階項目的末端產品" });
+    }
     const parentIds = Array.from(new Set(products.map(product => product.parentId?.toString()).filter(Boolean))) as string[];
     const parents: any[] = parentIds.length ? await ProductCategoryModel.find({ _id: { $in: parentIds.map(toObjectId) } }).lean() : [];
     const grandParentIds = Array.from(new Set(parents.map(parent => parent.parentId?.toString()).filter(Boolean))) as string[];
@@ -791,7 +798,7 @@ export const opportunitiesRouter = router({
             if (input.approvedSecurity) approvalStatuses["資安"] = "approved";
             await syncOpportunityProductApprovals({
                 opportunityId: result._id.toString(),
-                productNames: input.productNames || [],
+                productNames: selectedProducts.productNames,
                 statuses: approvalStatuses
             });
 
@@ -1810,14 +1817,31 @@ export const opportunitiesRouter = router({
         .input(z.object({ opportunityId: z.string() }))
         .query(async ({ ctx, input }) => {
             const opportunity = assertFound(
-                await OpportunityModel.findById(input.opportunityId).select("ownerId salesUserId salesDepartment members presalesAssignments").lean(),
+                await OpportunityModel.findById(input.opportunityId).select("ownerId salesUserId salesDepartment members presalesAssignments productNames").lean(),
                 "找不到商機"
             );
             assertAuthorized(await canAccessOpportunityInScope(ctx.user, opportunity), "您沒有權限查看產品核准資料");
-            const approvals = await ProductApprovalModel.find({ opportunityId: input.opportunityId })
+            let approvals = await ProductApprovalModel.find({ opportunityId: input.opportunityId })
                 .populate("decidedById", "name email")
                 .sort({ productNameSnapshot: 1 })
                 .lean();
+            const existingProductNames = new Set(approvals.map((approval: any) => approval.productNameSnapshot));
+            const selectedProductNames = Array.from(new Set<string>(
+                ((opportunity as any).productNames || [])
+                    .map((name: unknown) => String(name).trim())
+                    .filter((name: string) => Boolean(name))
+            ));
+            if (selectedProductNames.some(name => !existingProductNames.has(name))) {
+                // 修復舊版建立商機時未同步產品核准列的既有資料；只有缺漏時才寫入。
+                await syncOpportunityProductApprovals({
+                    opportunityId: input.opportunityId,
+                    productNames: selectedProductNames
+                });
+                approvals = await ProductApprovalModel.find({ opportunityId: input.opportunityId })
+                    .populate("decidedById", "name email")
+                    .sort({ productNameSnapshot: 1 })
+                    .lean();
+            }
             return approvals.map((approval: any) => ({
                 id: approval._id.toString(),
                 productCategoryId: approval.productCategoryId?.toString(),

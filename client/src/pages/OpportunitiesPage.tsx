@@ -606,7 +606,7 @@ export function OpportunitiesPage() {
                                             name="productIds"
                                             render={({ field }: any) => (
                                                 <FormItem className="md:col-span-2">
-                                                    <FormLabel>產品名稱</FormLabel>
+                                                    <FormLabel>產品名稱（末端產品）</FormLabel>
                                                     <div className="grid grid-cols-2 gap-2 rounded-lg border bg-muted/20 p-3 sm:grid-cols-3">
                                                         {availableProducts.map((product: any) => (
                                                             <label key={product.id} className="flex cursor-pointer items-center space-x-2 rounded p-1 text-sm transition-colors hover:bg-muted/50">
@@ -629,6 +629,7 @@ export function OpportunitiesPage() {
                                                             <span className="col-span-full text-xs italic text-muted-foreground">請至「系統設定」維護產品清單</span>
                                                         )}
                                                     </div>
+                                                    <p className="text-xs text-muted-foreground">顯示產品主檔中所有啟用且沒有下階項目的產品；建立或核准主檔異動後會自動同步。</p>
                                                     <FormMessage />
                                                 </FormItem>
                                             )}
