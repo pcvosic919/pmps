@@ -7,6 +7,7 @@ import path from "path";
 import mongoose from "mongoose";
 import { appRouter } from "./routers";
 import { copilotApiRouter } from "./api/v1/routes";
+import { swaggerRouter } from "./api/swagger";
 import { createContext } from "./_core/trpc";
 import { connectDB } from "./db";
 import { notificationEvents } from "./_core/events";
@@ -32,6 +33,7 @@ const app = express();
 app.use(cors());
 app.use(express.json({ limit: process.env.REQUEST_BODY_LIMIT || "50mb" }));
 
+app.use("/api/docs", swaggerRouter);
 app.use("/api/v1", copilotApiRouter);
 
 app.use("/api/trpc", (req, res, next) => {
