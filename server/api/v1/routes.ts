@@ -135,6 +135,41 @@ copilotApiRouter.get("/projects/search", async (req, res) => {
 });
 
 /**
+ * GET /api/v1/projects/summary
+ * 整體統計，適合 bot 回答「目前專案整體概況如何？」
+ */
+copilotApiRouter.get("/projects/summary", async (_req, res) => {
+    try {
+        const [statusGroups, atRisk, criticalIssues] = await Promise.all([
+            ServiceRequestModel.aggregate([
+                { $match: { isQuoteWorkspace: { $ne: true } } },
+                { $group: { _id: "$status", count: { $sum: 1 }, totalContract: { $sum: projectStatisticAmountExpr } } }
+            ]),
+            ServiceRequestModel.countDocuments({ isQuoteWorkspace: { $ne: true }, marginWarning: true, status: { $nin: ["completed", "cancelled"] } }),
+            IssueModel.countDocuments({ priority: { $in: ["high", "critical"] }, status: { $in: ["open", "in_progress"] } })
+        ]);
+
+        const byStatus: Record<string, number> = {};
+        let totalContract = 0;
+        statusGroups.forEach((g: any) => {
+            byStatus[g._id] = g.count;
+            totalContract += g.totalContract || 0;
+        });
+
+        res.json({
+            totalProjects: Object.values(byStatus).reduce((a, b) => a + b, 0),
+            byStatus,
+            totalContractValue: totalContract,
+            projectsAtMarginRisk: atRisk,
+            openCriticalIssues: criticalIssues
+        });
+    } catch (error) {
+        console.error("API Error [projects/summary]:", error);
+        res.status(500).json({ error: "Internal Server Error" });
+    }
+});
+
+/**
  * GET /api/v1/projects/:id
  * 取得單一專案的完整摘要，適合 bot 回答「告訴我 XXX 專案的詳細狀況」
  */
@@ -202,41 +237,6 @@ copilotApiRouter.get("/projects/:id", async (req, res) => {
         });
     } catch (error) {
         console.error("API Error [projects/:id]:", error);
-        res.status(500).json({ error: "Internal Server Error" });
-    }
-});
-
-/**
- * GET /api/v1/projects/summary
- * 整體統計，適合 bot 回答「目前專案整體概況如何？」
- */
-copilotApiRouter.get("/projects/summary", async (_req, res) => {
-    try {
-        const [statusGroups, atRisk, criticalIssues] = await Promise.all([
-            ServiceRequestModel.aggregate([
-                { $match: { isQuoteWorkspace: { $ne: true } } },
-                { $group: { _id: "$status", count: { $sum: 1 }, totalContract: { $sum: projectStatisticAmountExpr } } }
-            ]),
-            ServiceRequestModel.countDocuments({ isQuoteWorkspace: { $ne: true }, marginWarning: true, status: { $nin: ["completed", "cancelled"] } }),
-            IssueModel.countDocuments({ priority: { $in: ["high", "critical"] }, status: { $in: ["open", "in_progress"] } })
-        ]);
-
-        const byStatus: Record<string, number> = {};
-        let totalContract = 0;
-        statusGroups.forEach((g: any) => {
-            byStatus[g._id] = g.count;
-            totalContract += g.totalContract || 0;
-        });
-
-        res.json({
-            totalProjects: Object.values(byStatus).reduce((a, b) => a + b, 0),
-            byStatus,
-            totalContractValue: totalContract,
-            projectsAtMarginRisk: atRisk,
-            openCriticalIssues: criticalIssues
-        });
-    } catch (error) {
-        console.error("API Error [projects/summary]:", error);
         res.status(500).json({ error: "Internal Server Error" });
     }
 });
