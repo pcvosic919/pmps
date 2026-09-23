@@ -475,6 +475,8 @@ user       → 一般用戶
 - `uploadDocument` — 舊版整合測試 stub；正式附件上傳以 `opportunities.uploadAttachment` / `projects.uploadSrAttachment` 為主
 
 ### 🤖 `Copilot REST API (v1)` — AI 機器人對接 (非 tRPC)
+- `GET /api/docs` — Swagger UI 互動式 API 文件，可透過 `Authorize` 輸入 API Key 後直接測試
+- `GET /api/docs/openapi.json` — OpenAPI 3.0 規格，可供程式碼產生器與 Copilot Studio 匯入
 - `GET /api/v1/projects/active` — 提供給 Copilot 的進行中專案清單 (RAG 最佳化)
 - `GET /api/v1/opportunities/won` — 最近成交商機清單查詢
 - `GET /api/v1/issues/critical` — 暴露關鍵風險議題供 AI 回答專案狀態
